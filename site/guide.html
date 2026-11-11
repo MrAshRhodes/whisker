@@ -1,41 +1,183 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-GB">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Whisker user guide</title>
+  <meta name="description" content="How to set up and use Whisker: permissions, buttons, scrolling, pointer speed, per-app profiles, settings, updates and uninstalling.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://mrashrhodes.github.io/whisker/guide.html">
   <link rel="icon" href="assets/icon.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <p><a href="./">← Whisker</a></p>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <nav class="site-nav" aria-label="Site">
+    <div class="inner">
+      <a class="brand" href="./"><img src="assets/icon.png" alt="" width="24" height="24">Whisker</a>
+      <a href="./#install">Install</a>
+      <a href="guide.html" aria-current="page">Guide</a>
+      <a href="https://github.com/MrAshRhodes/whisker">GitHub</a>
+    </div>
+  </nav>
+
+  <main id="main" class="doc">
     <h1>User guide</h1>
+    <p class="lede">Everything Whisker can do in version 0.1, and how to set it up.</p>
+
+    <nav class="toc" aria-labelledby="toc-title">
+      <h2 id="toc-title">Contents</h2>
+      <ol>
+        <li><a href="#getting-started">Getting started</a></li>
+        <li><a href="#permissions">Permissions</a></li>
+        <li><a href="#menu-bar">Menu bar and login item</a></li>
+        <li><a href="#devices">Devices</a></li>
+        <li><a href="#buttons">Buttons</a></li>
+        <li><a href="#scrolling">Scrolling</a></li>
+        <li><a href="#pointer">Pointer speed</a></li>
+        <li><a href="#profiles">Per-app profiles</a></li>
+        <li><a href="#settings-file">Settings file</a></li>
+        <li><a href="#updates">Updates</a></li>
+        <li><a href="#switching-installs">Switching installs</a></li>
+        <li><a href="#uninstall">Uninstalling</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ol>
+    </nav>
+
+    <section aria-labelledby="getting-started">
+      <h2 id="getting-started">Getting started</h2>
+      <p>Whisker runs on macOS 14 Sonoma or later. Install it with Homebrew:</p>
+      <pre><code>brew install --cask mrashrhodes/tap/whisker</code></pre>
+      <p>or download the DMG or ZIP from the <a href="https://github.com/MrAshRhodes/whisker/releases/latest">latest release</a>. Before opening a download, check it in Terminal with the matching checksum file from the same release, for example <code>shasum -a 256 -c Whisker-0.1.0.dmg.sha256</code>, and continue only if it reports <code>OK</code>. Then move <strong>Whisker.app</strong> to your Applications folder and open it.</p>
+      <p>On first launch Whisker opens its settings window and asks for the Accessibility permission. Once that is granted, choose a device and start assigning buttons. Whisker keeps running in the menu bar when you close the window.</p>
+    </section>
 
     <section aria-labelledby="permissions">
       <h2 id="permissions">Permissions</h2>
-      <p>Whisker uses the Accessibility permission to observe and remap mouse buttons and scrolling.
-        On first launch, open <strong>System Settings &gt; Privacy &amp; Security &gt; Accessibility</strong>,
-        allow Whisker, then relaunch it. Signed releases keep this permission across updates.</p>
+      <p>macOS only lets an app see and change mouse input if you have allowed it under <strong>Accessibility</strong>. Whisker uses this to notice when you press a button or turn the wheel, and to replace that event with the action you chose. It also reads which app is in front so it can pick the right profile. It does not record what you type or send anything off your Mac.</p>
+      <ol>
+        <li>In Whisker's welcome screen, click <strong>Open Accessibility Settings</strong>.</li>
+        <li>In <strong>System Settings › Privacy &amp; Security › Accessibility</strong>, turn on Whisker. You may need to enter your password.</li>
+        <li>Return to Whisker. It notices the change within about a second and starts working; you do not need to relaunch it.</li>
+      </ol>
+      <p>If you later turn the permission off, Whisker stops changing input straight away, its menu bar icon is shown crossed through, and its menu offers <strong>Grant Accessibility Access…</strong>.</p>
+      <p>Releases are signed with the same Apple Developer ID each time, so the permission carries over when you update. A copy you built yourself, or one signed differently, counts as a new app and has to be allowed again. See <a href="#troubleshooting">Troubleshooting</a>.</p>
+    </section>
+
+    <section aria-labelledby="menu-bar">
+      <h2 id="menu-bar">Menu bar and login item</h2>
+      <p>Whisker's menu bar item lets you switch Whisker on or off, open its settings, check for updates and quit. Switching it off passes every mouse event through unchanged and restores the original pointer settings, without quitting.</p>
+      <p>Whisker can open automatically when you log in. Turn this on or off in its settings. If macOS needs your approval for the login item, Whisker says so and offers a button that opens <strong>System Settings › General › Login Items</strong>.</p>
+    </section>
+
+    <section aria-labelledby="devices">
+      <h2 id="devices">Devices</h2>
+      <p>The devices list shows the mice and trackballs that are connected now, by USB, a wireless receiver or Bluetooth. Devices appear and disappear as you connect them, and Whisker remembers settings for each one, so they come back when the device reconnects. Wheel and pointer settings are stored per device; button mappings belong to <a href="#profiles">profiles</a>.</p>
+      <p>Trackpads and Magic Mouse rely on gestures, so Whisker does not remap their buttons. Scroll reversal can still be turned on for a Magic Mouse.</p>
+    </section>
+
+    <section aria-labelledby="buttons">
+      <h2 id="buttons">Buttons</h2>
+      <p>To change a button, add a mapping, press the button you want to change (or pick it from the list), then choose an action. Add modifier keys (<kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>⌃</kbd> <kbd>⇧</kbd> <kbd>fn</kbd>) to a mapping to make it apply only while those keys are held. A mapping with the exact modifiers you are holding is used first, then one with no modifiers; otherwise the button works as normal.</p>
+      <p class="note">The primary (left) button cannot be remapped on its own, so you can always click. It can be remapped in combination with a modifier key.</p>
+      <h3 id="actions">Actions</h3>
+      <table>
+        <thead>
+          <tr><th scope="col">Action</th><th scope="col">What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Click</td><td>Acts as another mouse button, optionally with modifier keys. Holding the button holds the click, so dragging works.</td></tr>
+          <tr><td>Keyboard shortcut</td><td>Presses a key combination. It can repeat while the button is held, at your keyboard's repeat rate.</td></tr>
+          <tr><td>Back / Forward</td><td>Sends <kbd>⌘</kbd><kbd>[</kbd> or <kbd>⌘</kbd><kbd>]</kbd>, which most browsers and Finder understand.</td></tr>
+          <tr><td>Media</td><td>Play or pause, next or previous track, volume up or down, mute, and display brightness. Volume can move in finer steps.</td></tr>
+          <tr><td>Mission Control</td><td>Mission Control, application windows, show desktop, Launchpad or Notification Centre.</td></tr>
+          <tr><td>Spaces</td><td>Move one Space left or right, or go to Desktop 1 to 9.</td></tr>
+          <tr><td>Switch app</td><td>Go to the next or previous app, in order of recent use.</td></tr>
+          <tr><td>Open</td><td>Open a file, folder, app or web address.</td></tr>
+          <tr><td>Do nothing</td><td>Ignore the button completely.</td></tr>
+        </tbody>
+      </table>
+      <p>Mission Control, Spaces and some other system actions use your own keyboard shortcuts from <strong>System Settings › Keyboard › Keyboard Shortcuts</strong>. If the matching shortcut is turned off, Whisker shows a warning next to the action with a button to open that pane. Whisker never changes those shortcuts itself.</p>
+    </section>
+
+    <section aria-labelledby="scrolling">
+      <h2 id="scrolling">Scrolling</h2>
+      <h3 id="direction">Direction</h3>
+      <p>Reverse the vertical or horizontal wheel for each device. This is separate from the system's natural scrolling setting and affects only that device, so a trackpad keeps scrolling the way it did.</p>
+      <h3 id="lines-per-notch">Lines per notch</h3>
+      <p>Choose how many lines each click of the wheel scrolls, from 1 to 20. This is set per profile, so one app can scroll further than another. It applies to wheels that click in steps; smooth-scrolling devices such as trackpads and free-spinning wheels are left as they are.</p>
+      <h3 id="wheel-actions">Wheel with modifier keys</h3>
+      <p>Turning the wheel while holding a modifier can run an action instead of scrolling, for example <kbd>⌥</kbd> and the wheel to change the volume. A quick turn of several notches counts as one action, so a shortcut is not triggered many times; actions such as volume can be set to repeat for each notch instead.</p>
+    </section>
+
+    <section aria-labelledby="pointer">
+      <h2 id="pointer">Pointer speed</h2>
+      <p>Where the device and macOS allow it, Whisker can set pointer speed and acceleration for each device, or turn acceleration off for a linear response.</p>
+      <p>If a change more than doubles the speed, Whisker asks you to confirm it. If you do not confirm within five seconds, it goes back to the previous setting, so you are never stuck with a pointer too fast to use.</p>
+      <p>Whisker records each device's original values before changing them and restores them when you turn the device's settings off, switch Whisker off or quit. If Whisker did not quit cleanly, it restores them the next time it opens.</p>
+    </section>
+
+    <section aria-labelledby="profiles">
+      <h2 id="profiles">Per-app profiles</h2>
+      <p>The <strong>Default</strong> profile applies everywhere and cannot be deleted. Add a profile for an app, and optionally a particular device, to change buttons or scrolling only there. Whisker switches profiles automatically when you change apps.</p>
+      <p>A profile only needs the mappings that differ. Anything it does not set comes from the Default profile. When more than one profile could apply, the most specific wins: one for this app and this device, then this app on any device, then this device in any app, then Default.</p>
+    </section>
+
+    <section aria-labelledby="settings-file">
+      <h2 id="settings-file">Settings file</h2>
+      <p>Whisker saves everything to one JSON file:</p>
+      <pre><code>~/Library/Application Support/Whisker/settings.json</code></pre>
+      <p>Use <strong>Export Settings…</strong> to save a copy, for example to move your setup to another Mac, and <strong>Import Settings…</strong> to load one. Whisker checks an imported file before using it and leaves your current settings unchanged if the file is not valid.</p>
+      <p>You can edit the file by hand while Whisker is not running. Settings that a newer version of Whisker added are kept even if your version does not use them. Whisker also keeps a small <code>state.json</code> beside it with the original device values it needs to restore; do not edit that file.</p>
     </section>
 
     <section aria-labelledby="updates">
       <h2 id="updates">Updates</h2>
-      <p>Copies downloaded from GitHub Releases can check for updates from the Whisker menu with
-        <strong>Check for Updates…</strong>, or automatically when enabled in Settings. Whisker always asks
-        before downloading and again before installing and relaunching. Every update is verified against
-        Whisker's update signing key and Apple's Developer ID signature before it is installed.</p>
-      <p>Copies installed with Homebrew are updated by Homebrew:</p>
+      <p>Copies downloaded from GitHub Releases can update themselves. Choose <strong>Check for Updates…</strong> from Whisker's menu bar menu, or <strong>Check Now</strong> under Updates in the settings window. Automatic checks are off until you choose Daily, Weekly or Monthly there; choose Never to turn them off again.</p>
+      <p>Whisker always asks before downloading an update, and again before installing it and relaunching. Every update must have a valid Whisker update signature and Apple Developer ID signature before it is installed. Only stable releases are offered. Update checks are the only network requests Whisker makes.</p>
+      <p>Copies installed with Homebrew are updated by Homebrew, and Whisker shows the command with a <strong>Copy Command</strong> button. Quit Whisker, then run:</p>
       <pre><code>brew update &amp;&amp; brew upgrade --cask whisker</code></pre>
+      <p>Copies you build from source cannot update themselves.</p>
     </section>
 
     <section aria-labelledby="switching-installs">
       <h2 id="switching-installs">Switching between Homebrew and direct downloads</h2>
-      <p>Use one installation method at a time. To move a direct download to Homebrew, quit Whisker,
-        delete it from Applications, then run <code>brew install --cask mrashrhodes/tap/whisker</code>.
-        To move from Homebrew to a direct download, run <code>brew uninstall --cask whisker</code>
-        first, then install the downloaded app. Your settings are kept either way.</p>
+      <p>Use one installation method at a time. To move a direct download to Homebrew, quit Whisker, delete it from Applications, then run <code>brew install --cask mrashrhodes/tap/whisker</code>. To move from Homebrew to a direct download, run <code>brew uninstall --cask whisker</code> first, then install the downloaded app. Your settings are kept either way.</p>
+    </section>
+
+    <section aria-labelledby="uninstall">
+      <h2 id="uninstall">Uninstalling</h2>
+      <ol>
+        <li>In Whisker's settings, turn off opening at login. Then quit Whisker from its menu bar menu; this restores your original pointer and scroll settings.</li>
+        <li>Delete Whisker from Applications, or run <code>brew uninstall --cask whisker</code> if you installed it with Homebrew.</li>
+        <li>In <strong>System Settings › Privacy &amp; Security › Accessibility</strong>, select Whisker and click the remove (−) button. Or run <code>tccutil reset Accessibility io.github.mrashrhodes.whisker</code> in Terminal.</li>
+        <li>If Whisker is still listed in <strong>System Settings › General › Login Items</strong>, remove it there.</li>
+        <li>To remove your settings too, delete <code>~/Library/Application Support/Whisker</code>. With Homebrew, <code>brew uninstall --cask --zap whisker</code> does this for you.</li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="troubleshooting">
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <h3>Buttons or scrolling do nothing</h3>
+      <p>Check that Whisker is switched on in its menu and allowed under Accessibility. If the menu bar icon is crossed through, choose <strong>Grant Accessibility Access…</strong>.</p>
+      <h3>Whisker is allowed but still does not work</h3>
+      <p>This usually happens after installing a copy signed differently, such as one you built yourself. Remove Whisker from the Accessibility list, or run <code>tccutil reset Accessibility io.github.mrashrhodes.whisker</code>, then open Whisker and allow it again.</p>
+      <h3>A system action does nothing</h3>
+      <p>Turn on the matching shortcut in <strong>System Settings › Keyboard › Keyboard Shortcuts</strong>. Keyboard shortcuts may also be ignored while a password field is active; this is a macOS protection.</p>
+      <h3>Back and forward do nothing in one app</h3>
+      <p>That app does not use <kbd>⌘</kbd><kbd>[</kbd> and <kbd>⌘</kbd><kbd>]</kbd>. Add a profile for it and map the buttons to the shortcuts it does use.</p>
+      <h3>Something else</h3>
+      <p>Search the <a href="https://github.com/MrAshRhodes/whisker/issues">issues</a> or open a new one with your Whisker and macOS versions and the mouse you use.</p>
     </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="inner">
+      <span>Whisker is open source under the MIT Licence.</span>
+      <a href="./">Home</a>
+      <a href="https://github.com/MrAshRhodes/whisker">Source</a>
+      <a href="https://github.com/MrAshRhodes/whisker/blob/main/CHANGELOG.md">Changelog</a>
+    </div>
+  </footer>
 </body>
 </html>
