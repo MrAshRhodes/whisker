@@ -128,6 +128,11 @@ user-facing text in plain British English that matches the rest of the app.
 
 ## Cutting a release
 
+No release has been cut yet. The **release** environment still lacks the notarization issuer ID
+(`WHISKER_NOTARY_ISSUER_ID`), and the workflow stops rather than publish an un-notarized build,
+so add it before tagging the first release. Until then there is no published build, update feed
+or Homebrew cask.
+
 Releases are built, signed, notarized and published only by `.github/workflows/release.yml`.
 Credentials live in the protected GitHub **release** environment; see the
 [signing and notarization guide](packaging/signing/README.md).

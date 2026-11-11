@@ -18,7 +18,7 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   button is held), go back or forward, send a media key (play/pause, track, volume, mute or
   display brightness), open Mission Control, App Windows, Show Desktop, Launchpad or
   Notification Centre, move to the Space on the left or right, switch apps, scroll, open an
-  app, file or web address, or do nothing at all.
+  app, file (by full path or a `~/` path) or web address, or do nothing at all.
 - **Wheel actions.** Turning the wheel runs its action once per burst of notches, or once for
   every notch if you choose **Repeat for every notch**.
 - **Scrolling.** Reverse the vertical or horizontal wheel for each mouse without changing the
@@ -30,16 +30,20 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 - **Pointer speed and acceleration**, per mouse, where supported. If a change makes the pointer
   more than twice as fast, Whisker asks you to keep it and changes it back after a few seconds
   if you do not. The system's values come back when you turn a mouse's custom speed off, when
-  Whisker quits, or at the next launch if it did not quit cleanly.
+  you turn Whisker off, when Whisker quits, or at the next launch if it did not quit cleanly.
+  Turning Whisker back on reapplies your settings.
 - **Devices.** Lists connected mice and trackballs, including ones you plug in or pair while
   Whisker is running. With several mice connected, allow Input Monitoring so Whisker can tell
-  which one each click came from and apply that mouse's settings. Trackpads and Magic Mouse are
-  left alone.
+  which one each click came from and apply that mouse's settings. Trackpads and touch mice such
+  as Magic Mouse are left alone.
 - **Menu bar item** to turn Whisker on or off, see the active profile and open its settings. The
   icon can be hidden, and Whisker can open at login.
 - **Settings file.** Everything is kept in one readable JSON file that you can export, import or
-  reset. Whisker checks it when it starts and tells you about anything it had to fix.
-- **Updates** through Sparkle for direct downloads, or through Homebrew.
+  reset. Whisker checks it when it starts and tells you about anything it had to fix. If an
+  existing file can't be read, Whisker leaves it untouched and doesn't save changes until it is
+  fixed, and tells you why.
+- **Updates** through Sparkle for direct downloads, or through Homebrew, once releases are
+  published (see [Install](#install)).
 
 ## Requirements
 
@@ -52,32 +56,37 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 
 ## Install
 
-With [Homebrew](https://brew.sh):
+> **No release has been published yet.** There is no downloadable build or Homebrew cask today,
+> because release signing is not fully set up (the notarization issuer ID is still missing).
+> For now, [build Whisker from source](#build-from-source).
+
+Once the first release is out, you will be able to install it with [Homebrew](https://brew.sh):
 
 ```sh
 brew install --cask mrashrhodes/tap/whisker
 ```
 
-Or download `Whisker-<version>.dmg` or `Whisker-<version>.zip` from the
-[latest release](https://github.com/MrAshRhodes/whisker/releases/latest), check it against the
-matching `.sha256` file as described in the release notes, and move **Whisker.app** to your
-Applications folder.
-
-Releases are signed with Apple Developer ID and notarized by Apple. Gatekeeper stays enabled; if
-macOS refuses to open the app, stop and report it rather than bypassing the warning.
+or download `Whisker-<version>.dmg` or `Whisker-<version>.zip` from the
+[releases page](https://github.com/MrAshRhodes/whisker/releases), check it against the matching
+`.sha256` file as described in the release notes, and move **Whisker.app** to your Applications
+folder. Releases will be signed with Apple Developer ID and notarized by Apple. Gatekeeper stays
+enabled; if macOS refuses to open the app, stop and report it rather than bypassing the warning.
 
 ## First run
 
 1. Open Whisker. Its icon appears in the menu bar and a **Welcome to Whisker** window explains
    why it needs Accessibility access.
 2. Click **Open Accessibility Settings** and turn Whisker on in
-   **System Settings › Privacy & Security › Accessibility**. While the welcome window is open,
-   Whisker notices the change within a second or so, with no need to relaunch.
+   **System Settings › Privacy & Security › Accessibility**. Whisker notices the change within a
+   second or so, with no need to relaunch.
 3. Choose whether Whisker opens at login, click **Done**, then open **Settings…** from the menu
    bar menu and start assigning buttons.
 
-If you choose **Continue Without Access**, Whisker stays in the menu bar with a dimmed icon.
-Choose **Grant Accessibility Access…** from its menu when you are ready.
+If you choose **Continue Without Access**, Whisker stays in the menu bar with a dimmed icon and
+keeps checking every second, so it starts remapping as soon as you allow it. Choose
+**Grant Accessibility Access…** from its menu to see the instructions again. If you later remove
+access, Whisker stops remapping straight away, lets go of any held buttons, and starts again when
+access returns.
 
 See the [user guide](https://mrashrhodes.github.io/whisker/guide.html) for each settings pane.
 
@@ -90,13 +99,13 @@ network requests except update checks, which are off until you turn them on or c
 
 ## Updates
 
-Direct downloads update in place with [Sparkle](https://sparkle-project.org). Choose
+Once releases are published, direct downloads will update in place with [Sparkle](https://sparkle-project.org). Choose
 **Check for Updates…** from the menu bar menu, or pick a schedule under Updates in the settings
 window. Automatic checks are off by default. Whisker asks before downloading and again before
 installing, and every update must carry a valid Whisker update signature and Apple Developer ID
 signature.
 
-Homebrew copies are updated by Homebrew. Quit Whisker, then run:
+Homebrew copies will be updated by Homebrew. Quit Whisker, then run:
 
 ```sh
 brew update && brew upgrade --cask whisker
@@ -116,14 +125,16 @@ brew update && brew upgrade --cask whisker
   these with your keyboard shortcuts from **System Settings › Keyboard › Keyboard Shortcuts**.
   Turn the matching shortcut on there; Whisker shows a warning with an
   **Open Keyboard Shortcuts** button next to any action whose shortcut is off. Mission Control
-  and Launchpad still open without their shortcut.
+  and Launchpad use their shortcut when it is on, and otherwise open the app instead (Launchpad,
+  or Apps on newer macOS).
 - **Back and forward do nothing in an app.** These send ⌘[ and ⌘]. Map the button to a different
   shortcut in a profile for that app.
 - **A mouse's own settings are not used when another mouse is connected.** Click
   **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart.
 - **The pointer is suddenly too fast.** Wait a few seconds without confirming and Whisker reverts
   the change. Quitting Whisker also restores the original speed.
-- **Trackpads and Magic Mouse** are left alone entirely: Whisker does not remap, reverse or change
+- **Trackpads and touch mice such as Magic Mouse** are left alone entirely (shown as
+  "Touch mouse — left alone" under Devices): Whisker does not remap, reverse or change
   the speed of them.
 
 ## Build from source

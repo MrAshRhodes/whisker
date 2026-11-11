@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-Security fixes target the latest release. Please update and check whether the problem still
-occurs before reporting. Reports about older versions are welcome, but the fix may require
-upgrading.
+No binary release has been published yet, so reports should be against a source build of the
+latest `main`. Once releases exist, security fixes will target the latest release; please update
+and check whether the problem still occurs before reporting.
 
 ## Report a vulnerability
 
@@ -14,7 +14,7 @@ Do not open a public issue or pull request with vulnerability details or a worki
 
 Please include:
 
-- The Whisker version, macOS version, Mac model and installation method (download or Homebrew).
+- The Whisker version, macOS version, Mac model and installation method (source build, download or Homebrew).
 - The mouse or trackball involved, if relevant.
 - What happened, what you expected and the possible security impact.
 - Steps to reproduce, and a settings file that shows the problem with any personal paths or
@@ -29,12 +29,16 @@ Whisker needs the macOS **Accessibility** permission. It uses it to:
 - replace those events with the action you assigned, which may mean posting a different click,
   a keyboard shortcut, a media key or a scroll event.
 
+If the permission is removed, Whisker stops watching events straight away and lets go of any
+buttons it was holding or keys it was repeating. It checks every second and resumes when the
+permission comes back.
+
 Whisker also asks macOS which app is frontmost, to choose the matching profile.
 
 Whisker reads the list of connected pointing devices and, where supported, changes their pointer
 speed and acceleration through public IOKit interfaces. It restores the original values when you
-turn a mouse's custom speed off, when it quits, and at the next launch if it did not quit
-cleanly. Trackpads and Magic Mouse are never changed.
+turn a mouse's custom speed off, when you turn Whisker off, when it quits, and at the next launch if it did not quit
+cleanly. Trackpads and touch mice such as Magic Mouse are never changed.
 
 **Input Monitoring** is optional and only requested when you click **Allow Input Monitoring…**
 under Devices. Whisker then reads input reports from connected mice only to tell which mouse sent
@@ -57,8 +61,9 @@ Relevant reports include:
 
 ## Update integrity and credentials
 
-Releases are signed with an Apple Developer ID certificate, use the hardened runtime and are
-notarized by Apple. Gatekeeper stays enabled, and the Homebrew cask does not remove quarantine.
+No release has been published yet; release signing still lacks the notarization issuer ID.
+The following describes how releases will be produced. Releases are signed with an Apple
+Developer ID certificate, use the hardened runtime and are notarized by Apple. Gatekeeper stays enabled, and the Homebrew cask does not remove quarantine.
 Each release publishes a SHA-256 checksum for its ZIP and DMG.
 
 Direct downloads update with Sparkle 2. The update feed is fetched over HTTPS from
