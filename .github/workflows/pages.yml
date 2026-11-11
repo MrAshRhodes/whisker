@@ -1,0 +1,62 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publish product site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      # The Sparkle feed (SUFeedURL) lives at the site root. It is copied from the latest stable
+      # release, whose appcast.xml is EdDSA-signed by the release workflow; until the first release
+      # the site is published without one.
+      - name: Stage the site and the update feed
+        id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/site"
+          mkdir -p "$stage"
+          cp -R site/. "$stage/"
+          errors="$RUNNER_TEMP/latest-release.err"
+          if tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$errors")"; then
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern appcast.xml --dir "$stage" --clobber
+            echo "Published appcast.xml from $tag."
+          elif grep -q 'HTTP 404' "$errors"; then
+            echo "::notice title=No update feed yet::There is no published release, so the site has no appcast.xml."
+          else
+            cat "$errors" >&2
+            exit 1
+          fi
+          echo "dir=$stage" >> "$GITHUB_OUTPUT"
+      - name: Upload the static site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ steps.stage.outputs.dir }}
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

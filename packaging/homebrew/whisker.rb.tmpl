@@ -1,0 +1,34 @@
+cask "whisker" do
+  version "{{VERSION}}"
+  sha256 "{{SHA256}}"
+
+  url "https://github.com/MrAshRhodes/whisker/releases/download/v#{version}/Whisker-#{version}.zip"
+  name "Whisker"
+  desc "Menu bar utility for mouse buttons, scrolling and pointer speed"
+  homepage "https://mrashrhodes.github.io/whisker/"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  depends_on macos: :sonoma
+
+  app "Whisker.app"
+
+  zap trash: [
+    "~/Library/Application Support/Whisker",
+    "~/Library/Caches/io.github.mrashrhodes.whisker",
+    "~/Library/Preferences/io.github.mrashrhodes.whisker.plist",
+  ]
+
+  caveats <<~EOS
+    Whisker is Developer ID-signed and notarized by Apple.
+
+    Whisker reads and remaps mouse input, so macOS asks for permission on first launch.
+    Allow Whisker under
+      System Settings > Privacy & Security > Accessibility
+    (and under Input Monitoring if macOS asks), then relaunch Whisker.
+    Later Developer ID upgrades keep the same signing requirement, so the grant carries over.
+  EOS
+end

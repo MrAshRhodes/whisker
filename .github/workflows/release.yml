@@ -1,0 +1,267 @@
+name: Release
+
+# Pushing a tag such as v1.2.3 builds a universal Whisker.app, publishes the GitHub release with
+# that version's CHANGELOG.md section as its notes and, when the TAP_GITHUB_TOKEN secret exists,
+# updates the Homebrew cask. A published release is never rebuilt or overwritten, because the cask
+# pins the sha256 of its zip.
+#
+# Stable releases also publish appcast.xml, the EdDSA-signed Sparkle feed, as a release asset and then
+# start the Pages workflow, which copies it from the latest release to
+# https://mrashrhodes.github.io/whisker/appcast.xml (the SUFeedURL installed copies read).
+# Prereleases are never offered as updates.
+#
+# Developer ID and notarization credentials live in the protected release environment, next to the
+# Sparkle update-signing key pair: the variable WHISKER_SPARKLE_PUBLIC_KEY (built into the app) and
+# the secret WHISKER_SPARKLE_PRIVATE_KEY (signs the zip and the feed).
+# No unsigned/self-signed fallback is allowed. See packaging/signing/README.md.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  SWIFTW_BUILD_SYSTEM: native
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-latest
+    environment: release
+    permissions:
+      actions: write
+      contents: write
+    timeout-minutes: 90
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          version_re='^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.-]+)?$'
+          if [[ ! $version =~ $version_re ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' is not a version tag such as v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          file_version="$(tr -d '[:space:]' < VERSION)"
+          if [[ "$version" != "$file_version" ]]; then
+            echo "::warning title=Version mismatch::Tag $GITHUB_REF_NAME does not match the VERSION file ($file_version). Releasing $version."
+          fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+          # Published assets are immutable: the Homebrew cask pins the zip's sha256, and every
+          # build differs byte for byte, so replacing an asset would break `brew install`.
+          exists=false
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            exists=true
+            echo "::notice title=Release already published::$GITHUB_REF_NAME already has a release, so nothing is rebuilt or replaced. Delete the release and tag to rebuild, or cut a new version."
+          fi
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "exists=$exists"
+          } >> "$GITHUB_OUTPUT"
+
+      # Fails in seconds, before the build, if CHANGELOG.md at the tag has no section for this
+      # version. Pre-releases may use the Unreleased entries instead.
+      - name: Check the changelog
+        if: steps.version.outputs.exists != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          flags=()
+          if [[ "$PRERELEASE" == true ]]; then
+            flags+=(--allow-unreleased)
+          fi
+          node .github/scripts/changelog.cjs check
+          node .github/scripts/changelog.cjs notes "$VERSION" ${flags[@]+"${flags[@]}"} > "$RUNNER_TEMP/changelog.md"
+
+      # Fails before the build when the update-signing keys are missing: an app built without the
+      # public key cannot verify updates, and a stable release without the private key has no feed.
+      - name: Require the update signing configuration
+        if: steps.version.outputs.exists != 'true'
+        env:
+          WHISKER_SPARKLE_PUBLIC_KEY: ${{ vars.WHISKER_SPARKLE_PUBLIC_KEY }}
+          WHISKER_SPARKLE_PRIVATE_KEY: ${{ secrets.WHISKER_SPARKLE_PRIVATE_KEY }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set +x
+          : "${WHISKER_SPARKLE_PUBLIC_KEY:?Set the release environment variable WHISKER_SPARKLE_PUBLIC_KEY (see packaging/signing/README.md)}"
+          if [[ "$PRERELEASE" != true ]]; then
+            : "${WHISKER_SPARKLE_PRIVATE_KEY:?Set the release environment secret WHISKER_SPARKLE_PRIVATE_KEY (see packaging/signing/README.md)}"
+          fi
+
+      # Sparkle offers an update only when its build number (CFBundleVersion) is higher than the
+      # installed app's, and the build number is this workflow's run number. A recreated or renamed
+      # workflow would restart the count and silently stop every installed copy from updating.
+      - name: Check the build number
+        if: steps.version.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          errors="$RUNNER_TEMP/latest-release.err"
+          if ! previous_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$errors")"; then
+            if grep -q 'HTTP 404' "$errors"; then
+              echo "::notice title=No earlier release::There is no published release to compare the build number with."
+              exit 0
+            fi
+            cat "$errors" >&2
+            exit 1
+          fi
+          previous_dir="$RUNNER_TEMP/previous-release"
+          mkdir "$previous_dir"
+          gh release download "$previous_tag" --pattern 'Whisker-*.zip' --dir "$previous_dir"
+          unzip -p "$previous_dir"/Whisker-*.zip Whisker.app/Contents/Info.plist > "$previous_dir/Info.plist"
+          previous_build="$(plutil -extract CFBundleVersion raw -o - "$previous_dir/Info.plist")"
+          if [[ ! "$previous_build" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Unexpected build number::$previous_tag has the build number '$previous_build', which is not a plain number."
+            exit 1
+          fi
+          if (( GITHUB_RUN_NUMBER <= 10#$previous_build )); then
+            echo "::error title=Build number too low::This run's number ($GITHUB_RUN_NUMBER) is not higher than $previous_tag's build number ($previous_build), so installed copies would not be offered this release."
+            exit 1
+          fi
+          echo "Build number $GITHUB_RUN_NUMBER is higher than $previous_tag's ($previous_build)."
+
+      # Fails before the build when the signing secrets are missing: an ad-hoc release would
+      # reset Accessibility permission for every user who updates.
+      - name: Import the signing identity
+        id: signing
+        if: steps.version.outputs.exists != 'true'
+        env:
+          WHISKER_SIGNING_P12_BASE64: ${{ secrets.WHISKER_SIGNING_P12_BASE64 }}
+          WHISKER_SIGNING_P12_PASSWORD: ${{ secrets.WHISKER_SIGNING_P12_PASSWORD }}
+        run: |
+          Scripts/import_signing_identity.sh --require-developer-id > /dev/null
+
+      - name: Prepare notarization credentials
+        if: steps.version.outputs.exists != 'true'
+        env:
+          WHISKER_NOTARY_KEY_P8_BASE64: ${{ secrets.WHISKER_NOTARY_KEY_P8_BASE64 }}
+          WHISKER_NOTARY_KEY_ID: ${{ secrets.WHISKER_NOTARY_KEY_ID }}
+          WHISKER_NOTARY_ISSUER_ID: ${{ secrets.WHISKER_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${WHISKER_NOTARY_KEY_P8_BASE64:?Missing notarization key secret}"
+          export WHISKER_NOTARY_KEY_PATH="$RUNNER_TEMP/whisker-notary.p8"
+          printf '%s' "$WHISKER_NOTARY_KEY_P8_BASE64" | base64 --decode > "$WHISKER_NOTARY_KEY_PATH"
+          Scripts/notarize.sh --check-credentials
+
+      - name: Show the toolchain
+        if: steps.version.outputs.exists != 'true'
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # With the signing identity, build_app.sh and package_release.sh verify that the app (and
+      # the app inside the zip) has a stable signature that satisfies
+      # packaging/signing/designated-requirement.txt, and that it carries the Sparkle public key.
+      - name: Build and package
+        if: steps.version.outputs.exists != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          WHISKER_SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+          WHISKER_REQUIRE_STABLE_SIGNATURE: '1'
+          WHISKER_SPARKLE_PUBLIC_KEY: ${{ vars.WHISKER_SPARKLE_PUBLIC_KEY }}
+          WHISKER_NOTARY_KEY_PATH: ${{ runner.temp }}/whisker-notary.p8
+          WHISKER_NOTARY_KEY_ID: ${{ secrets.WHISKER_NOTARY_KEY_ID }}
+          WHISKER_NOTARY_ISSUER_ID: ${{ secrets.WHISKER_NOTARY_ISSUER_ID }}
+        run: Scripts/package_release.sh --version "$VERSION" --require-universal --build-number "$GITHUB_RUN_NUMBER" --notarize
+
+      # Signs the final, notarized zip and the appcast, then verifies both against the public key
+      # inside the packaged app. Nothing may modify the zip afterwards.
+      - name: Generate and verify the signed update feed
+        if: steps.version.outputs.exists != 'true' && steps.version.outputs.prerelease != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          WHISKER_SPARKLE_PUBLIC_KEY: ${{ vars.WHISKER_SPARKLE_PUBLIC_KEY }}
+          WHISKER_SPARKLE_PRIVATE_KEY: ${{ secrets.WHISKER_SPARKLE_PRIVATE_KEY }}
+        run: Scripts/generate_appcast.sh "$VERSION"
+
+      - name: Remove notarization credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/whisker-notary.p8"
+
+      - name: Remove the signing keychain
+        if: always() && steps.signing.outputs.keychain != ''
+        env:
+          KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+        run: Scripts/import_signing_identity.sh --cleanup "$KEYCHAIN"
+
+      - name: Publish the GitHub release
+        if: steps.version.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          assets=(
+            "dist/Whisker-$VERSION.zip"
+            "dist/Whisker-$VERSION.zip.sha256"
+            "dist/Whisker-$VERSION.dmg"
+            "dist/Whisker-$VERSION.dmg.sha256"
+          )
+          flags=()
+          if [[ "$PRERELEASE" == true ]]; then
+            flags+=(--prerelease)
+          else
+            # Prereleases are never offered as updates, so only stable releases carry the signed feed.
+            assets+=("dist/appcast.xml" "dist/appcast.xml.sha256")
+          fi
+          # The changelog section comes first, then the install and update instructions.
+          {
+            if [[ -s "$RUNNER_TEMP/changelog.md" ]]; then
+              echo "## What's changed"
+              echo
+              cat "$RUNNER_TEMP/changelog.md"
+              echo
+            fi
+            sed "s/@VERSION@/$VERSION/g" .github/release-notes-header.md
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --title "Whisker $VERSION" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            ${flags[@]+"${flags[@]}"}
+
+      # The feed URL is served by GitHub Pages, so republish the site with this release's appcast.xml.
+      - name: Publish the update feed to GitHub Pages
+        if: steps.version.outputs.exists != 'true' && steps.version.outputs.prerelease != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      - name: Check for a Homebrew tap token
+        id: tap
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ -n "$TAP_GITHUB_TOKEN" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Homebrew tap not updated::Add a TAP_GITHUB_TOKEN secret (a token that can push to the tap repository) to update the cask automatically, or run Scripts/update_tap.sh --version $RELEASE_VERSION --from-release yourself."
+          fi
+
+      - name: Update the Homebrew tap
+        if: steps.tap.outputs.enabled == 'true' && steps.version.outputs.prerelease != 'true'
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: Scripts/update_tap.sh --version "$VERSION" --from-release

@@ -1,0 +1,38 @@
+# SwiftPM / Xcode
+.build/
+.swiftpm/
+xcuserdata/
+DerivedData/
+*.xcodeproj/
+*.xcuserstate
+
+# Build and packaging output (make app / make zip / make dmg)
+dist/
+*.iconset
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Local research material and scratch space
+research/screens/
+.scratch/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Credentials and signing keys stay outside the repository (packaging/signing/README.md)
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.keychain
+*.keychain-db
+*private?key*
+.env
+.env.*

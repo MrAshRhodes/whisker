@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Whisker user guide</title>
+  <link rel="icon" href="assets/icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <p><a href="./">← Whisker</a></p>
+    <h1>User guide</h1>
+
+    <section aria-labelledby="permissions">
+      <h2 id="permissions">Permissions</h2>
+      <p>Whisker uses the Accessibility permission to observe and remap mouse buttons and scrolling.
+        On first launch, open <strong>System Settings &gt; Privacy &amp; Security &gt; Accessibility</strong>,
+        allow Whisker, then relaunch it. Signed releases keep this permission across updates.</p>
+    </section>
+
+    <section aria-labelledby="updates">
+      <h2 id="updates">Updates</h2>
+      <p>Copies downloaded from GitHub Releases can check for updates from the Whisker menu with
+        <strong>Check for Updates…</strong>, or automatically when enabled in Settings. Whisker always asks
+        before downloading and again before installing and relaunching. Every update is verified against
+        Whisker's update signing key and Apple's Developer ID signature before it is installed.</p>
+      <p>Copies installed with Homebrew are updated by Homebrew:</p>
+      <pre><code>brew update &amp;&amp; brew upgrade --cask whisker</code></pre>
+    </section>
+
+    <section aria-labelledby="switching-installs">
+      <h2 id="switching-installs">Switching between Homebrew and direct downloads</h2>
+      <p>Use one installation method at a time. To move a direct download to Homebrew, quit Whisker,
+        delete it from Applications, then run <code>brew install --cask mrashrhodes/tap/whisker</code>.
+        To move from Homebrew to a direct download, run <code>brew uninstall --cask whisker</code>
+        first, then install the downloaded app. Your settings are kept either way.</p>
+    </section>
+  </main>
+</body>
+</html>

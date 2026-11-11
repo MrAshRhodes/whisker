@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: User guide
+    url: https://mrashrhodes.github.io/whisker/guide.html
+    about: Installation, permissions, updates and troubleshooting.
+  - name: Report a security vulnerability privately
+    url: https://github.com/MrAshRhodes/whisker/security/advisories/new
+    about: Do not publish vulnerability details in a public issue.
