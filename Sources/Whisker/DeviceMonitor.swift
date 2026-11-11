@@ -4,16 +4,7 @@ import os
 import WhiskerCore
 
 /// A pointing device that is plugged in or paired right now.
-struct ConnectedDevice: Identifiable, Hashable {
-    var id: String
-    var name: String
-    var vendorID: Int
-    var productID: Int
-    var serial: String?
-    var transport: String?
-    /// Trackpads and touch mice: listed, but Whisker leaves them alone.
-    var isExcluded: Bool
-}
+typealias ConnectedDevice = PointingDevice
 
 /// Watches mice come and go, and — when Input Monitoring is allowed — which one each click came from.
 final class DeviceMonitor: ObservableObject, @unchecked Sendable {
@@ -22,6 +13,10 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     var onChange: (([ConnectedDevice]) -> Void)?
 
     private var manager: IOHIDManager?
+    /// Only matched, never opened: keyboards are watched just to tell a keyboard's mouse-keys interface from a mouse.
+    private var keyboardManager: IOHIDManager?
+    private var interfaces: [IOHIDDevice: HIDInterfaceInfo] = [:]
+    /// The listed device each pointing interface belongs to, for attributing input.
     private var deviceIDs: [IOHIDDevice: String] = [:]
     private var opened = false
     private let attributor = OSAllocatedUnfairLock(initialState: DeviceAttributor())
@@ -33,11 +28,20 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
 
     func start() {
         guard manager == nil else { return }
+        manager = makeManager(usages: [kHIDUsage_GD_Mouse, kHIDUsage_GD_Pointer])
+        keyboardManager = makeManager(usages: [kHIDUsage_GD_Keyboard, kHIDUsage_GD_Keypad])
+        for manager in [manager, keyboardManager].compactMap({ $0 }) {
+            for device in (IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>) ?? [] {
+                interfaces[device] = Self.info(for: device)
+            }
+        }
+        refresh()
+        openIfAllowed()
+    }
+
+    private func makeManager(usages: [Int]) -> IOHIDManager {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let matches: [[String: Int]] = [
-            [kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey: kHIDUsage_GD_Mouse],
-            [kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey: kHIDUsage_GD_Pointer],
-        ]
+        let matches = usages.map { [kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey: $0] }
         IOHIDManagerSetDeviceMatchingMultiple(manager, matches as CFArray)
         let context = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, _, _, device in
@@ -49,11 +53,7 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
             Unmanaged<DeviceMonitor>.fromOpaque(context).takeUnretainedValue().removed(device)
         }, context)
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
-        self.manager = manager
-        if let existing = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> {
-            for device in existing { added(device) }
-        }
-        openIfAllowed()
+        return manager
     }
 
     /// Reading which device sent each click needs Input Monitoring. Whisker only asks when the user wants it.
@@ -82,33 +82,55 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     }
 
     private func added(_ device: IOHIDDevice) {
-        func property<T>(_ key: String) -> T? { IOHIDDeviceGetProperty(device, key as CFString) as? T }
-        let vendor: Int = property(kIOHIDVendorIDKey) ?? 0
-        let product: Int = property(kIOHIDProductIDKey) ?? 0
-        let serial: String? = property(kIOHIDSerialNumberKey)
-        let name: String? = property(kIOHIDProductKey)
-        let transport: String? = property(kIOHIDTransportKey)
-        let identity = DeviceIdentity(vendorID: vendor, productID: product, serial: serial)
-        deviceIDs[device] = identity.id
-        let entry = ConnectedDevice(
-            id: identity.id,
-            name: DeviceIdentity.displayName(product: name, vendorID: vendor, productID: product),
-            vendorID: vendor, productID: product, serial: identity.serial, transport: transport,
-            isExcluded: DeviceIdentity.isExcluded(transport: transport, product: name, vendorID: vendor)
-        )
-        guard !devices.contains(where: { $0.id == entry.id }) else { return }
-        Log.devices.info("Connected \(entry.name, privacy: .public) [\(entry.id, privacy: .public)]\(entry.isExcluded ? " (left alone)" : "", privacy: .public)")
-        devices.append(entry)
-        devices.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        changed()
+        guard interfaces[device] == nil else { return }
+        interfaces[device] = Self.info(for: device)
+        refresh()
     }
 
     private func removed(_ device: IOHIDDevice) {
-        guard let id = deviceIDs.removeValue(forKey: device) else { return }
-        // A receiver can expose the same mouse as several HID devices; keep it while any remain.
-        guard !deviceIDs.values.contains(id) else { return }
-        devices.removeAll { $0.id == id }
-        Log.devices.info("Disconnected [\(id, privacy: .public)]")
+        guard interfaces.removeValue(forKey: device) != nil else { return }
+        refresh()
+    }
+
+    static func info(for device: IOHIDDevice) -> HIDInterfaceInfo {
+        func property<T>(_ key: String) -> T? { IOHIDDeviceGetProperty(device, key as CFString) as? T }
+        var interfaceNumber: Int?
+        let service = IOHIDDeviceGetService(device)
+        if service != IO_OBJECT_NULL {
+            interfaceNumber = IORegistryEntrySearchCFProperty(
+                service, kIOServicePlane, "bInterfaceNumber" as CFString, kCFAllocatorDefault,
+                IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)
+            ) as? Int
+        }
+        return HIDInterfaceInfo(
+            vendorID: property(kIOHIDVendorIDKey) ?? 0,
+            productID: property(kIOHIDProductIDKey) ?? 0,
+            serial: property(kIOHIDSerialNumberKey),
+            product: property(kIOHIDProductKey),
+            transport: property(kIOHIDTransportKey),
+            locationID: property(kIOHIDLocationIDKey),
+            interfaceNumber: interfaceNumber,
+            primaryUsagePage: property(kIOHIDPrimaryUsagePageKey) ?? 0,
+            primaryUsage: property(kIOHIDPrimaryUsageKey) ?? 0
+        )
+    }
+
+    private func refresh() {
+        let listed = PointingDeviceClassifier.pointingDevices(from: Array(interfaces.values))
+        var owner: [String: String] = [:]
+        for device in listed {
+            for key in device.physicalKeys { owner[key] = device.id }
+        }
+        deviceIDs = interfaces.compactMapValues { $0.isPointing ? owner[$0.physicalKey] : nil }
+        guard listed != devices else { return }
+        let before = Set(devices.map(\.id)), after = Set(listed.map(\.id))
+        for device in listed where !before.contains(device.id) {
+            Log.devices.info("Connected \(device.name, privacy: .public) [\(device.id, privacy: .public)]\(device.isExcluded ? " (left alone)" : "", privacy: .public)")
+        }
+        for id in before.subtracting(after) {
+            Log.devices.info("Disconnected [\(id, privacy: .public)]")
+        }
+        devices = listed
         changed()
     }
 
