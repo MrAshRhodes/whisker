@@ -27,7 +27,8 @@ final class SettingsStore: ObservableObject {
     }
     /// Problems fixed while loading, shown once in the settings window.
     @Published private(set) var loadIssues: [ValidationIssue] = []
-    /// Set when the file belongs to a newer Whisker; nothing is written so it isn't damaged.
+    /// Set when the file belongs to a newer Whisker, or exists but can't be read or set aside; nothing is
+    /// written so it isn't damaged.
     @Published private(set) var readOnlyReason: String?
 
     let directory: URL
@@ -49,8 +50,17 @@ final class SettingsStore: ObservableObject {
     }
 
     func load() {
-        guard let data = try? Data(contentsOf: fileURL) else {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch where Self.isMissingFile(error) {
             Log.settings.info("No settings file yet; using defaults")
+            readOnlyReason = nil
+            settings = .default
+            return
+        } catch {
+            readOnlyReason = "settings.json couldn’t be read (\(error.localizedDescription)). Whisker is using default settings and won’t save changes until the file can be read."
+            Log.settings.error("Settings file couldn’t be read; not saving changes: \(error.localizedDescription, privacy: .public)")
             settings = .default
             return
         }
@@ -68,7 +78,15 @@ final class SettingsStore: ObservableObject {
             settings = .default
         } catch {
             let backup = directory.appendingPathComponent("settings.unreadable-\(Self.timestamp()).json")
-            try? FileManager.default.moveItem(at: fileURL, to: backup)
+            do {
+                try FileManager.default.moveItem(at: fileURL, to: backup)
+            } catch let moveError {
+                readOnlyReason = "settings.json is damaged and couldn’t be set aside (\(moveError.localizedDescription)). Whisker is using default settings and won’t save changes over it."
+                Log.settings.error("Settings file unreadable and couldn’t be moved; not saving changes: \(moveError.localizedDescription, privacy: .public)")
+                settings = .default
+                return
+            }
+            readOnlyReason = nil
             Log.settings.error("Settings file unreadable, moved to \(backup.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             loadIssues = [ValidationIssue("settings.json", "The file couldn’t be read and was set aside as \(backup.lastPathComponent). Whisker started with default settings.")]
             settings = .default
@@ -135,6 +153,14 @@ final class SettingsStore: ObservableObject {
         } catch {
             Log.app.error("Couldn’t save run state: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    nonisolated static func isMissingFile(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain, error.code == NSFileReadNoSuchFileError { return true }
+        if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) { return true }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? Error { return isMissingFile(underlying) }
+        return false
     }
 
     private static func timestamp() -> String {
