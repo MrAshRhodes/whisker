@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
+const vm = require('node:vm');
 
 const site = path.join(__dirname, '..', '..', 'site');
 const base = 'https://mrashrhodes.github.io/whisker/';
@@ -170,6 +171,22 @@ test('points ARIA, label and copy references at elements on the same page', () =
   }
 });
 
+test('resolves local SVG paint references without allowing external paint servers', () => {
+  for (const page of pages) {
+    const found = new Set(ids(page));
+    for (const tag of parsed.get(page).tags) {
+      for (const name of ['fill', 'stroke', 'filter', 'clip-path', 'mask']) {
+        const value = tag.attributes.get(name) || '';
+        for (const match of value.matchAll(/url\(([^)]+)\)/g)) {
+          const target = match[1].replace(/["']/g, '').trim();
+          assert.ok(target.startsWith('#') && found.has(target.slice(1)),
+            `${page}: ${name}="${value}" must reference an SVG definition on this page`);
+        }
+      }
+    }
+  }
+});
+
 test('loads nothing from other sites', () => {
   for (const page of pages) {
     for (const tag of parsed.get(page).tags) {
@@ -289,4 +306,99 @@ test('never names other products', () => {
   for (const file of walk(site)) {
     assert.doesNotMatch(fs.readFileSync(file, 'latin1'), names, `${path.relative(site, file)} names another product`);
   }
+});
+
+// A small DOM adapter executes the shipped pointer code against IDs from the real page.
+// Timers are controlled so the safety timeout doesn't slow the suite down.
+function pointerFixture(reducedMotion = false) {
+  const nodes = new Map();
+  function node(attributes = new Map()) {
+    const classes = new Set();
+    const events = new Map();
+    const properties = new Map();
+    return {
+      value: attributes.get('value') || '',
+      checked: attributes.has('checked'),
+      hidden: attributes.has('hidden'),
+      textContent: '',
+      offsetWidth: 300,
+      classList: {
+        add: (name) => classes.add(name),
+        remove: (name) => classes.delete(name),
+        contains: (name) => classes.has(name),
+      },
+      style: {
+        setProperty: (name, value) => properties.set(name, value),
+        getPropertyValue: (name) => properties.get(name),
+      },
+      setAttribute: (name, value) => attributes.set(name, value),
+      addEventListener: (name, callback) => events.set(name, callback),
+      dispatch: (name) => {
+        assert.ok(events.has(name), `missing ${name} listener`);
+        events.get(name)();
+      },
+      querySelector: (selector) => {
+        if (selector === '.meter span') return meter;
+        if (selector.startsWith('path.')) return node();
+        return nodes.get(selector.slice(1)) || null;
+      },
+      querySelectorAll: () => [],
+    };
+  }
+  for (const tag of parsed.get('index.html').tags) {
+    if (tag.attributes.has('id')) nodes.set(tag.attributes.get('id'), node(tag.attributes));
+  }
+  const meter = node();
+  const timers = new Map();
+  let timerID = 0;
+  const sandbox = {
+    document: {
+      querySelector: (selector) => selector === '#pointer-demo' ? nodes.get('pointer-demo') : null,
+      querySelectorAll: () => [],
+    },
+    window: { matchMedia: () => ({ matches: reducedMotion }) },
+    setTimeout: (callback) => { timers.set(++timerID, callback); return timerID; },
+    clearTimeout: (id) => timers.delete(id),
+  };
+  vm.runInNewContext(read('site.js'), sandbox);
+  return { get: (id) => nodes.get(id), expire: () => { for (const callback of timers.values()) callback(); } };
+}
+
+test('pointer playground responds to settings and exposes a reduced-motion-safe replay', () => {
+  for (const reducedMotion of [false, true]) {
+    const { get } = pointerFixture(reducedMotion);
+    const runway = get('pointer-runway');
+    const initialTravel = parseFloat(runway.style.getPropertyValue('--travel'));
+    get('speed').value = '2';
+    get('speed').dispatch('input');
+    assert.ok(parseFloat(runway.style.getPropertyValue('--travel')) > initialTravel);
+    get('linear').checked = true;
+    get('linear').dispatch('change');
+    assert.equal(get('accel').disabled, true);
+    assert.equal(get('accel-out').value, 'off');
+    get('pointer-play').dispatch('click');
+    assert.equal(runway.classList.contains('playing'), !reducedMotion);
+    assert.match(get('move-status').textContent, /×2\.0 speed, without acceleration/);
+  }
+});
+
+test('pointer playground keeps its confirm-or-revert safety through the new presentation', () => {
+  const { get, expire } = pointerFixture();
+  get('speed').value = '2';
+  get('speed').dispatch('change');
+  assert.equal(get('confirm').hidden, true, 'exactly double needs no confirmation');
+  get('speed').value = '4.1';
+  get('speed').dispatch('input');
+  get('speed').dispatch('change');
+  assert.equal(get('confirm').hidden, false);
+  expire();
+  assert.equal(Number(get('speed').value), 2);
+  assert.equal(get('confirm').hidden, true);
+  assert.match(get('pointer-status').textContent, /went back to ×2\.0/);
+  get('speed').value = '4.1';
+  get('speed').dispatch('change');
+  get('keep').dispatch('click');
+  expire();
+  assert.equal(Number(get('speed').value), 4.1);
+  assert.match(get('pointer-status').textContent, /Kept ×4\.1/);
 });

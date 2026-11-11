@@ -6,24 +6,6 @@
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const NS = "http://www.w3.org/2000/svg";
 
-  // Reveal sections as they scroll into view. Only content that starts below the fold is hidden first.
-  if ("IntersectionObserver" in window && !reduceMotion.matches) {
-    const io = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        entry.target.classList.add("shown");
-        entry.target.classList.remove("pending");
-        io.unobserve(entry.target);
-      }
-    }, { rootMargin: "0px 0px -8% 0px" });
-    for (const el of $$("[data-reveal]")) {
-      if (el.getBoundingClientRect().top > window.innerHeight) {
-        el.classList.add("pending");
-        io.observe(el);
-      }
-    }
-  }
-
   // Copy buttons.
   for (const button of $$("[data-copy]")) {
     button.hidden = false;
@@ -45,7 +27,7 @@
     });
   }
 
-  // Fig. 1: the annotated mouse. Example profiles; mappings merge over Default by trigger and modifiers,
+  // Example profiles; mappings merge over Default by trigger and modifiers,
   // the same way Whisker resolves an app profile.
   const schematic = $("#schematic");
   if (schematic) {
@@ -158,7 +140,7 @@
   const sx = (v, max) => box.x0 + (v / max) * (box.x1 - box.x0);
   const sy = (v, max) => box.y0 - (Math.min(v, max) / max) * (box.y0 - box.y1);
 
-  // Fig. 2: the wheel. Lines for one notch follow Whisker's own formula, L × (1 + k × max(0, rate − 4)).
+  // Lines for one notch follow Whisker's own formula, L × (1 + k × max(0, rate − 4)).
   const wheel = $("#wheel-demo");
   if (wheel) {
     const linesInput = $("#lines", wheel);
@@ -201,7 +183,7 @@
     draw();
   }
 
-  // Fig. 3: the pointer. The curve's shape is illustrative; the confirm-or-revert rule is Whisker's own:
+  // The pointer's response is illustrative; the confirm-or-revert rule is Whisker's own:
   // more than double the last confirmed speed must be kept within five seconds.
   const pointer = $("#pointer-demo");
   if (pointer) {
@@ -212,6 +194,8 @@
     const confirmBox = $("#confirm", pointer);
     const meter = $(".meter span", confirmBox);
     const status = $("#pointer-status", pointer);
+    const runway = $("#pointer-runway", pointer);
+    const moveStatus = $("#move-status", pointer);
     let confirmed = Number(speed.value);
     let timer = 0;
 
@@ -230,6 +214,10 @@
       }
       plotLine(plot, "ref", ref);
       plotLine(plot, "curve", pts);
+      const distance = Math.min(1, travel(s, a, 0.7) / 5);
+      runway.classList.remove("playing");
+      runway.style.setProperty("--travel", `${(distance * 100).toFixed(2)}%`);
+      runway.style.setProperty("--travel-scale", String(distance));
     };
     const settle = (message) => {
       clearTimeout(timer);
@@ -264,6 +252,14 @@
       speed.value = String(confirmed);
       draw();
       settle(`Changed back to ×${confirmed.toFixed(1)}.`);
+    });
+    $("#pointer-play", pointer).addEventListener("click", () => {
+      runway.classList.remove("playing");
+      if (!reduceMotion.matches) {
+        void runway.offsetWidth;
+        runway.classList.add("playing");
+      }
+      moveStatus.textContent = `Illustrative move at ×${Number(speed.value).toFixed(1)} speed, ${linear.checked ? "without acceleration" : `with ${Number(accel.value).toFixed(2)} acceleration`}.`;
     });
     for (const el of $$("[data-js-only]", pointer)) el.hidden = false;
     draw();
