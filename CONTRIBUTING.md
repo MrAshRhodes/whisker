@@ -126,12 +126,29 @@ changes.
 Keep pull requests focused. Write code comments only where the reason is not obvious, and keep
 user-facing text in plain British English that matches the rest of the app.
 
+## Repository protections
+
+Repository rulesets and the **release** environment enforce the workflow above. Nobody, including
+administrators, can turn off the rules marked "no bypass".
+
+- **`main` (no bypass):** changes arrive only through pull requests. Force pushes and deleting
+  the branch are blocked. Review conversations must be resolved, and the **Build and test** and
+  **Issue link** checks must pass on a branch that is up to date with `main`.
+- **`main` review:** a pull request needs one approval. A new push dismisses earlier approvals,
+  and the latest push must be approved by someone other than its author. Only the repository
+  owner can merge, and the owner may merge their own pull request without an approval once the
+  checks pass, for example with `gh pr merge --squash --admin`.
+- **Release tags (no bypass):** `v*` tags cannot be moved or deleted once pushed, so a tag
+  always names the commit its release was built from.
+- **Release tag creation:** only the repository owner can create `v*` tags.
+- **release environment:** only `v*` tags can deploy to it, and every run waits for the owner
+  to approve the deployment. Administrators cannot skip the approval. Its signing credentials are
+  environment secrets, so pull-request workflows never see them.
+
 ## Cutting a release
 
-No release has been cut yet. The **release** environment still lacks the notarization issuer ID
-(`WHISKER_NOTARY_ISSUER_ID`), and the workflow stops rather than publish an un-notarized build,
-so add it before tagging the first release. Until then there is no published build, update feed
-or Homebrew cask.
+No release has been cut yet, so there is no published build, update feed or Homebrew cask. If a
+credential is missing, the workflow stops rather than publish an un-notarized build.
 
 Releases are built, signed, notarized and published only by `.github/workflows/release.yml`.
 Credentials live in the protected GitHub **release** environment; see the
@@ -148,10 +165,12 @@ Credentials live in the protected GitHub **release** environment; see the
    git tag vX.Y.Z && git push origin vX.Y.Z
    ```
 
-   Do not create the GitHub release by hand.
+   Do not create the GitHub release by hand. Only the repository owner can push `v*` tags.
+   Approve the waiting **release** deployment in the workflow run on the Actions tab; nothing is
+   built or signed until you do.
 3. The release workflow checks that `CHANGELOG.md` at the tag has a section for the version and
-   stops before building if not. To recover, delete the tag
-   (`git push origin :refs/tags/vX.Y.Z && git tag -d vX.Y.Z`), fix the changelog and tag again.
+   stops before building if not. To recover, fix the changelog and cut a new version: pushed tags
+   are never moved or deleted.
    It also checks the Sparkle public key and requires a build number higher than the previous
    release's, so installed copies are offered the update.
 4. It builds a universal app, signs it with Apple Developer ID and the hardened runtime,
@@ -166,15 +185,16 @@ Credentials live in the protected GitHub **release** environment; see the
 6. If `TAP_GITHUB_TOKEN` is set in the release environment, the workflow updates the cask in
    `MrAshRhodes/homebrew-tap`. Otherwise run
    `Scripts/update_tap.sh --version X.Y.Z --from-release` once the release is published.
-   `--dry-run` previews the change.
+   `--dry-run` previews the change. The script never replaces a newer cask with an older one (for
+   example when an old release's workflow run is repeated) unless you pass `--allow-downgrade`.
 
 Tags containing `-` (for example `v0.2.0-beta.1`) are prereleases: they publish no update feed
 and no tap update, and are never offered in-app. Preview release notes with
 `node .github/scripts/changelog.cjs notes X.Y.Z`.
 
 Published releases are immutable. The cask pins the ZIP's checksum and every build differs, so
-the workflow never replaces assets of an existing release. To rebuild, delete the release and its
-tag first, or cut a new version.
+the workflow never replaces assets of an existing release. To replace a broken release, cut a new
+version.
 
 `make zip` and `make dmg` build local packages in `dist/` for testing. They are not notarized and
 must not be published.
