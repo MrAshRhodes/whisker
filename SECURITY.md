@@ -27,17 +27,24 @@ Whisker needs the macOS **Accessibility** permission. It uses it to:
 - observe mouse button, drag and scroll-wheel events, together with the modifier keys held at
   the time, so it can decide whether a mapping applies;
 - replace those events with the action you assigned, which may mean posting a different click,
-  a keyboard shortcut, a media key or a scroll event;
-- read the name of the frontmost app, to choose the matching profile.
+  a keyboard shortcut, a media key or a scroll event.
+
+Whisker also asks macOS which app is frontmost, to choose the matching profile.
 
 Whisker reads the list of connected pointing devices and, where supported, changes their pointer
-speed and acceleration through public IOKit interfaces. It restores the original values when it
-quits, and at the next launch if it did not quit cleanly.
+speed and acceleration through public IOKit interfaces. It restores the original values when you
+turn a mouse's custom speed off, when it quits, and at the next launch if it did not quit
+cleanly. Trackpads and Magic Mouse are never changed.
+
+**Input Monitoring** is optional and only requested when you click **Allow Input Monitoring…**
+under Devices. Whisker then reads input reports from connected mice only to tell which mouse sent
+each click, so different mice can use different settings.
 
 Whisker does not record keystrokes, take screenshots, read window contents or send any of this
 information anywhere. Settings are stored locally in
 `~/Library/Application Support/Whisker/settings.json`, and Whisker reads your keyboard shortcut
-preferences only to perform system actions such as Mission Control.
+preferences (`com.apple.symbolichotkeys`) only to perform system actions such as Mission Control
+and to warn when one is turned off.
 
 Relevant reports include:
 

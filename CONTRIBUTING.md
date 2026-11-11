@@ -85,9 +85,9 @@ devices, posts events, and draws the interface.
   `Tests/WhiskerCoreTests`.
 - `node --test .github/scripts/*.test.cjs` runs the release tooling tests: changelog, issue-link
   policy, notarization gates and the update feed generator.
-- Settings changes must keep older settings files loading. Unknown keys are preserved, so add new
-  keys rather than renaming existing ones, and bump `schemaVersion` only with a migration and a
-  test for it.
+- Settings changes must keep older settings files loading. Unknown top-level keys are preserved,
+  but unknown keys inside nested objects are not, so add new keys rather than renaming existing
+  ones, and bump `schemaVersion` only with a migration and a test for it.
 - Event-tap and device code cannot be fully tested in CI. Describe how you checked it by hand,
   including which mouse you used, in the pull request.
 

@@ -10,25 +10,35 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 
 ## Features
 
-- **Button remapping.** Assign an action to any button from the middle button upwards, optionally
-  combined with ⌘, ⌥, ⌃, ⇧ or fn, so one button can do several things. The primary button is
-  never remapped on its own, so you cannot lock yourself out of clicking.
-- **Actions.** Click another button, press a keyboard shortcut (optionally repeating while the
-  button is held), go back or forward, control media playback and volume, open Mission Control,
-  move between Spaces, switch to the next or previous app, open a file or web address, or do
-  nothing at all.
+- **Button remapping.** Assign an action to any mouse button or wheel direction, optionally only
+  while ⌘, ⌥, ⌃ or ⇧ is held, so one button can do several things. Record a button by pressing
+  it, or pick one from a list. The primary button is not remapped unless you hold a modifier key
+  or turn on **Allow remapping the primary button**, so you cannot lock yourself out of clicking.
+- **Actions.** Click or double-click, press a keyboard shortcut (optionally repeating while the
+  button is held), go back or forward, send a media key (play/pause, track, volume, mute or
+  display brightness), open Mission Control, App Windows, Show Desktop, Launchpad or
+  Notification Centre, move to the Space on the left or right, switch apps, scroll, open an
+  app, file or web address, or do nothing at all.
+- **Wheel actions.** Turning the wheel runs its action once per burst of notches, or once for
+  every notch if you choose **Repeat for every notch**.
 - **Scrolling.** Reverse the vertical or horizontal wheel for each mouse without changing the
-  trackpad or the system's natural-scrolling setting, choose how many lines each wheel notch
-  scrolls, and run an action when you turn the wheel while holding a modifier key.
-- **Per-app profiles.** Give an app its own buttons and scrolling. Anything a profile does not
-  set falls back to the default profile, and Whisker switches profiles as you change apps.
-- **Pointer speed and acceleration**, per device, where supported. If a change makes the
-  pointer much faster, Whisker asks you to confirm it and reverts automatically after a few
-  seconds if you cannot. Original values are restored when Whisker quits.
+  trackpad or the system's natural-scrolling setting. Each profile can set how many lines a
+  wheel notch scrolls, add scroll acceleration and choose a modifier key that scrolls sideways.
+- **Profiles.** Give an app, a mouse, or an app on one mouse its own buttons and scrolling.
+  Anything a profile does not set comes from the profile it inherits from, ending at the
+  default profile, and Whisker switches profiles as you change apps.
+- **Pointer speed and acceleration**, per mouse, where supported. If a change makes the pointer
+  more than twice as fast, Whisker asks you to keep it and changes it back after a few seconds
+  if you do not. The system's values come back when you turn a mouse's custom speed off, when
+  Whisker quits, or at the next launch if it did not quit cleanly.
 - **Devices.** Lists connected mice and trackballs, including ones you plug in or pair while
-  Whisker is running.
-- **Menu bar item** to turn Whisker on or off and open its settings, plus an optional login item.
-- **Settings file.** Everything is kept in one readable JSON file that you can export and import.
+  Whisker is running. With several mice connected, allow Input Monitoring so Whisker can tell
+  which one each click came from and apply that mouse's settings. Trackpads and Magic Mouse are
+  left alone.
+- **Menu bar item** to turn Whisker on or off, see the active profile and open its settings. The
+  icon can be hidden, and Whisker can open at login.
+- **Settings file.** Everything is kept in one readable JSON file that you can export, import or
+  reset. Whisker checks it when it starts and tells you about anything it had to fix.
 - **Updates** through Sparkle for direct downloads, or through Homebrew.
 
 ## Requirements
@@ -37,6 +47,8 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 - The **Accessibility** permission. Whisker watches mouse button and scroll-wheel events so it
   can replace them with the actions you choose, and macOS only allows that for apps you have
   approved under Accessibility. Whisker does not read what you type.
+- Optionally, **Input Monitoring**, only if you want different settings for several mice that
+  are connected at the same time. With one mouse, Whisker does not need it.
 
 ## Install
 
@@ -56,12 +68,16 @@ macOS refuses to open the app, stop and report it rather than bypassing the warn
 
 ## First run
 
-1. Open Whisker. Its icon appears in the menu bar and the settings window explains why it needs
-   Accessibility access.
-2. Click **Open Accessibility Settings**, turn Whisker on in
-   **System Settings › Privacy & Security › Accessibility**, then return to Whisker. It notices
-   the change within a second or so.
-3. Choose whether Whisker opens at login, then pick a device and start assigning buttons.
+1. Open Whisker. Its icon appears in the menu bar and a **Welcome to Whisker** window explains
+   why it needs Accessibility access.
+2. Click **Open Accessibility Settings** and turn Whisker on in
+   **System Settings › Privacy & Security › Accessibility**. While the welcome window is open,
+   Whisker notices the change within a second or so, with no need to relaunch.
+3. Choose whether Whisker opens at login, click **Done**, then open **Settings…** from the menu
+   bar menu and start assigning buttons.
+
+If you choose **Continue Without Access**, Whisker stays in the menu bar with a dimmed icon.
+Choose **Grant Accessibility Access…** from its menu when you are ready.
 
 See the [user guide](https://mrashrhodes.github.io/whisker/guide.html) for each settings pane.
 
@@ -89,21 +105,26 @@ brew update && brew upgrade --cask whisker
 ## Troubleshooting
 
 - **Buttons or scrolling do nothing.** Check that Whisker is switched on in the menu bar menu and
-  under **System Settings › Privacy & Security › Accessibility**. If the menu bar icon is crossed
-  through, choose **Grant Accessibility Access…** from its menu.
+  under **System Settings › Privacy & Security › Accessibility**. If the menu bar icon is
+  dimmed, Whisker is either turned off or missing access; choose **Grant Accessibility Access…**
+  from its menu if it appears.
 - **Whisker is listed under Accessibility but still does not work.** This usually follows a
   rebuild or reinstall from a differently signed copy. Remove the entry, or run
   `tccutil reset Accessibility io.github.mrashrhodes.whisker`, then open Whisker and allow it
   again.
-- **A system action such as Mission Control or a Space switch does nothing.** Whisker performs
+- **A system action such as App Windows or a Space switch does nothing.** Whisker performs
   these with your keyboard shortcuts from **System Settings › Keyboard › Keyboard Shortcuts**.
-  Turn the matching shortcut on there; Whisker shows a warning next to any action whose shortcut
-  is missing.
+  Turn the matching shortcut on there; Whisker shows a warning with an
+  **Open Keyboard Shortcuts** button next to any action whose shortcut is off. Mission Control
+  and Launchpad still open without their shortcut.
 - **Back and forward do nothing in an app.** These send ⌘[ and ⌘]. Map the button to a different
   shortcut in a profile for that app.
+- **A mouse's own settings are not used when another mouse is connected.** Click
+  **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart.
 - **The pointer is suddenly too fast.** Wait a few seconds without confirming and Whisker reverts
   the change. Quitting Whisker also restores the original speed.
-- **Trackpads and Magic Mouse** are left alone for button remapping because they rely on gestures.
+- **Trackpads and Magic Mouse** are left alone entirely: Whisker does not remap, reverse or change
+  the speed of them.
 
 ## Build from source
 
@@ -125,7 +146,7 @@ builds cannot update themselves. See [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 Planned after 0.1, in no particular order:
 
 - Tilt-wheel buttons and two-button chords.
-- Auto-scroll, click lock, and double or triple click actions.
+- Auto-scroll, click lock and triple-click actions.
 - Keyboard shortcut sequences and quick-switch pointer speed presets.
 - Native per-device wheel speed and acceleration, and smooth scrolling for notched wheels.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
