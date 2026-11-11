@@ -20,6 +20,8 @@
 #                         creates, commits or pushes anything.
 #   --create              Create the tap repository (public) when it does not exist yet.
 #   --skip-asset-check    Do not require the release zip to be downloadable before publishing.
+#   --allow-downgrade     Publish even when the tap already pins a newer version. Without it, an
+#                         older release (for example a re-run workflow) never replaces a newer cask.
 #
 # Authentication: TAP_GITHUB_TOKEN (a token that can push to the tap) is used when set,
 # otherwise the local `gh auth login` session. The tap is cloned into dist/tap-work/.
@@ -58,6 +60,7 @@ Publishes Casks/whisker.rb (version + sha256) to the Homebrew tap and pushes it.
   --dry-run             render + print the cask and diff it against the tap; change nothing
   --create              create the public tap repository if it does not exist
   --skip-asset-check    do not require the release zip to be downloadable first
+  --allow-downgrade     publish even if the tap already pins a newer version
 
 Authentication: TAP_GITHUB_TOKEN when set, otherwise the local `gh auth login` session.
 EOF
@@ -72,6 +75,7 @@ BRANCH=""
 DRY_RUN=0
 CREATE=0
 ASSET_CHECK=1
+ALLOW_DOWNGRADE=0
 
 while (($#)); do
   case "$1" in
@@ -104,6 +108,7 @@ while (($#)); do
     --dry-run) DRY_RUN=1 ;;
     --create) CREATE=1 ;;
     --skip-asset-check) ASSET_CHECK=0 ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1 ;;
     -h | --help)
       usage
       exit 0
@@ -207,6 +212,23 @@ asset_reachable() {
 ASSET_URL=""
 ASSET_CODE=""
 
+# Prints the version a cask file pins.
+cask_version() { sed -n 's/^  version "\(.*\)"$/\1/p' "$1" | head -n 1; }
+
+# True if version $1 is older than $2. Uses sort -V on the release part; for equal release parts a
+# pre-release (1.2.0-beta.1) is older than the release (1.2.0), as in Semantic Versioning.
+version_lt() {
+  local a="$1" b="$2" a_core="${1%%-*}" b_core="${2%%-*}"
+  [[ "$a" == "$b" ]] && return 1
+  if [[ "$a_core" != "$b_core" ]]; then
+    [[ "$(printf '%s\n%s\n' "$a_core" "$b_core" | sort -V | head -n 1)" == "$a_core" ]]
+    return
+  fi
+  [[ "$a" == *-* && "$b" != *-* ]] && return 0
+  [[ "$a" != *-* && "$b" == *-* ]] && return 1
+  [[ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" == "$a" ]]
+}
+
 if ((DRY_RUN)); then
   log "Dry run: nothing will be created, committed or pushed"
   printf -- '---- %s ----\n' "${CASK_OUT#"$ROOT"/}"
@@ -219,6 +241,10 @@ if ((DRY_RUN)); then
   case "$REPO_STATE" in
     exists)
       if remote="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/Casks/whisker.rb" 2>/dev/null)"; then
+        remote_version="$(cask_version <(printf '%s\n' "$remote"))"
+        if [[ -n "$remote_version" ]] && version_lt "$VERSION" "$remote_version" && ((!ALLOW_DOWNGRADE)); then
+          warn "$REPO already pins whisker $remote_version, which is newer than $VERSION; a real run would not downgrade it (pass --allow-downgrade to force)"
+        fi
         if diff -u --label "$REPO:Casks/whisker.rb" --label "new:Casks/whisker.rb" \
           <(printf '%s\n' "$remote") "$CASK_OUT"; then
           log "Casks/whisker.rb in $REPO is already up to date"
@@ -279,6 +305,17 @@ else
 fi
 
 mkdir -p Casks
+if [[ -f Casks/whisker.rb ]]; then
+  existing_version="$(cask_version Casks/whisker.rb)"
+  if [[ -n "$existing_version" ]] && version_lt "$VERSION" "$existing_version"; then
+    if ((ALLOW_DOWNGRADE)); then
+      warn "downgrading the cask from $existing_version to $VERSION (--allow-downgrade)"
+    else
+      warn "$REPO already pins whisker $existing_version, which is newer than $VERSION; not downgrading the cask (pass --allow-downgrade to force)"
+      exit 0
+    fi
+  fi
+fi
 cp "$CASK_OUT" Casks/whisker.rb
 
 if [[ ! -f README.md ]]; then

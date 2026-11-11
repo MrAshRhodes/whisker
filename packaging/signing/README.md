@@ -129,9 +129,11 @@ need the private key secret, because their update feed must be signed.
 ## GitHub Actions setup
 
 Use a GitHub environment named **release**, restricted to deployment from **tags matching
-`v*`**, not branches. Restrict who can create release tags and consider required environment
-reviewers according to the repository's protection policy. Only the tag-triggered release job
-uses this environment; pull-request CI never receives production signing credentials.
+`v*`**, not branches. The repository owner is its required reviewer, and administrators cannot
+bypass that, so every release run waits for the owner to approve the deployment. Repository
+rulesets let only the owner create `v*` tags, and stop anyone moving or deleting them; see
+[Repository protections](../../CONTRIBUTING.md#repository-protections). Only the tag-triggered
+release job uses this environment; pull-request CI never receives production signing credentials.
 
 Set these **environment secrets**, not repository secrets or variables:
 

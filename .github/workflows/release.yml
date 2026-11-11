@@ -67,7 +67,7 @@ jobs:
           exists=false
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             exists=true
-            echo "::notice title=Release already published::$GITHUB_REF_NAME already has a release, so nothing is rebuilt or replaced. Delete the release and tag to rebuild, or cut a new version."
+            echo "::notice title=Release already published::$GITHUB_REF_NAME already has a release, so nothing is rebuilt or replaced. Cut a new version to publish new artifacts."
           fi
           {
             echo "version=$version"

@@ -61,7 +61,7 @@ Relevant reports include:
 
 ## Update integrity and credentials
 
-No release has been published yet; release signing still lacks the notarization issuer ID.
+No release has been published yet.
 The following describes how releases will be produced. Releases are signed with an Apple
 Developer ID certificate, use the hardened runtime and are notarized by Apple. Gatekeeper stays enabled, and the Homebrew cask does not remove quarantine.
 Each release publishes a SHA-256 checksum for its ZIP and DMG.

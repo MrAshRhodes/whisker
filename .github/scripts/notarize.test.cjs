@@ -331,3 +331,86 @@ test('the release workflow requires notarization, keeps secrets tag-scoped, and 
   assert.match(workflow.slice(clean, publish), /--cleanup "\$KEYCHAIN"/);
   assert.doesNotMatch(read('packaging/homebrew/whisker.rb.tmpl'), /xattr|postflight|quarantine/);
 });
+
+// update_tap.sh runs from a copy, so its dist/ output stays out of the repository. A local bare
+// repository stands in for the tap, and a `gh` that always succeeds for the GitHub API.
+function tapFixture(t, tapVersion) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whisker-tap-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const copy = path.join(dir, 'whisker');
+  for (const file of ['Scripts/update_tap.sh', 'Scripts/render_cask.sh', 'packaging/homebrew/whisker.rb.tmpl']) {
+    fs.mkdirSync(path.dirname(path.join(copy, file)), { recursive: true });
+    fs.copyFileSync(path.join(root, file), path.join(copy, file));
+  }
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!/^(GIT_|GH_|GITHUB_|TAP_GITHUB_TOKEN$)/.test(key)) env[key] = value;
+  }
+  Object.assign(env, { HOME: dir, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' });
+  const execute = (command, args, cwd, extra = {}) => {
+    const result = spawnSync(command, args, { cwd, env: { ...env, ...extra }, encoding: 'utf8', timeout: 30000 });
+    assert.ifError(result.error);
+    return { ...result, output: result.stdout + result.stderr };
+  };
+  const git = (cwd, ...args) => {
+    const identity = ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false'];
+    const result = execute('git', [...identity, ...args], cwd);
+    assert.equal(result.status, 0, result.output);
+    return result.stdout.trim();
+  };
+  const remote = path.join(dir, 'tap.git');
+  git(dir, 'init', '--quiet', '--bare', remote);
+  git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  const seed = path.join(dir, 'seed');
+  git(dir, 'init', '--quiet', seed);
+  git(seed, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  const rendered = execute('/bin/bash', [
+    path.join(copy, 'Scripts/render_cask.sh'), '--version', tapVersion, '--sha256', 'a'.repeat(64),
+    '--output', path.join(seed, 'Casks/whisker.rb'),
+  ], dir);
+  assert.equal(rendered.status, 0, rendered.output);
+  git(seed, 'add', '-A');
+  git(seed, 'commit', '--quiet', '-m', `whisker ${tapVersion}`);
+  git(seed, 'push', '--quiet', remote, 'HEAD:refs/heads/main');
+  return {
+    head: () => git(remote, 'rev-parse', 'main'),
+    caskVersion: () => /^ {2}version "(.*)"$/m.exec(git(remote, 'show', 'main:Casks/whisker.rb'))?.[1],
+    publish: (version, ...flags) => execute('/bin/bash', [
+      path.join(copy, 'Scripts/update_tap.sh'), '--version', version, '--sha256', '0'.repeat(64),
+      '--skip-asset-check', '--repo', 'OWNER/NAME', ...flags,
+    ], copy, {
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.${remote}.insteadOf`,
+      GIT_CONFIG_VALUE_0: 'https://github.com/OWNER/NAME.git',
+    }),
+  };
+}
+
+// Re-running the workflow of an old tag must not point `brew install` back at an older build.
+for (const [name, tapVersion, version, flags, published] of [
+  ['keeps a newer cask when run for an older release', '1.10.0', '1.2.0', [], false],
+  ['keeps a release cask when run for its own pre-release', '1.2.0', '1.2.0-beta.1', [], false],
+  ['downgrades the cask only with --allow-downgrade', '1.10.0', '1.2.0', ['--allow-downgrade'], true],
+  ['publishes a newer release', '1.10.0', '1.11.0', [], true],
+  ['promotes a pre-release cask to its release', '1.2.0-beta.1', '1.2.0', [], true],
+]) {
+  test(`update_tap.sh ${name}`, t => {
+    const tap = tapFixture(t, tapVersion);
+    const before = tap.head();
+    const result = tap.publish(version, ...flags);
+    assert.equal(result.status, 0, result.output);
+    if (published) {
+      assert.doesNotMatch(result.output, /not downgrading/);
+      assert.equal(tap.caskVersion(), version);
+      assert.notEqual(tap.head(), before);
+    } else {
+      assert.match(result.output, /not downgrading/);
+      assert.equal(tap.caskVersion(), tapVersion);
+      assert.equal(tap.head(), before);
+    }
+  });
+}

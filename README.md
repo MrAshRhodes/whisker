@@ -56,8 +56,7 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 
 ## Install
 
-> **No release has been published yet.** There is no downloadable build or Homebrew cask today,
-> because release signing is not fully set up (the notarization issuer ID is still missing).
+> **No release has been published yet.** There is no downloadable build or Homebrew cask today.
 > For now, [build Whisker from source](#build-from-source).
 
 Once the first release is out, you will be able to install it with [Homebrew](https://brew.sh):
@@ -102,8 +101,9 @@ network requests except update checks, which are off until you turn them on or c
 Once releases are published, direct downloads will update in place with [Sparkle](https://sparkle-project.org). Choose
 **Check for Updates…** from the menu bar menu, or pick a schedule under Updates in the settings
 window. Automatic checks are off by default. Whisker asks before downloading and again before
-installing, and every update must carry a valid Whisker update signature and Apple Developer ID
-signature.
+installing. The update feed and every update archive must carry a valid Whisker update signature,
+which Sparkle checks before unpacking the archive, and Sparkle also checks the new app's code
+signature before installing it.
 
 Homebrew copies will be updated by Homebrew. Quit Whisker, then run:
 
