@@ -60,8 +60,12 @@ final class EventSynthesizer: @unchecked Sendable {
             guard phase != .up else { return }
             queue.async { [weak self] in self?.postKey(direction.shortcut) }
         case .missionControl, .space:
-            guard phase != .up, let plan = action.systemShortcutPlan(shortcuts) else { return }
-            queue.async { [weak self] in self?.perform(plan) }
+            guard phase != .up else { return }
+            // Reading the shortcut table touches user defaults, so it stays off the event tap thread.
+            queue.async { [weak self] in
+                guard let self, let plan = action.systemShortcutPlan(self.shortcuts) else { return }
+                self.perform(plan)
+            }
         case .appSwitch(let direction):
             guard phase != .up else { return }
             let switchApp = self.switchApp
