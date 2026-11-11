@@ -1,0 +1,258 @@
+import Foundation
+import Testing
+@testable import WhiskerCore
+
+@Suite("Settings model")
+struct SettingsTests {
+    // MARK: Modifiers and shortcuts
+
+    @Test func modifiersRoundTripThroughEventFlags() {
+        let set: ModifierSet = [.command, .shift]
+        #expect(set.eventFlags == ModifierSet.EventFlag.command | ModifierSet.EventFlag.shift)
+        #expect(ModifierSet(eventFlags: set.eventFlags | 0x100) == set)
+        #expect(ModifierSet([.control, .option, .shift, .command]).symbols == "⌃⌥⇧⌘")
+    }
+
+    @Test func modifiersCodeAsNamesAndRejectUnknownOnes() throws {
+        let data = try JSONEncoder().encode(ModifierSet([.command, .control]))
+        #expect(String(decoding: data, as: UTF8.self) == #"["control","command"]"#)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(ModifierSet.self, from: Data(#"["hyper"]"#.utf8)) }
+    }
+
+    @Test(arguments: [
+        ("cmd+shift+t", UInt16(0x11), ModifierSet([.command, .shift])),
+        ("⌘⇧T", UInt16(0x11), ModifierSet([.command, .shift])),
+        ("control-left", UInt16(0x7B), ModifierSet.control),
+        ("F11", UInt16(0x67), ModifierSet()),
+    ])
+    func shortcutsParse(text: String, keyCode: UInt16, modifiers: ModifierSet) throws {
+        let shortcut = try #require(KeyShortcut(parsing: text))
+        #expect(shortcut.keyCode == keyCode)
+        #expect(shortcut.modifiers == modifiers)
+    }
+
+    @Test func nonsenseShortcutsDoNotParse() {
+        #expect(KeyShortcut(parsing: "") == nil)
+        #expect(KeyShortcut(parsing: "hyper+t") == nil)
+        #expect(KeyShortcut(parsing: "cmd+nosuchkey") == nil)
+    }
+
+    // MARK: Coding
+
+    @Test func everyActionRoundTrips() throws {
+        let actions: [Action] = [
+            .passthrough, .none, .click(button: 2, modifiers: [.command]), .doubleClick(modifiers: []),
+            .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: true),
+            .scroll(direction: .left, lines: 4), .media(.volumeUp), .navigate(.forward),
+            .missionControl(.appWindows), .space(.right), .appSwitch(.previous), .open(url: "https://example.com"),
+        ]
+        for action in actions {
+            let data = try JSONEncoder().encode(action)
+            #expect(try JSONDecoder().decode(Action.self, from: data) == action)
+        }
+        #expect(Set(actions.map(\.kind)).count == ActionKind.allCases.count)
+    }
+
+    @Test func triggersRoundTripAndRejectUnknownTypes() throws {
+        for trigger in [Trigger.button(5), .wheel(.down)] {
+            #expect(try JSONDecoder().decode(Trigger.self, from: JSONEncoder().encode(trigger)) == trigger)
+        }
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(Trigger.self, from: Data(#"{"type":"pedal"}"#.utf8)) }
+    }
+
+    @Test func settingsRoundTripKeepingUnknownKeys() throws {
+        var settings = WhiskerSettings()
+        settings.devices["046d:c52b"] = DeviceSettings(name: "Mouse", pointer: PointerSettings(speed: 1.5), wheel: WheelSettings(invertVertical: true))
+        settings.profiles.append(Profile(id: "safari", name: "Safari", match: ProfileMatch(apps: ["com.apple.Safari"]), inherits: nil, scroll: ScrollSettings(linesPerNotch: 5)))
+        settings.unknownKeys["future"] = .object(["x": .array([.number(1), .bool(true), .null])])
+        let data = try SettingsCodec.encode(settings)
+        let decoded = try SettingsCodec.decode(data)
+        #expect(decoded == settings)
+        #expect(decoded.profile(id: "safari")?.inherits == nil)
+    }
+
+    @Test func missingInheritsMeansDefaultAndExplicitNullMeansNone() throws {
+        let json = #"{"schemaVersion":1,"profiles":[{"id":"default"},{"id":"a"},{"id":"b","inherits":null}]}"#
+        let settings = try SettingsCodec.decode(Data(json.utf8))
+        #expect(settings.profile(id: "a")?.inherits == "default")
+        #expect(settings.profile(id: "b")?.inherits == nil)
+    }
+
+    @Test func unversionedFilesUpgrade() throws {
+        let settings = try SettingsCodec.decode(Data(#"{"general":{"enabled":false}}"#.utf8))
+        #expect(settings.schemaVersion == 1)
+        #expect(settings.general.enabled == false)
+        #expect(settings.profiles == [.makeDefault()])
+    }
+
+    @Test func newerAndUnreadableFilesAreRefused() {
+        #expect(throws: SettingsCodec.Failure.newerSchema(9)) { try SettingsCodec.decode(Data(#"{"schemaVersion":9}"#.utf8)) }
+        #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decode(Data("[1,2]".utf8)) }
+        #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decode(Data(#"{"profiles":[{"name":"no id"}]}"#.utf8)) }
+    }
+
+    // MARK: Validation
+
+    @Test func defaultSettingsAreValid() {
+        #expect(WhiskerSettings().validate().isEmpty)
+    }
+
+    @Test func repairFixesEveryKindOfProblem() {
+        var settings = WhiskerSettings(schemaVersion: 1, profiles: [])
+        settings.devices["not-a-device"] = DeviceSettings()
+        settings.devices["046d:c52b"] = DeviceSettings(pointer: PointerSettings(speed: 50, acceleration: .nan))
+        settings.profiles = [
+            Profile(id: "a", name: "A", inherits: "b", scroll: ScrollSettings(linesPerNotch: 99, acceleration: 7), mappings: [
+                Mapping(trigger: .button(0), action: .none),
+                Mapping(trigger: .button(3), action: .navigate(.back)),
+                Mapping(trigger: .button(3), action: .navigate(.forward)),
+                Mapping(trigger: .button(4), action: .open(url: "no scheme")),
+            ]),
+            Profile(id: "b", name: "B", inherits: "a"),
+            Profile(id: "b", name: "Duplicate"),
+            Profile(id: "c", name: "C", inherits: "missing"),
+        ]
+        let (repaired, issues) = settings.repairedWithIssues()
+        #expect(!issues.isEmpty)
+        #expect(repaired.validate().isEmpty)
+        #expect(repaired.profiles.first?.isDefault == true)
+        #expect(repaired.devices["not-a-device"] == nil)
+        #expect(repaired.devices["046d:c52b"]?.pointer == PointerSettings(speed: 5, acceleration: 0))
+        let a = repaired.profile(id: "a")
+        #expect(a?.mappings == [Mapping(trigger: .button(3), action: .navigate(.back))])
+        #expect(a?.scroll == ScrollSettings(linesPerNotch: 20, acceleration: 1))
+        #expect(repaired.profiles.filter { $0.id == "b" }.count == 1)
+        #expect(repaired.profile(id: "c")?.inherits == "default")
+        for profile in repaired.profiles {
+            #expect(!WhiskerSettings.inheritanceLoops(from: profile.id, in: repaired.profiles))
+        }
+    }
+
+    @Test func primaryButtonNeedsModifierUnlessAllowed() {
+        let bare = Mapping(trigger: .button(0), action: .navigate(.back))
+        #expect(WhiskerSettings.problem(with: bare, allowPrimary: false) != nil)
+        #expect(WhiskerSettings.problem(with: bare, allowPrimary: true) == nil)
+        #expect(WhiskerSettings.problem(with: Mapping(trigger: .button(0), modifiers: .command, action: .navigate(.back)), allowPrimary: false) == nil)
+    }
+
+    @Test func importsMustAlreadyBeValid() throws {
+        let json = #"{"schemaVersion":1,"profiles":[{"id":"default","mappings":[{"trigger":{"type":"button","button":0},"action":{"kind":"none"}}]}]}"#
+        #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decodeValidated(Data(json.utf8)) }
+        #expect(try SettingsCodec.decodeRepairing(Data(json.utf8)).settings.defaultProfile.mappings.isEmpty)
+    }
+
+    // MARK: Profile resolution
+
+    private func layered() -> WhiskerSettings {
+        var settings = WhiskerSettings()
+        settings.profiles += [
+            Profile(id: "dev", name: "Device", match: ProfileMatch(devices: ["046d:c52b"]), mappings: [Mapping(trigger: .button(3), action: .media(.playPause))]),
+            Profile(id: "app", name: "App", match: ProfileMatch(apps: ["com.example.app"]), scroll: ScrollSettings(linesPerNotch: 6), mappings: [Mapping(trigger: .button(2), action: .none)]),
+            Profile(id: "both", name: "Both", match: ProfileMatch(devices: ["046d:c52b"], apps: ["com.example.app"]), inherits: "app", mappings: [Mapping(trigger: .button(4), action: .space(.left))]),
+        ]
+        return settings
+    }
+
+    @Test func mostSpecificProfileWins() {
+        let settings = layered()
+        #expect(settings.matchingProfile(device: "046d:c52b", app: "com.example.app").id == "both")
+        #expect(settings.matchingProfile(device: "1234:5678", app: "com.example.app").id == "app")
+        #expect(settings.matchingProfile(device: "046d:c52b", app: "com.other").id == "dev")
+        #expect(settings.matchingProfile(device: nil, app: nil).id == "default")
+    }
+
+    @Test func inheritanceMergesParentsUnderChildren() {
+        let resolved = layered().resolvedProfile(device: "046d:c52b", app: "com.example.app")
+        #expect(resolved.profileID == "both")
+        #expect(resolved.mapping(.button(3), modifiers: []) == Mapping(trigger: .button(3), action: .navigate(.back)))
+        #expect(resolved.mapping(.button(4), modifiers: [])?.action == .space(.left))
+        #expect(resolved.mapping(.button(2), modifiers: [])?.action == Action.none)
+        #expect(resolved.mappings[MappingKey(.button(4))]?.inherited == false)
+        #expect(resolved.mappings[MappingKey(.button(3))]?.sourceProfileID == "default")
+        #expect(resolved.scroll.linesPerNotch == 6)
+        #expect(resolved.sortedMappings.map(\.mapping.trigger) == [.button(2), .button(3), .button(4)])
+    }
+
+    @Test func profileWithoutParentStartsEmpty() {
+        var settings = WhiskerSettings()
+        settings.profiles.append(Profile(id: "bare", name: "Bare", match: ProfileMatch(apps: ["x"]), inherits: nil))
+        #expect(settings.resolvedProfile(device: nil, app: "x").mappings.isEmpty)
+    }
+
+    // MARK: Devices and apps
+
+    @Test func deviceIdentifiersRoundTrip() {
+        let identity = DeviceIdentity(vendorID: 0x046D, productID: 0xC52B, serial: " ABC ")
+        #expect(identity.id == "046d:c52b:ABC")
+        #expect(DeviceIdentity(id: identity.id) == identity)
+        #expect(DeviceIdentity(id: "046d:c52b")?.serial == nil)
+        #expect(DeviceIdentity(id: "46d:c52b") == nil)
+        #expect(DeviceIdentity(id: "zzzz:c52b") == nil)
+        #expect(DeviceIdentity(id: "046d:c52b:") == nil)
+    }
+
+    @Test func trackpadsAndTouchMiceAreExcluded() {
+        #expect(DeviceIdentity.isExcluded(transport: "FIFO", product: nil, vendorID: 0))
+        #expect(DeviceIdentity.isExcluded(transport: "Bluetooth", product: "Magic Trackpad", vendorID: 0x05AC))
+        #expect(DeviceIdentity.isExcluded(transport: "Bluetooth", product: "Magic Mouse", vendorID: 0x05AC))
+        #expect(!DeviceIdentity.isExcluded(transport: "USB", product: "USB Receiver", vendorID: 0x046D))
+    }
+
+    @Test func attributorPrefersRecentReportsThenTheOnlyMouse() {
+        var attributor = DeviceAttributor(connected: ["a"])
+        #expect(attributor.attribute(kind: .button(3), at: 1) == DeviceAttribution(id: "a", exact: false))
+        attributor.connected = ["a", "b"]
+        #expect(attributor.attribute(kind: .button(3), at: 1) == nil)
+        attributor.record(deviceID: "b", kind: .button(3), at: 1.0)
+        #expect(attributor.attribute(kind: .button(3), at: 1.01) == DeviceAttribution(id: "b", exact: true))
+        #expect(attributor.attribute(kind: .wheel, at: 1.01) == nil)
+        #expect(attributor.attribute(kind: .button(3), at: 1.5) == nil)
+    }
+
+    @Test func appHistoryIsMostRecentFirst() {
+        var history = AppSwitchHistory()
+        for app in ["a", "b", "c", "b"] { history.activated(app) }
+        #expect(history.bundleIDs == ["b", "c", "a"])
+        #expect(history.target(.next) == "c")
+        #expect(history.target(.previous) == "a")
+        #expect(history.target(.next, running: ["a", "b"]) == "a")
+        history.terminated("c")
+        #expect(history.bundleIDs == ["b", "a"])
+    }
+
+    @Test func symbolicHotKeysParse() {
+        let table = SymbolicHotKeyTable(dictionary: [
+            "32": ["enabled": NSNumber(value: 1), "value": ["parameters": [NSNumber(value: 65535), NSNumber(value: 0x7E), NSNumber(value: 0x0004_0000)]]],
+            "79": ["enabled": NSNumber(value: 0)],
+            "81": ["enabled": NSNumber(value: 1), "value": ["parameters": [NSNumber(value: 65535), NSNumber(value: 65535), NSNumber(value: 0)]]],
+        ])
+        #expect(table.status(of: .missionControl) == .available(KeyShortcut(keyCode: 0x7E, modifiers: .control)))
+        #expect(table.status(of: .moveLeftSpace) == .disabled)
+        #expect(table.status(of: .moveRightSpace) == .unassigned)
+        #expect(table.status(of: .showDesktop) == SystemShortcutID.showDesktop.factoryDefault)
+    }
+
+    // MARK: Pointer and scroll math
+
+    @Test func pointerSpeedMapsToResolutionAndBack() {
+        #expect(PointerMath.resolution(forSpeed: 1) == 400)
+        #expect(PointerMath.resolution(forSpeed: 2) == 200)
+        #expect(PointerMath.resolution(forSpeed: 1, nativeResolution: 1000) == 1000)
+        #expect(PointerMath.resolution(forSpeed: 0.01) == 2000)
+        #expect(PointerMath.speed(forResolution: 200) == 2)
+        #expect(PointerMath.acceleration(2, linear: true) == -1)
+        #expect(PointerMath.acceleration(9, linear: false) == 3)
+        #expect(PointerMath.ioFixed(1.5) == 98304)
+        #expect(PointerMath.fromIOFixed(26_214_400) == 400)
+        #expect(PointerMath.needsConfirmation(confirmed: 1, new: 2.5))
+        #expect(!PointerMath.needsConfirmation(confirmed: 1, new: 2))
+    }
+
+    @Test func scrollAccelerationOnlyAboveThreshold() {
+        #expect(ScrollMath.effectiveLines(base: 3, acceleration: 1, rate: 4) == 3)
+        #expect(ScrollMath.effectiveLines(base: 3, acceleration: 0.5, rate: 10) == 12)
+        #expect(ScrollMath.effectiveLines(base: 3, acceleration: 0, rate: 50) == 3)
+        #expect(ScrollMath.notchRate(times: [0.0, 0.85, 0.9, 0.95, 1.0], now: 1.0) == 15)
+        #expect(ScrollMath.notchRate(times: [1.0], now: 1.0) == 0)
+    }
+}

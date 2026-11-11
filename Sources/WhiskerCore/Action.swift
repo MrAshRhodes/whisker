@@ -1,0 +1,359 @@
+import Foundation
+
+public enum MediaKey: String, Codable, CaseIterable, Sendable {
+    case playPause, next, previous, volumeUp, volumeDown, mute, brightnessUp, brightnessDown
+
+    public var title: String {
+        switch self {
+        case .playPause: return "Play/Pause"
+        case .next: return "Next Track"
+        case .previous: return "Previous Track"
+        case .volumeUp: return "Volume Up"
+        case .volumeDown: return "Volume Down"
+        case .mute: return "Mute"
+        case .brightnessUp: return "Brightness Up"
+        case .brightnessDown: return "Brightness Down"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .playPause: return "playpause"
+        case .next: return "forward"
+        case .previous: return "backward"
+        case .volumeUp: return "speaker.wave.3"
+        case .volumeDown: return "speaker.wave.1"
+        case .mute: return "speaker.slash"
+        case .brightnessUp: return "sun.max"
+        case .brightnessDown: return "sun.min"
+        }
+    }
+
+    /// The `NX_KEYTYPE_*` value from `<IOKit/hidsystem/ev_keymap.h>` posted as a system-defined event.
+    public var systemKeyType: Int {
+        switch self {
+        case .volumeUp: return 0
+        case .volumeDown: return 1
+        case .brightnessUp: return 2
+        case .brightnessDown: return 3
+        case .mute: return 7
+        case .playPause: return 16
+        case .next: return 17
+        case .previous: return 18
+        }
+    }
+
+    /// Volume and brightness keys repeat while the trigger is held, like the keys on a keyboard.
+    public var repeats: Bool {
+        switch self {
+        case .volumeUp, .volumeDown, .brightnessUp, .brightnessDown: return true
+        default: return false
+        }
+    }
+}
+
+public enum NavigationDirection: String, Codable, CaseIterable, Sendable {
+    case back, forward
+
+    public var title: String { self == .back ? "Back" : "Forward" }
+    public var symbolName: String { self == .back ? "chevron.backward" : "chevron.forward" }
+
+    /// ⌘[ and ⌘], which Finder, Safari and most document browsers use.
+    public var shortcut: KeyShortcut {
+        KeyShortcut(keyCode: self == .back ? 0x21 : 0x1E, modifiers: .command)
+    }
+}
+
+public enum MissionControlTarget: String, Codable, CaseIterable, Sendable {
+    case missionControl, appWindows, showDesktop, launchpad, notificationCentre
+
+    public var title: String {
+        switch self {
+        case .missionControl: return "Mission Control"
+        case .appWindows: return "Application Windows"
+        case .showDesktop: return "Show Desktop"
+        case .launchpad: return "Launchpad"
+        case .notificationCentre: return "Notification Centre"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .missionControl: return "rectangle.3.group"
+        case .appWindows: return "macwindow.on.rectangle"
+        case .showDesktop: return "desktopcomputer"
+        case .launchpad: return "square.grid.3x3"
+        case .notificationCentre: return "bell"
+        }
+    }
+
+    /// Whether opening an app in /System/Applications does the same job when the shortcut is off.
+    public var hasAppFallback: Bool { self == .missionControl || self == .launchpad }
+
+    public var systemShortcut: SystemShortcutID {
+        switch self {
+        case .missionControl: return .missionControl
+        case .appWindows: return .applicationWindows
+        case .showDesktop: return .showDesktop
+        case .launchpad: return .launchpad
+        case .notificationCentre: return .notificationCentre
+        }
+    }
+}
+
+public enum SpaceDirection: String, Codable, CaseIterable, Sendable {
+    case left, right
+
+    public var title: String { self == .left ? "Space on the Left" : "Space on the Right" }
+    public var symbolName: String { self == .left ? "arrow.left.square" : "arrow.right.square" }
+    public var systemShortcut: SystemShortcutID { self == .left ? .moveLeftSpace : .moveRightSpace }
+}
+
+public enum AppSwitchDirection: String, Codable, CaseIterable, Sendable {
+    case next, previous
+
+    public var title: String { self == .next ? "Last Used App" : "Least Recently Used App" }
+}
+
+/// Everything a trigger can do. Encoded as `{"kind": "...", ...parameters}`.
+public enum Action: Hashable, Sendable {
+    /// Leave the event alone.
+    case passthrough
+    /// Swallow the event and do nothing.
+    case none
+    /// Press a mouse button for as long as the trigger is held.
+    case click(button: Int, modifiers: ModifierSet)
+    case doubleClick(modifiers: ModifierSet)
+    case shortcut(KeyShortcut, repeatWhileHeld: Bool)
+    case scroll(direction: WheelDirection, lines: Int)
+    case media(MediaKey)
+    case navigate(NavigationDirection)
+    case missionControl(MissionControlTarget)
+    case space(SpaceDirection)
+    case appSwitch(AppSwitchDirection)
+    /// An app, file or web address.
+    case open(url: String)
+
+    public var kind: ActionKind {
+        switch self {
+        case .passthrough: return .passthrough
+        case .none: return .none
+        case .click: return .click
+        case .doubleClick: return .doubleClick
+        case .shortcut: return .shortcut
+        case .scroll: return .scroll
+        case .media: return .media
+        case .navigate: return .navigate
+        case .missionControl: return .missionControl
+        case .space: return .space
+        case .appSwitch: return .appSwitch
+        case .open: return .open
+        }
+    }
+
+    /// Actions that follow the trigger: pressed while it is down, released when it comes up.
+    public var followsTrigger: Bool {
+        switch self {
+        case .click: return true
+        case .shortcut(_, let repeats): return repeats
+        case .media(let key): return key.repeats
+        default: return false
+        }
+    }
+
+    /// The system keyboard shortcut this action can't work without. Mission Control and Launchpad
+    /// fall back to opening the app, so they don't need one.
+    public var systemShortcut: SystemShortcutID? {
+        switch self {
+        case .missionControl(let target):
+            return target.hasAppFallback ? nil : target.systemShortcut
+        case .space(let direction): return direction.systemShortcut
+        default: return nil
+        }
+    }
+
+    /// One line describing the action, for lists and the menu bar.
+    public var summary: String {
+        switch self {
+        case .passthrough: return "Default"
+        case .none: return "Do Nothing"
+        case let .click(button, modifiers):
+            let name: String
+            switch button {
+            case 0: name = "Left Click"
+            case 1: name = "Right Click"
+            case 2: name = "Middle Click"
+            default: name = "Button \(button + 1) Click"
+            }
+            return modifiers.isEmpty ? name : "\(modifiers.symbols) \(name)"
+        case .doubleClick(let modifiers): return modifiers.isEmpty ? "Double Click" : "\(modifiers.symbols) Double Click"
+        case let .shortcut(shortcut, _): return "Keyboard Shortcut \(shortcut.displayString)"
+        case let .scroll(direction, lines): return "\(direction.title) \(lines) \(lines == 1 ? "Line" : "Lines")"
+        case .media(let key): return key.title
+        case .navigate(let direction): return direction.title
+        case .missionControl(let target): return target.title
+        case .space(let direction): return "Move to \(direction.title)"
+        case .appSwitch(let direction): return "Switch to \(direction.title)"
+        case .open(let url): return "Open \(Self.openTitle(url))"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .media(let key): return key.symbolName
+        case .navigate(let direction): return direction.symbolName
+        case .missionControl(let target): return target.symbolName
+        case .space(let direction): return direction.symbolName
+        case .scroll(let direction, _): return direction.symbolName
+        default: return kind.symbolName
+        }
+    }
+
+    static func openTitle(_ string: String) -> String {
+        guard let url = URL(string: string), !string.isEmpty else { return "Nothing" }
+        if url.isFileURL {
+            let name = url.deletingPathExtension().lastPathComponent
+            return name.isEmpty ? url.path : name
+        }
+        return url.host ?? string
+    }
+}
+
+/// The action families offered in the action picker, in menu order.
+public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
+    case passthrough, none, click, doubleClick, shortcut, navigate, media, missionControl, space, appSwitch, scroll, open
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .passthrough: return "Default"
+        case .none: return "Do Nothing"
+        case .click: return "Click"
+        case .doubleClick: return "Double Click"
+        case .shortcut: return "Keyboard Shortcut"
+        case .navigate: return "Back or Forward"
+        case .media: return "Media Key"
+        case .missionControl: return "Mission Control"
+        case .space: return "Switch Space"
+        case .appSwitch: return "Switch App"
+        case .scroll: return "Scroll"
+        case .open: return "Open App, File or Website"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .passthrough: return "computermouse"
+        case .none: return "nosign"
+        case .click: return "cursorarrow.click"
+        case .doubleClick: return "cursorarrow.click.2"
+        case .shortcut: return "keyboard"
+        case .navigate: return "arrow.left.arrow.right"
+        case .media: return "playpause"
+        case .missionControl: return "rectangle.3.group"
+        case .space: return "square.split.2x1"
+        case .appSwitch: return "rectangle.stack"
+        case .scroll: return "arrow.up.and.down"
+        case .open: return "arrow.up.forward.app"
+        }
+    }
+
+    /// The action a new mapping of this kind starts with.
+    public var defaultAction: Action {
+        switch self {
+        case .passthrough: return .passthrough
+        case .none: return .none
+        case .click: return .click(button: 2, modifiers: [])
+        case .doubleClick: return .doubleClick(modifiers: [])
+        case .shortcut: return .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: false)
+        case .navigate: return .navigate(.back)
+        case .media: return .media(.playPause)
+        case .missionControl: return .missionControl(.missionControl)
+        case .space: return .space(.left)
+        case .appSwitch: return .appSwitch(.next)
+        case .scroll: return .scroll(direction: .down, lines: 3)
+        case .open: return .open(url: "")
+        }
+    }
+}
+
+extension Action: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(String.self, forKey: .kind)
+        func modifiers() throws -> ModifierSet {
+            try container.decodeIfPresent(ModifierSet.self, forKey: .modifiers) ?? []
+        }
+        switch kind {
+        case "passthrough": self = .passthrough
+        case "none": self = .none
+        case "click": self = .click(button: try container.decode(Int.self, forKey: .button), modifiers: try modifiers())
+        case "doubleClick": self = .doubleClick(modifiers: try modifiers())
+        case "shortcut":
+            self = .shortcut(
+                KeyShortcut(keyCode: try container.decode(UInt16.self, forKey: .keyCode), modifiers: try modifiers()),
+                repeatWhileHeld: try container.decodeIfPresent(Bool.self, forKey: .repeatWhileHeld) ?? false
+            )
+        case "scroll":
+            self = .scroll(
+                direction: try container.decode(WheelDirection.self, forKey: .direction),
+                lines: try container.decodeIfPresent(Int.self, forKey: .lines) ?? 3
+            )
+        case "media": self = .media(try container.decode(MediaKey.self, forKey: .key))
+        case "navigate": self = .navigate(try container.decode(NavigationDirection.self, forKey: .direction))
+        case "missionControl": self = .missionControl(try container.decode(MissionControlTarget.self, forKey: .target))
+        case "space": self = .space(try container.decode(SpaceDirection.self, forKey: .direction))
+        case "appSwitch": self = .appSwitch(try container.decode(AppSwitchDirection.self, forKey: .direction))
+        case "open": self = .open(url: try container.decode(String.self, forKey: .url))
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "Unknown action “\(kind)”.")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .passthrough: try container.encode("passthrough", forKey: .kind)
+        case .none: try container.encode("none", forKey: .kind)
+        case let .click(button, modifiers):
+            try container.encode("click", forKey: .kind)
+            try container.encode(button, forKey: .button)
+            try container.encode(modifiers, forKey: .modifiers)
+        case .doubleClick(let modifiers):
+            try container.encode("doubleClick", forKey: .kind)
+            try container.encode(modifiers, forKey: .modifiers)
+        case let .shortcut(shortcut, repeats):
+            try container.encode("shortcut", forKey: .kind)
+            try container.encode(shortcut.keyCode, forKey: .keyCode)
+            try container.encode(shortcut.modifiers, forKey: .modifiers)
+            try container.encode(repeats, forKey: .repeatWhileHeld)
+        case let .scroll(direction, lines):
+            try container.encode("scroll", forKey: .kind)
+            try container.encode(direction, forKey: .direction)
+            try container.encode(lines, forKey: .lines)
+        case .media(let key):
+            try container.encode("media", forKey: .kind)
+            try container.encode(key, forKey: .key)
+        case .navigate(let direction):
+            try container.encode("navigate", forKey: .kind)
+            try container.encode(direction, forKey: .direction)
+        case .missionControl(let target):
+            try container.encode("missionControl", forKey: .kind)
+            try container.encode(target, forKey: .target)
+        case .space(let direction):
+            try container.encode("space", forKey: .kind)
+            try container.encode(direction, forKey: .direction)
+        case .appSwitch(let direction):
+            try container.encode("appSwitch", forKey: .kind)
+            try container.encode(direction, forKey: .direction)
+        case .open(let url):
+            try container.encode("open", forKey: .kind)
+            try container.encode(url, forKey: .url)
+        }
+    }
+}
