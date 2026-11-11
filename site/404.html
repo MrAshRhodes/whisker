@@ -7,53 +7,41 @@
   <title>Page not found · Whisker</title>
   <meta name="robots" content="noindex">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f3efe4" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0c2136" media="(prefers-color-scheme: dark)">
-  <!-- GitHub Pages serves this page for any missing path, so links here are root-relative to the project site. -->
+  <meta name="theme-color" content="#c1f17b">
+  <!-- Pages serves this at arbitrary missing paths, so URLs start at the project root. -->
   <link rel="icon" type="image/png" href="/whisker/favicon.png">
   <link rel="apple-touch-icon" href="/whisker/apple-touch-icon.png">
-  <link rel="preload" href="/whisker/fonts/bodoni-moda.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/whisker/fonts/anybody.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/whisker/site.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
-  <div class="sheet sheet-fill">
-    <div class="zones zones-top" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span></div>
-    <div class="zones zones-side" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span></div>
-
-    <header>
-      <nav class="site-nav" aria-label="Main">
-        <a class="brand" href="/whisker/"><img src="/whisker/assets/icon.png" alt="" width="30" height="30">Whisker</a>
-        <a class="optional" href="/whisker/#parts">Parts</a>
-        <a href="/whisker/#source">Build</a>
-        <a href="/whisker/guide.html">Guide</a>
-        <a href="https://github.com/MrAshRhodes/whisker">GitHub</a>
-        <span class="dwg-no" aria-hidden="true">DWG WHK-404</span>
-      </nav>
-    </header>
-
-    <main id="main">
-      <section class="lost" aria-labelledby="lost-title">
-        <p class="big rise d1">ERROR 404 · SHEET NOT FOUND</p>
-        <h1 id="lost-title" class="rise d2">This sheet isn't in the set.</h1>
-        <p class="lede rise d3">The page you asked for doesn't exist, or it has moved. The overview and the user guide are both still here.</p>
-        <div class="cta rise d4">
-          <a class="btn btn-primary" href="/whisker/">Go to the overview</a>
-          <a class="btn" href="/whisker/guide.html">Read the guide</a>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="Main">
+      <a class="brand" href="/whisker/"><img src="/whisker/assets/icon.png" alt="" width="36" height="36">Whisker</a>
+      <span class="nav-purpose">Mouse &amp; trackball control for macOS</span>
+      <a href="/whisker/guide.html">Guide</a>
+      <a href="https://github.com/MrAshRhodes/whisker">GitHub <span aria-hidden="true">↗</span></a>
+      <a class="nav-build" href="/whisker/#source">Build from source <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="lost" aria-labelledby="lost-title">
+      <div>
+        <h1 id="lost-title">A wrong turn.</h1>
+        <p class="lede">404 — the page you're looking for has moved, or isn't here. Let's get you pointing in the right direction.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="/whisker/">Back to the playground <span aria-hidden="true">↗</span></a>
+          <a class="text-link" href="/whisker/guide.html">Read the guide <span aria-hidden="true">→</span></a>
         </div>
-      </section>
-    </main>
-
-    <footer class="tb">
-      <dl>
-        <div class="title"><dt>Project</dt><dd>Whisker</dd></div>
-        <div><dt>Document</dt><dd>Page not found</dd></div>
-        <div><dt>Requires</dt><dd>macOS 14 or later</dd></div>
-        <div><dt>Licence</dt><dd><a href="https://github.com/MrAshRhodes/whisker/blob/main/LICENSE">MIT</a></dd></div>
-        <div><dt>Sheet</dt><dd>404 of 2</dd></div>
-        <div><dt>Related</dt><dd class="footer-links"><a href="/whisker/">Overview</a><a href="/whisker/guide.html">Guide</a><a href="https://github.com/MrAshRhodes/whisker">Source</a><a href="https://github.com/MrAshRhodes/whisker/issues">Issues</a></dd></div>
-      </dl>
-    </footer>
-  </div>
+      </div>
+      <svg class="lost-arrow" viewBox="0 0 300 300" aria-hidden="true" focusable="false"><path d="M255 105H133V35L25 150L133 265V195H255Z"/></svg>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <a class="brand" href="/whisker/"><img src="/whisker/assets/icon.png" alt="" width="36" height="36">Whisker</a>
+    <p>Made for your way of moving.</p>
+    <nav aria-label="Footer"><a href="/whisker/">Playground</a><a href="/whisker/guide.html">Guide</a><a href="https://github.com/MrAshRhodes/whisker">Source</a><a href="https://github.com/MrAshRhodes/whisker/issues">Issues</a><a href="https://github.com/MrAshRhodes/whisker/blob/main/LICENSE">MIT licence</a></nav>
+  </footer>
 </body>
 </html>

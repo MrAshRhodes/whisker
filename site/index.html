@@ -4,338 +4,311 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'self'; form-action 'none'">
-  <title>Whisker · mouse and trackball customiser for macOS</title>
-  <meta name="description" content="Whisker is a free, open-source menu bar app for macOS that remaps mouse buttons, tunes the scroll wheel and sets pointer speed, with profiles for each app.">
+  <title>Whisker · mouse and trackball control for macOS</title>
+  <meta name="description" content="Same mouse. New moves. Whisker is a free, open-source macOS menu bar app for mouse buttons, scrolling and pointer speed, with profiles for each app.">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f3efe4" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0c2136" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#c1f17b">
   <link rel="canonical" href="https://mrashrhodes.github.io/whisker/">
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="preload" href="fonts/bodoni-moda.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/anybody.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/atkinson-next.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="site.css">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Whisker">
-  <meta property="og:title" content="Whisker · mouse and trackball customiser for macOS">
-  <meta property="og:description" content="Remap buttons, tune the wheel and set the pointer, with profiles for each app. Free and open source.">
+  <meta property="og:title" content="Whisker · same mouse, new moves">
+  <meta property="og:description" content="Your buttons. Your scroll. Your speed. Free, open-source mouse and trackball control for macOS.">
   <meta property="og:url" content="https://mrashrhodes.github.io/whisker/">
   <meta property="og:image" content="https://mrashrhodes.github.io/whisker/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Whisker: a technical drawing of a mouse with its buttons and wheel annotated.">
+  <meta property="og:image:alt" content="Same mouse. New moves. An oversized lilac mouse on Whisker's spring-green playground.">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Whisker · mouse and trackball customiser for macOS">
-  <meta name="twitter:description" content="Remap buttons, tune the wheel and set the pointer, with profiles for each app. Free and open source.">
+  <meta name="twitter:title" content="Whisker · same mouse, new moves">
+  <meta name="twitter:description" content="Free, open-source mouse and trackball control for macOS.">
   <meta name="twitter:image" content="https://mrashrhodes.github.io/whisker/og.png">
   <script src="site.js" defer></script>
 </head>
 <body>
+  <!--
+  THESIS: A familiar mouse can become a very personal instrument.
+  OWN-WORLD: Spring green, orchid objects, broad expressive type and tangible
+  controls make an original exhibition identity, not a software screenshot.
+  STORY: Change a button, turn the wheel, feel a different response, then build.
+  FIRST VIEWPORT: The actual profile demo is the hero; input, choice and result
+  form a diagonal conversation around a solid, oversized mouse.
+  FORM: Candidate 7, contemporary exhibition identity; diagonal-stage;
+  concept seed 33b8bf2f. Deliberate colour fields alternate with reading space.
+  -->
   <a class="skip-link" href="#main">Skip to content</a>
-  <div class="sheet">
-    <div class="zones zones-top" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span></div>
-    <div class="zones zones-side" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span></div>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="Main">
+      <a class="brand" href="./"><img src="assets/icon.png" alt="" width="36" height="36">Whisker</a>
+      <span class="nav-purpose">Mouse &amp; trackball control for macOS</span>
+      <a href="guide.html">Guide</a>
+      <a href="https://github.com/MrAshRhodes/whisker">GitHub <span aria-hidden="true">↗</span></a>
+      <a class="nav-build" href="#source">Build from source <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
 
-    <header>
-      <nav class="site-nav" aria-label="Main">
-        <a class="brand" href="./"><img src="assets/icon.png" alt="" width="30" height="30">Whisker</a>
-        <a class="optional" href="#anatomy">Drawing</a>
-        <a class="optional" href="#parts">Parts</a>
-        <a href="#source">Build</a>
-        <a href="guide.html">Guide</a>
-        <a href="https://github.com/MrAshRhodes/whisker">GitHub</a>
-        <span class="dwg-no" aria-hidden="true">DWG WHK-001 · SHEET 1/2</span>
-      </nav>
-    </header>
-
-    <main id="main">
-      <section class="hero" aria-labelledby="hero-title">
-        <div>
-          <p class="eyebrow rise d1">Mouse &amp; trackball customiser · macOS</p>
-          <h1 id="hero-title" class="rise d2">Whisker<span class="dot">.</span></h1>
-          <p class="lede rise d3">Every button, notch and nudge of your mouse, set <em>exactly</em> how you like it, for each app, from the menu bar.</p>
-          <div class="cta rise d4">
-            <a class="btn btn-primary" href="#source">Build from source</a>
-            <a class="btn" href="https://github.com/MrAshRhodes/whisker/releases">Releases</a>
-            <a class="btn" href="guide.html">Read the guide</a>
+  <main id="main">
+    <section class="playground" id="anatomy" aria-labelledby="hero-title">
+      <div class="stage" id="schematic">
+        <div class="hero-copy">
+          <h1 id="hero-title">Same mouse.<br>New moves.</h1>
+          <p class="lede">Give your mouse new shortcuts, a better scroll and a speed that feels right — in every app.</p>
+          <div class="cta">
+            <a class="btn btn-primary" href="#source">Build from source <span aria-hidden="true">↗</span></a>
+            <a class="text-link" href="guide.html">Meet Whisker <span aria-hidden="true">→</span></a>
           </div>
-          <div class="status rise d5">
-            <span class="label">Pre-release</span>
-            <p>No signed build is published yet, so for now you build Whisker from source. The first signed, notarised release and a Homebrew cask come next. Once they're out, this is all it takes:</p>
-            <div class="cmd"><pre><code id="brew-cmd">brew install --cask mrashrhodes/tap/whisker</code></pre><button class="copy" type="button" data-copy="brew-cmd" hidden>Copy</button></div>
-          </div>
-          <p class="meta-line rise d5"><span>macOS 14 Sonoma or later</span><span>Apple silicon and Intel</span><span>MIT licence</span><span>No telemetry</span></p>
+          <p class="release-note">Free &amp; open source. Pre-release — no signed download yet.</p>
         </div>
-        <div class="plate rise d3">
-          <svg class="plate-lines" viewBox="0 0 200 200" aria-hidden="true" focusable="false">
-            <g class="draw" fill="none" stroke="currentColor" stroke-width="0.6">
-              <path pathLength="1" d="M8 26V8h18M174 8h18v18M192 174v18h-18M26 192H8v-18"/>
-              <path pathLength="1" d="M100 22a78 78 0 1 1 0 156a78 78 0 1 1 0-156"/>
-              <path pathLength="1" d="M100 4v14M100 182v14M4 100h14M182 100h14"/>
-              <path class="accent" pathLength="1" stroke-width="1.6" d="M155.15 44.85A78 78 0 0 1 178 100"/>
-            </g>
-            <text x="32" y="14">FIG. 0</text>
-            <text x="168" y="190" text-anchor="end">SCALE 1:<tspan dx="-3.2">1</tspan></text>
+
+        <div class="object-stage">
+          <svg class="mouse-object" viewBox="0 0 460 490" role="img" aria-labelledby="drawing-title drawing-desc">
+            <title id="drawing-title">A mouse ready for new moves</title>
+            <desc id="drawing-desc">A solid lilac five-button mouse. Choose a part with the buttons below, or point to it here, to explore an example mapping. The wheel and its middle-button press can be selected separately.</desc>
+            <defs>
+              <linearGradient id="mouse-depth" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#eadbff"/>
+                <stop offset="0.5" stop-color="#d7b8f3"/>
+                <stop offset="1" stop-color="#b590d6"/>
+              </linearGradient>
+              <linearGradient id="mouse-edge" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#c7a5e2"/>
+                <stop offset="1" stop-color="#9770b9"/>
+              </linearGradient>
+            </defs>
+            <ellipse class="object-shadow" cx="245" cy="438" rx="134" ry="23"/>
+            <path class="shell-edge" fill="url(#mouse-edge)" d="M235 25C325 25 359 88 359 172L349 343C345 423 307 465 231 465C151 465 112 423 108 347L98 172C94 83 142 25 235 25Z"/>
+            <path class="shell" fill="url(#mouse-depth)" d="M229 16C317 16 351 79 351 163L341 334C337 414 299 452 223 452C145 452 106 414 102 338L92 163C88 76 136 16 229 16Z"/>
+            <path class="part mouse-button" data-hot="primary" d="M220 24C142 27 99 81 100 163L102 185C138 201 178 208 220 208Z"/>
+            <path class="part mouse-button" data-hot="secondary" d="M230 24C306 26 342 82 343 164L341 185C307 201 270 208 230 208Z"/>
+            <path class="mouse-seam" d="M105 200Q224 244 338 200"/>
+            <rect class="part side-button" data-hot="b5" x="78" y="208" width="27" height="55" rx="13"/>
+            <rect class="part side-button" data-hot="b4" x="81" y="275" width="27" height="55" rx="13"/>
+            <path class="button-arrow" d="m95 224-5 7 6 7m1 72-6-7 5-7"/>
+            <rect class="wheel-socket" x="202" y="65" width="45" height="111" rx="22"/>
+            <rect class="part wheel-body" data-hot="wheel" x="210" y="71" width="29" height="98" rx="14"/>
+            <path class="wheel-ribs" d="M215 83h19m-19 11h19m-19 54h19m-19 10h19"/>
+            <circle class="part wheel-press" data-hot="middle" cx="224.5" cy="120" r="12"/>
+            <path class="mouse-signature" d="m197 350 15 16 12-16 12 16 15-16"/>
           </svg>
-          <img src="assets/icon.png" alt="The Whisker app icon" width="256" height="256">
+          <div class="action-result">
+            <div class="callout" id="callout">
+              <h3>Button 4 <span class="label">Default</span></h3>
+              <ul class="maps"><li><span class="key">On its own</span><span class="act">Back<small>Sends ⌘[</small></span></li></ul>
+            </div>
+            <p class="result-note">Example mapping. Your mouse stays unchanged.</p>
+          </div>
+          <p class="visually-hidden" id="schematic-status" aria-live="polite"></p>
         </div>
-      </section>
 
-      <section class="section" id="anatomy" aria-labelledby="anatomy-title" data-reveal>
-        <div class="section-head">
-          <p class="eyebrow">General arrangement</p>
-          <h2 id="anatomy-title">Every control, <em>annotated</em>.</h2>
-          <p>Pick a part and a profile. Whisker looks at the app in front and the mouse you're using, picks the closest profile and lays it over Default, so an app profile only holds what it changes.</p>
-        </div>
-        <figure class="fig" id="schematic">
-          <div class="schematic">
-            <svg class="drawing" viewBox="0 0 400 440" role="img" aria-labelledby="drawing-title drawing-desc">
-              <title id="drawing-title">Plan view of a five-button mouse</title>
-              <desc id="drawing-desc">Balloons mark the primary button (1), secondary button (2), the wheel press or middle button (3, shown enlarged as detail A), button 4 (4), button 5 (5) and the wheel (W).</desc>
-              <g class="dims">
-                <path class="dim" d="M88 150V14M252 150V14M84 20h172M88 15v10M252 15v10"/>
-                <text class="dim-text" x="170" y="14" text-anchor="middle">64</text>
-                <path class="dim" d="M150 40H8M150 404H8M14 40v364M9 40h10M9 404h10"/>
-                <text class="dim-text" x="10" y="222" text-anchor="middle" transform="rotate(-90 10 222)">120</text>
-                <path class="dim" stroke-dasharray="10 3 2 3" d="M170 28v392"/>
-                <circle class="dim" stroke-dasharray="4 3" cx="170" cy="104" r="40"/>
-                <text class="tag" x="204" y="66">A</text>
-              </g>
-              <g class="draw">
-                <path class="body" pathLength="1" d="M170 40C222 40 250 80 252 150C254 230 250 330 226 380C210 412 130 412 114 380C90 330 86 230 88 150C90 80 118 40 170 40Z"/>
-                <path class="body" pathLength="1" d="M94 198v26a4 4 0 0 1-4 4h-6a4 4 0 0 1-4-4v-26a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4Z"/>
-                <path class="body" pathLength="1" d="M94 236v26a4 4 0 0 1-4 4h-6a4 4 0 0 1-4-4v-26a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4Z"/>
-                <path class="detail" pathLength="1" d="M170 40v36M170 132v52"/>
-                <path class="detail" pathLength="1" d="M89 172Q170 196 251 172"/>
-                <path class="body" pathLength="1" d="M170 76a10 10 0 0 1 10 10v36a10 10 0 0 1-20 0v-36a10 10 0 0 1 10-10Z"/>
-                <path class="detail" pathLength="1" d="M164 90h12M164 98h12M164 106h12M164 114h12M164 122h12"/>
-              </g>
-              <g class="detail-a">
-                <circle class="dim" stroke-dasharray="4 3" cx="330" cy="330" r="50"/>
-                <path class="detail" d="M286 322h24M350 322h24"/>
-                <path class="body" d="M348 334a18 18 0 1 1-36 0a18 18 0 1 1 36 0Z"/>
-                <path class="detail" d="M336 334a6 6 0 1 1-12 0a6 6 0 1 1 12 0Z"/>
-                <path class="detail" d="M330 288v20M325 302l5 7 5-7"/>
-                <path class="detail" d="M356 322a28 28 0 0 1 0 24M351 345l5 2 2-5"/>
-                <text class="dim-text" x="330" y="273" text-anchor="middle">PRESS</text>
-                <text class="dim-text" x="370" y="376">TURN</text>
-                <text class="tag" x="330" y="398" text-anchor="middle">DETAIL A · 2:<tspan dx="-3.6">1</tspan></text>
-              </g>
-              <text class="tag" x="170" y="432" text-anchor="middle">PLAN</text>
-              <path class="part" data-hot="primary" d="M170 40C118 40 90 80 88 150L89 172Q129.5 184 170 184Z"/>
-              <path class="part" data-hot="secondary" d="M170 40C222 40 250 80 252 150L251 172Q210.5 184 170 184Z"/>
-              <rect class="part" data-hot="b5" x="77" y="191" width="20" height="39" rx="5"/>
-              <rect class="part" data-hot="b4" x="77" y="230" width="20" height="39" rx="5"/>
-              <rect class="part" data-hot="wheel" x="156" y="72" width="28" height="64" rx="14"/>
-              <circle class="part" data-hot="middle" cx="330" cy="330" r="50"/>
-              <line class="leader" data-hot="primary" x1="49" y1="110" x2="124" y2="120"/>
-              <line class="leader" data-hot="secondary" x1="341" y1="150" x2="216" y2="124"/>
-              <line class="leader" data-hot="wheel" x1="341" y1="70" x2="182" y2="96"/>
-              <line class="leader" data-hot="b5" x1="49" y1="198" x2="80" y2="208"/>
-              <line class="leader" data-hot="b4" x1="49" y1="262" x2="80" y2="250"/>
-              <line class="leader" data-hot="middle" x1="281.4" y1="285.2" x2="294.6" y2="294.6"/>
-              <g class="balloon" data-hot="primary"><circle cx="40" cy="110" r="9"/><text x="40" y="110">1</text></g>
-              <g class="balloon" data-hot="secondary"><circle cx="350" cy="150" r="9"/><text x="350" y="150">2</text></g>
-              <g class="balloon" data-hot="middle"><circle cx="274" cy="280" r="9"/><text x="274" y="280">3</text></g>
-              <g class="balloon" data-hot="b4"><circle cx="40" cy="262" r="9"/><text x="40" y="262">4</text></g>
-              <g class="balloon" data-hot="b5"><circle cx="40" cy="198" r="9"/><text x="40" y="198">5</text></g>
-              <g class="balloon" data-hot="wheel"><circle cx="350" cy="70" r="9"/><text x="350" y="70">W</text></g>
-            </svg>
-            <div class="panel">
-              <div class="seg" role="group" aria-label="Profile" data-js-only hidden>
-                <button type="button" data-profile="default" aria-pressed="true" aria-controls="callout">Default</button>
-                <button type="button" data-profile="safari" aria-pressed="false" aria-controls="callout">Safari</button>
-                <button type="button" data-profile="finder" aria-pressed="false" aria-controls="callout">Finder</button>
-                <button type="button" data-profile="xcode" aria-pressed="false" aria-controls="callout">Xcode</button>
-              </div>
-              <div class="parts" role="group" aria-label="Part of the mouse" data-js-only hidden>
-                <button type="button" data-part="primary" aria-pressed="false" aria-controls="callout"><span class="num" aria-hidden="true">1</span>Primary</button>
-                <button type="button" data-part="secondary" aria-pressed="false" aria-controls="callout"><span class="num" aria-hidden="true">2</span>Secondary</button>
-                <button type="button" data-part="middle" aria-pressed="false" aria-controls="callout"><span class="num" aria-hidden="true">3</span>Middle</button>
-                <button type="button" data-part="b4" aria-pressed="true" aria-controls="callout"><span class="num" aria-hidden="true">4</span>Button 4</button>
-                <button type="button" data-part="b5" aria-pressed="false" aria-controls="callout"><span class="num" aria-hidden="true">5</span>Button 5</button>
-                <button type="button" data-part="wheel" aria-pressed="false" aria-controls="callout"><span class="num" aria-hidden="true">W</span>Wheel</button>
-              </div>
-              <div class="callout" id="callout">
-                <h3>Default profile <span class="label">Example</span></h3>
-                <ul class="maps">
-                  <li><span class="key">Button 4</span><span class="act">Back<small>Sends ⌘[</small></span></li>
-                  <li><span class="key">Button 5</span><span class="act">Forward<small>Sends ⌘]</small></span></li>
-                  <li><span class="key">⌃ + Middle</span><span class="act">Mission Control</span></li>
-                  <li><span class="key">⌥ + Wheel</span><span class="act">Volume Up / Down<small>Repeat for every notch</small></span></li>
-                </ul>
-              </div>
-              <p class="visually-hidden" id="schematic-status" aria-live="polite"></p>
-              <p class="note-small">Whisker ships with Back and Forward on buttons 4 and 5. The other mappings here are examples of what you might add.</p>
+        <div class="demo-console">
+          <div class="profile-picker" data-js-only hidden>
+            <p id="profile-label" class="control-caption">Try an app profile</p>
+            <div class="seg" role="group" aria-labelledby="profile-label">
+              <button type="button" data-profile="default" aria-pressed="true" aria-controls="callout">Default</button>
+              <button type="button" data-profile="safari" aria-pressed="false" aria-controls="callout">Safari</button>
+              <button type="button" data-profile="finder" aria-pressed="false" aria-controls="callout">Finder</button>
+              <button type="button" data-profile="xcode" aria-pressed="false" aria-controls="callout">Xcode</button>
             </div>
           </div>
-          <figcaption class="fig-caption"><span><b>Fig. 1</b> General arrangement, five-button mouse, with example app profiles</span><span>Not to scale</span></figcaption>
-        </figure>
-      </section>
-
-      <section class="section" id="tuning" aria-labelledby="tuning-title" data-reveal>
-        <div class="section-head">
-          <p class="eyebrow">Wheel and pointer</p>
-          <h2 id="tuning-title">Measured by the <em>notch</em>.</h2>
-          <p>Whisker counts wheel notches rather than pixels, and lets each mouse keep its own pointer feel. Both instruments below are live.</p>
+          <div class="part-picker" data-js-only hidden>
+            <p id="part-label" class="control-caption">Then pick a part</p>
+            <div class="parts" role="group" aria-labelledby="part-label">
+              <button type="button" data-part="primary" aria-pressed="false" aria-controls="callout">Primary</button>
+              <button type="button" data-part="secondary" aria-pressed="false" aria-controls="callout">Secondary</button>
+              <button type="button" data-part="middle" aria-pressed="false" aria-controls="callout">Middle</button>
+              <button type="button" data-part="b4" aria-pressed="true" aria-controls="callout">Button 4</button>
+              <button type="button" data-part="b5" aria-pressed="false" aria-controls="callout">Button 5</button>
+              <button type="button" data-part="wheel" aria-pressed="false" aria-controls="callout">Wheel</button>
+            </div>
+          </div>
+          <p class="demo-note">Back and Forward come ready on buttons 4 and 5. The rest? Examples of what you could make yours.</p>
         </div>
-        <div class="instruments">
-          <figure class="fig instrument" id="wheel-demo">
-            <h3>Wheel</h3>
-            <p>Set how far each notch scrolls, speed up quick spins, and reverse either direction for each mouse. Mapping the wheel to an action with a modifier key works too.</p>
-            <div class="wheel-demo" data-js-only hidden>
+        <p class="hero-facts"><span>macOS 14+</span><span>Apple silicon &amp; Intel</span><span>MIT licensed</span><a href="#tuning">Keep playing <span aria-hidden="true">↓</span></a></p>
+      </div>
+    </section>
+
+    <section class="scene scroll-scene" id="tuning" aria-labelledby="tuning-title">
+      <div class="scene-inner scroll-layout" id="wheel-demo">
+        <div class="scene-copy">
+          <h2 id="tuning-title">A little notch.<br>A longer way.</h2>
+          <p>One line or twenty. A gentle turn or a quick spin. Give your scroll wheel a rhythm of its own, without changing your trackpad.</p>
+          <div class="controls" data-js-only hidden>
+            <div class="control"><label for="lines">Lines per notch</label><output id="lines-out" for="lines">3</output><input type="range" id="lines" min="1" max="20" step="1" value="3"></div>
+            <div class="control"><label for="spin">Speed up quick spins</label><output id="spin-out" for="spin">0.50</output><input type="range" id="spin" min="0" max="1" step="0.05" value="0.5"></div>
+            <label class="check"><input type="checkbox" id="reverse"> Reverse vertical scrolling</label>
+          </div>
+          <p class="note-small">Reverse either direction for each mouse, scroll sideways with a modifier, or map a wheel turn to an action.</p>
+          <a class="text-link" href="guide.html#scrolling">All about scrolling <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="scroll-play">
+          <div class="wheel-demo" data-js-only hidden>
+            <div class="page-window" aria-label="Scroll preview">
+              <ol id="page-lines" aria-hidden="true">
+                <li>Little by little.</li><li>Or a lot at once.</li><li>Your wheel.</li><li>Your rhythm.</li>
+                <li>A new direction.</li><li>A little further.</li><li>Make it yours.</li><li>Keep on moving.</li>
+                <li>Little by little.</li><li>Or a lot at once.</li><li>Your wheel.</li><li>Your rhythm.</li>
+                <li>A new direction.</li><li>A little further.</li><li>Make it yours.</li><li>Keep on moving.</li>
+                <li>Little by little.</li><li>Or a lot at once.</li><li>Your wheel.</li><li>Your rhythm.</li>
+                <li>A new direction.</li><li>A little further.</li><li>Make it yours.</li><li>Keep on moving.</li>
+                <li>Little by little.</li><li>Or a lot at once.</li><li>Your wheel.</li><li>Your rhythm.</li>
+                <li>A new direction.</li><li>A little further.</li><li>Make it yours.</li><li>Keep on moving.</li>
+                <li>Little by little.</li><li>Or a lot at once.</li><li>Your wheel.</li><li>Your rhythm.</li>
+                <li>A new direction.</li><li>A little further.</li><li>Make it yours.</li><li>Keep on moving.</li>
+              </ol>
+            </div>
+            <div class="wheel-actions">
               <div class="wheel-buttons">
-                <button type="button" id="wheel-up" aria-label="Turn the wheel up one notch">▲</button>
-                <button type="button" id="wheel-down" aria-label="Turn the wheel down one notch">▼</button>
+                <button type="button" id="wheel-up" aria-label="Turn the wheel up one notch">↑</button>
+                <button type="button" id="wheel-down" aria-label="Turn the wheel down one notch">↓</button>
               </div>
-              <div class="page-window">
-                <ol id="page-lines" aria-hidden="true">
-                  <li>01</li><li>02</li><li>03</li><li>04</li><li>05</li><li>06</li><li>07</li><li>08</li><li>09</li><li>10</li>
-                  <li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li>
-                  <li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li>
-                  <li>31</li><li>32</li><li>33</li><li>34</li><li>35</li><li>36</li><li>37</li><li>38</li><li>39</li><li>40</li>
-                </ol>
-                <span class="readout" id="wheel-readout" aria-live="polite">Turn the wheel</span>
-              </div>
+              <span class="readout" id="wheel-readout" aria-live="polite">Turn a notch. See where it takes you.</span>
             </div>
-            <div class="controls" data-js-only hidden>
-              <div class="control"><label for="lines">Lines per notch</label><output id="lines-out" for="lines">3</output><input type="range" id="lines" min="1" max="20" step="1" value="3"></div>
-              <div class="control"><label for="spin">Speed up quick spins</label><output id="spin-out" for="spin">0.50</output><input type="range" id="spin" min="0" max="1" step="0.05" value="0.5"></div>
-              <label class="check"><input type="checkbox" id="reverse"> Reverse vertical scrolling</label>
-            </div>
+          </div>
+          <details class="plot-details">
+            <summary>What happens when you spin faster?</summary>
+            <p>Up to four notches a second, each notch moves your chosen number of lines. After that, the speed-up setting adds distance. This plot shows the difference; the preview above turns one notch at a time.</p>
             <svg class="plot" id="wheel-plot" viewBox="0 0 340 222" role="img" aria-labelledby="wheel-plot-title">
-              <title id="wheel-plot-title">Lines scrolled per notch against how fast the wheel spins. The line stays flat up to four notches a second, then climbs.</title>
+              <title id="wheel-plot-title">Lines per notch against wheel speed. The line stays flat until four notches a second, then rises with the speed-up setting.</title>
               <path class="gridline" d="M44 128.7H330M44 71.3H330M44 14H330"/>
               <path class="threshold" d="M101.2 186V14"/>
               <path class="axis" d="M44 14V186H330"/>
-              <path class="tick" d="M44 186v4M101.2 186v4M158.4 186v4M215.6 186v4M272.8 186v4M330 186v4M40 186h4M40 128.7h4M40 71.3h4M40 14h4"/>
-              <text x="44" y="199" text-anchor="middle">0</text><text x="101.2" y="199" text-anchor="middle">4</text><text x="158.4" y="199" text-anchor="middle">8</text><text x="215.6" y="199" text-anchor="middle">12</text><text x="272.8" y="199" text-anchor="middle">16</text><text x="330" y="199" text-anchor="middle">20</text>
-              <text x="36" y="189" text-anchor="end">0</text><text x="36" y="131.7" text-anchor="end">20</text><text x="36" y="74.3" text-anchor="end">40</text><text x="36" y="17" text-anchor="end">60</text>
-              <text x="330" y="216" text-anchor="end">SPIN RATE, NOTCHES PER SECOND</text>
-              <text x="105" y="26">SPEED-UP STARTS</text>
+              <text x="44" y="202" text-anchor="middle">0</text><text x="101.2" y="202" text-anchor="middle">4</text><text x="330" y="202" text-anchor="middle">20</text>
+              <text x="34" y="189" text-anchor="end">0</text><text x="34" y="131.7" text-anchor="end">20</text><text x="34" y="74.3" text-anchor="end">40</text><text x="34" y="17" text-anchor="end">60</text>
+              <text x="330" y="219" text-anchor="end">Notches per second</text>
+              <text x="50" y="27">Lines per notch</text>
               <path class="curve" d="M44 177.4L101.2 177.4L330 108.6"/>
             </svg>
-            <figcaption class="fig-caption"><span><b>Fig. 2</b> Lines per notch</span><span>L × (1 + k × max(0, rate − 4))</span></figcaption>
-          </figure>
+          </details>
+        </div>
+      </div>
+    </section>
 
-          <figure class="fig instrument" id="pointer-demo">
-            <h3>Pointer</h3>
-            <p>Give each mouse its own speed and acceleration, or turn acceleration off for a linear feel. More than double the speed and Whisker asks you to confirm, then changes back after five seconds if you don't.</p>
-            <div class="controls" data-js-only hidden>
-              <div class="control"><label for="speed">Speed</label><output id="speed-out" for="speed">×1.0</output><input type="range" id="speed" min="0.1" max="5" step="0.1" value="1"></div>
-              <div class="control"><label for="accel">Acceleration</label><output id="accel-out" for="accel">0.69</output><input type="range" id="accel" min="0" max="3" step="0.0625" value="0.6875"></div>
-              <label class="check"><input type="checkbox" id="linear"> Linear (no acceleration)</label>
+    <section class="scene pointer-scene" aria-labelledby="pointer-title">
+      <div class="scene-inner pointer-layout" id="pointer-demo">
+        <div class="scene-copy">
+          <h2 id="pointer-title">Find your<br>happy speed.</h2>
+          <p>A little more reach. A little less rush. Set speed and acceleration for each mouse, or go linear for a consistent hand-to-pointer feel.</p>
+          <a class="text-link" href="guide.html#pointer">Get a feel for pointer settings <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="pointer-play">
+          <div class="pointer-field" aria-hidden="true">
+            <span class="hand-mark">One hand move</span>
+            <div class="pointer-runway" id="pointer-runway">
+              <div class="pointer-trace"></div>
+              <div class="pointer-position"><svg class="motion-pointer" viewBox="0 0 100 120"><path d="M9 5L89 75L54 79L41 111Z"/></svg></div>
             </div>
+            <span class="field-caption">A different kind of reach.</span>
+          </div>
+          <button class="text-link play-button" type="button" id="pointer-play" data-js-only hidden>Try a move <span aria-hidden="true">↗</span></button>
+          <p class="visually-hidden" id="move-status" aria-live="polite"></p>
+          <p class="note-small">A feel-for-it illustration, not a measurement of macOS.</p>
+        </div>
+        <div class="pointer-settings">
+          <div class="controls" data-js-only hidden>
+            <div class="control"><label for="speed">Speed</label><output id="speed-out" for="speed">×1.0</output><input type="range" id="speed" min="0.1" max="5" step="0.1" value="1"></div>
+            <div class="control"><label for="accel">Acceleration</label><output id="accel-out" for="accel">0.69</output><input type="range" id="accel" min="0" max="3" step="0.0625" value="0.6875"></div>
+            <label class="check"><input type="checkbox" id="linear"> Linear (no acceleration)</label>
+          </div>
+          <div class="confirm" id="confirm" role="alert" hidden>
+            <p>Keep this pointer speed? It changes back in five seconds otherwise.</p>
+            <div class="row"><button type="button" class="btn" id="revert">Revert</button><button type="button" class="btn btn-primary" id="keep">Keep</button></div>
+            <div class="meter" aria-hidden="true"><span></span></div>
+          </div>
+          <p class="pointer-status" id="pointer-status" aria-live="polite"></p>
+        </div>
+        <div class="pointer-explanation">
+          <p><strong>A safety net for big jumps.</strong> More than double the speed and Whisker asks you to keep it. Do nothing for five seconds and it changes back. Try it here.</p>
+          <p class="note-small">Switching Whisker off or quitting restores your Mac's own pointer settings. Some mice don't accept pointer changes from macOS.</p>
+          <details class="plot-details">
+            <summary>See the illustrative response curve</summary>
             <svg class="plot" id="pointer-plot" viewBox="0 0 340 222" role="img" aria-labelledby="pointer-plot-title">
-              <title id="pointer-plot-title">Pointer travel against hand speed. Faster hand movement carries the pointer further when acceleration is on.</title>
+              <title id="pointer-plot-title">Illustrative pointer travel against hand speed. Acceleration makes faster hand movement carry the pointer further. The dashed line shows the original defaults.</title>
               <path class="gridline" d="M44 143H330M44 100H330M44 57H330M44 14H330"/>
               <path class="axis" d="M44 14V186H330"/>
-              <path class="tick" d="M44 186v4M115.5 186v4M187 186v4M258.5 186v4M330 186v4M40 186h4M40 143h4M40 100h4M40 57h4M40 14h4"/>
-              <text x="44" y="199" text-anchor="middle">STILL</text><text x="330" y="199" text-anchor="end">FAST</text>
-              <text x="36" y="189" text-anchor="end">0</text><text x="36" y="146" text-anchor="end">2</text><text x="36" y="103" text-anchor="end">4</text><text x="36" y="60" text-anchor="end">6</text><text x="36" y="17" text-anchor="end">8</text>
-              <text x="330" y="216" text-anchor="end">HAND SPEED</text>
-              <text x="50" y="26">POINTER TRAVEL</text>
+              <text x="44" y="202">Still</text><text x="330" y="202" text-anchor="end">Fast</text>
+              <text x="34" y="189" text-anchor="end">0</text><text x="34" y="103" text-anchor="end">4</text><text x="34" y="17" text-anchor="end">8</text>
+              <text x="330" y="219" text-anchor="end">Hand speed</text><text x="50" y="27">Pointer travel</text>
               <path class="ref" d="M44 186L115.5 179.1L187 169.3L258.5 156.6L330 140.9"/>
               <path class="curve" d="M44 186L115.5 179.1L187 169.3L258.5 156.6L330 140.9"/>
             </svg>
-            <div class="confirm" id="confirm" role="alert" hidden>
-              <p>Keep this pointer speed? It changes back in a few seconds otherwise.</p>
-              <div class="row"><button type="button" class="btn" id="revert">Revert</button><button type="button" class="btn btn-primary" id="keep">Keep</button></div>
-              <div class="meter" aria-hidden="true"><span></span></div>
-            </div>
-            <p class="note-small" id="pointer-status" aria-live="polite"></p>
-            <figcaption class="fig-caption"><span><b>Fig. 3</b> Pointer response, illustrative</span><span>Dashed: where you started</span></figcaption>
-          </figure>
+          </details>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section class="section" id="parts" aria-labelledby="parts-title" data-reveal>
-        <div class="section-head">
-          <p class="eyebrow">Parts list</p>
-          <h2 id="parts-title">What's in the <em>box</em>.</h2>
-          <p>Nine parts, one small menu bar app. Each links to its page in the guide.</p>
+    <section class="scene features-scene" id="parts" aria-labelledby="parts-title">
+      <div class="scene-inner features-layout">
+        <div class="scene-copy">
+          <h2 id="parts-title">Make room<br>for your habits.</h2>
+          <p>One small menu bar app. Change the things you care about. Leave the rest just as they are.</p>
+          <a class="text-link" href="guide.html">Every setting, explained <span aria-hidden="true">→</span></a>
         </div>
-        <table class="bom">
-          <caption>Parts list, Whisker for macOS</caption>
-          <thead><tr><th scope="col">Part</th><th scope="col">Description</th><th scope="col">Reference</th></tr></thead>
-          <tbody>
-            <tr><th scope="row"><span class="num">1</span>Buttons</th><td>Remap any of up to 32 mouse buttons, alone or with any mix of ⌘ ⌥ ⌃ ⇧. Press the button to record it rather than hunting for its number.</td><td><a href="guide.html#buttons">Settings › Buttons</a></td></tr>
-            <tr><th scope="row"><span class="num">2</span>Actions</th><td>Clicks and double-clicks with modifiers, keyboard shortcuts, back and forward, media keys, Mission Control and its friends, switching Spaces and apps, scrolling by lines, opening an app, file, folder or website, or nothing at all.</td><td><a href="guide.html#actions">Guide › Actions</a></td></tr>
-            <tr><th scope="row"><span class="num">3</span>Wheel</th><td>One to twenty lines per notch, a speed-up for quick spins, sideways scrolling while you hold a key, and each direction reversible for each mouse.</td><td><a href="guide.html#scrolling">Settings › Scrolling</a></td></tr>
-            <tr><th scope="row"><span class="num">4</span>Profiles</th><td>A Default profile, plus profiles for an app, a mouse, or one mouse in one app. The most specific match wins, and anything it leaves out comes from Default.</td><td><a href="guide.html#profiles">Settings › Applications</a></td></tr>
-            <tr><th scope="row"><span class="num">5</span>Pointer</th><td>Speed and acceleration for each mouse, or a linear response, where macOS lets the mouse be adjusted. Big jumps need confirming, and switching Whisker off or quitting puts the macOS settings back.</td><td><a href="guide.html#pointer">Settings › Pointer</a></td></tr>
-            <tr><th scope="row"><span class="num">6</span>Devices</th><td>Lists the mice and trackballs you've connected. Trackpads and touch mice such as Magic Mouse are left alone. To tell two or more mice apart, allow Input Monitoring.</td><td><a href="guide.html#devices">Settings › Devices</a></td></tr>
-            <tr><th scope="row"><span class="num">7</span>Menu bar</th><td>Switch Whisker on or off, see which profile is in use and open settings. Open it at login, or hide the icon altogether.</td><td><a href="guide.html#menu-bar">Menu bar</a></td></tr>
-            <tr><th scope="row"><span class="num">8</span>Settings file</th><td>Plain JSON you can export, import, read and back up. Whisker never saves over a file it couldn't read.</td><td><a href="guide.html#settings-file"><code>settings.json</code></a></td></tr>
-            <tr><th scope="row"><span class="num">9</span>Updates</th><td>Signed updates, checked never (the default), daily, weekly or monthly. Homebrew installs update through Homebrew.</td><td><a href="guide.html#updates">Settings › Updates</a></td></tr>
-          </tbody>
-        </table>
-      </section>
+        <dl class="feature-list">
+          <div><dt><a href="guide.html#buttons">More out of every button <span aria-hidden="true">↗</span></a></dt><dd>Remap up to 32 buttons, alone or with ⌘ ⌥ ⌃ ⇧. Press a button to record it. Your primary click stays protected unless you choose otherwise.</dd></div>
+          <div><dt><a href="guide.html#actions">A move for every moment <span aria-hidden="true">↗</span></a></dt><dd>Clicks, shortcuts, media keys, Mission Control, switching Spaces and apps, scrolling, opening a file or website. Or doing nothing at all.</dd></div>
+          <div><dt><a href="guide.html#profiles">Different app. Different moves. <span aria-hidden="true">↗</span></a></dt><dd>Profiles for an app, a mouse, or one mouse in one app. The closest match lays its changes over Default; everything else is inherited.</dd></div>
+          <div><dt><a href="guide.html#scrolling">A wheel that works your way <span aria-hidden="true">↗</span></a></dt><dd>One to twenty lines per notch, extra distance for quick spins, sideways scrolling with a key, and reversible directions for each mouse.</dd></div>
+          <div><dt><a href="guide.html#pointer">Your own sense of speed <span aria-hidden="true">↗</span></a></dt><dd>Per-mouse speed and acceleration, or a linear response. Big jumps have a safety check; switching Whisker off restores macOS settings.</dd></div>
+          <div><dt><a href="guide.html#devices">One mouse, or a few <span aria-hidden="true">↗</span></a></dt><dd>Mice and trackballs welcome. Trackpads and touch mice are left alone. Optional Input Monitoring tells multiple mice apart.</dd></div>
+          <div><dt><a href="guide.html#menu-bar">There when you need it <span aria-hidden="true">↗</span></a></dt><dd>Switch on or off, see your current profile and open settings from the menu bar. Start at login, or hide the icon altogether.</dd></div>
+          <div><dt><a href="guide.html#settings-file">Settings you can take with you <span aria-hidden="true">↗</span></a></dt><dd>Plain JSON to export, import and back up. Whisker never saves over a file it couldn't read.</dd></div>
+          <div><dt><a href="guide.html#updates">Updates on your terms <span aria-hidden="true">↗</span></a></dt><dd>Signed update support, with checks off by default. Source builds are rebuilt by you; future Homebrew installs update through Homebrew.</dd></div>
+        </dl>
+      </div>
+    </section>
 
-      <section class="section" id="notes" aria-labelledby="notes-title" data-reveal>
-        <div class="notes-grid">
-          <div>
-            <p class="eyebrow">Notes</p>
-            <h2 id="notes-title">Private by <em>design</em>.</h2>
-            <ol class="notes">
-              <li><p>No telemetry, analytics or accounts.</p></li>
-              <li><p>The only thing Whisker asks the network for is an update check, and that's off until you pick a schedule or press Check Now.</p></li>
-              <li><p>Accessibility access lets Whisker see and change mouse input. It doesn't read what you type.</p></li>
-              <li><p>Your settings stay on your Mac, in <code>~/Library/Application Support/Whisker/settings.json</code>.</p></li>
-              <li><p>Every line is open source under the MIT licence, <a href="https://github.com/MrAshRhodes/whisker">on GitHub</a>.</p></li>
-            </ol>
-          </div>
-          <div>
-            <p class="eyebrow">Next revision</p>
-            <h2>On the <em>drawing board</em>.</h2>
-            <p>Not in Whisker yet, but planned:</p>
-            <ul class="roadmap">
-              <li>Tilt-wheel buttons</li><li>Two-button chords</li><li>Auto-scroll</li><li>Click lock</li><li>Shortcut sequences</li><li>Pointer speed presets</li><li>Smooth scrolling for notched wheels</li>
-            </ul>
-          </div>
+    <section class="scene privacy-scene" id="notes" aria-labelledby="notes-title">
+      <div class="scene-inner privacy-layout">
+        <div>
+          <h2 id="notes-title">At home<br>on your Mac.</h2>
+          <p class="privacy-lede">Whisker has no accounts, analytics or telemetry.</p>
+          <p>Accessibility access lets Whisker change mouse input. It doesn't read what you type. Your settings stay on your Mac, in <code>~/Library/Application Support/Whisker/settings.json</code>.</p>
+          <p>The only network request is an update check — off until you choose a schedule or press Check Now.</p>
+          <a class="text-link" href="https://github.com/MrAshRhodes/whisker">Open source. Look for yourself. <span aria-hidden="true">↗</span></a>
         </div>
-      </section>
+        <div class="future">
+          <h3>More moves to come.</h3>
+          <p>Planned, not in Whisker yet:</p>
+          <ul class="roadmap">
+            <li>Tilt-wheel buttons</li><li>Two-button chords</li><li>Auto-scroll</li><li>Click lock</li><li>Shortcut sequences</li><li>Pointer speed presets</li><li>Smooth scrolling for notched wheels</li>
+          </ul>
+        </div>
+      </div>
+    </section>
 
-      <section class="section" id="source" aria-labelledby="source-title" data-reveal>
-        <div class="section-head">
-          <p class="eyebrow">Build</p>
-          <h2 id="source-title">Build it <em>today</em>.</h2>
-          <p>Until the first signed release, you build Whisker yourself. It takes a couple of minutes with Apple's free developer tools.</p>
+    <section class="scene source-scene" id="source" aria-labelledby="source-title">
+      <div class="scene-inner source-layout">
+        <div class="scene-copy">
+          <h2 id="source-title">Make your<br>next move.</h2>
+          <p>Whisker is free, open source and still in pre-release. <strong>No signed download is published yet.</strong> For now, build your own copy.</p>
+          <a class="text-link" href="guide.html#getting-started">Your first-run guide <span aria-hidden="true">→</span></a>
         </div>
-        <div class="notes-grid">
-          <div>
-            <ol class="steps">
-              <li><p>Install Xcode, or just the Command Line Tools with <code class="nowrap">xcode-select --install</code>. Whisker needs Swift 5.9 or later.</p></li>
-              <li><p>Clone the repository and build the app:</p></li>
-            </ol>
-            <div class="cmd"><pre><code id="build-cmd">git clone https://github.com/MrAshRhodes/whisker.git
+        <div class="build-instructions">
+          <h3>Build from source</h3>
+          <p>You'll need macOS 14+, Swift 5.9+, and Xcode or the free Command Line Tools: <code class="nowrap">xcode-select --install</code>.</p>
+          <div class="cmd"><pre><code id="build-cmd">git clone https://github.com/MrAshRhodes/whisker.git
 cd whisker
 make app</code></pre><button class="copy" type="button" data-copy="build-cmd" hidden>Copy</button></div>
-            <p class="cmd-note">The app lands in <code>dist/Whisker.app</code>. Move it to Applications and open it, or use <code class="nowrap">make run</code> to build and open in one go.</p>
-          </div>
-          <div>
-            <p class="eyebrow">Good to know</p>
-            <ol class="notes">
-              <li><p>Your build is signed just for your Mac, so macOS asks for Accessibility access again after each rebuild.</p></li>
-              <li><p>A copy you built can't update itself. Pull the latest source and build again.</p></li>
-              <li><p>After the first release, download signed builds from <a href="https://github.com/MrAshRhodes/whisker/releases">Releases</a> or install with Homebrew.</p></li>
-              <li><p>New to Whisker? The <a href="guide.html#getting-started">guide</a> walks through the first run.</p></li>
-            </ol>
-          </div>
+          <p>The app lands in <code>dist/Whisker.app</code>. Move it to Applications and open it, or use <code class="nowrap">make run</code> to build and open in one go.</p>
+          <p class="note-small">Your build is signed just for your Mac, so Accessibility access may need resetting after a rebuild. Source builds can't update themselves: pull the latest source and build again.</p>
+          <details class="release-details">
+            <summary>When signed releases arrive</summary>
+            <p>The first signed, notarised build and Homebrew cask come next. Once published, you'll be able to use the <a href="https://github.com/MrAshRhodes/whisker/releases">Releases page</a> or this command:</p>
+            <div class="cmd"><pre><code id="brew-cmd">brew install --cask mrashrhodes/tap/whisker</code></pre><button class="copy" type="button" data-copy="brew-cmd" hidden>Copy</button></div>
+          </details>
         </div>
-      </section>
-    </main>
+      </div>
+    </section>
+  </main>
 
-    <footer class="tb">
-      <dl>
-        <div class="title"><dt>Project</dt><dd>Whisker</dd></div>
-        <div><dt>Description</dt><dd>Mouse and trackball customiser for macOS</dd></div>
-        <div><dt>Requires</dt><dd>macOS 14 or later</dd></div>
-        <div><dt>Licence</dt><dd><a href="https://github.com/MrAshRhodes/whisker/blob/main/LICENSE">MIT</a></dd></div>
-        <div><dt>Sheet</dt><dd>1 of 2</dd></div>
-        <div><dt>Related</dt><dd class="footer-links"><a href="guide.html">Guide</a><a href="https://github.com/MrAshRhodes/whisker">Source</a><a href="https://github.com/MrAshRhodes/whisker/blob/main/CHANGELOG.md">Changelog</a><a href="https://github.com/MrAshRhodes/whisker/releases">Releases</a><a href="https://github.com/MrAshRhodes/whisker/issues">Issues</a></dd></div>
-      </dl>
-    </footer>
-  </div>
+  <footer class="site-footer">
+    <a class="brand" href="./"><img src="assets/icon.png" alt="" width="36" height="36">Whisker</a>
+    <p>Made for your way of moving.</p>
+    <nav aria-label="Footer"><a href="guide.html">Guide</a><a href="https://github.com/MrAshRhodes/whisker">Source</a><a href="https://github.com/MrAshRhodes/whisker/blob/main/CHANGELOG.md">Changelog</a><a href="https://github.com/MrAshRhodes/whisker/releases">Releases</a><a href="https://github.com/MrAshRhodes/whisker/issues">Issues</a><a href="https://github.com/MrAshRhodes/whisker/blob/main/LICENSE">MIT licence</a></nav>
+  </footer>
 </body>
 </html>

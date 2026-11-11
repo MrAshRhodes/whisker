@@ -7,11 +7,11 @@
   <title>Whisker user guide</title>
   <meta name="description" content="How to set up and use Whisker: permissions, buttons and actions, scrolling, pointer speed, profiles, the settings file, updates and troubleshooting.">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f3efe4" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0c2136" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#c1f17b">
   <link rel="canonical" href="https://mrashrhodes.github.io/whisker/guide.html">
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="fonts/anybody.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/atkinson-next.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="site.css">
   <meta property="og:type" content="article">
@@ -22,25 +22,20 @@
   <meta property="og:image" content="https://mrashrhodes.github.io/whisker/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Whisker: a technical drawing of a mouse with its buttons and wheel annotated.">
+  <meta property="og:image:alt" content="Same mouse. New moves. An oversized lilac mouse on Whisker's spring-green playground.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://mrashrhodes.github.io/whisker/og.png">
   <script src="site.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
-  <div class="sheet">
-    <div class="zones zones-top" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span></div>
-    <div class="zones zones-side" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span></div>
-
-    <header>
+    <header class="site-header">
       <nav class="site-nav" aria-label="Main">
-        <a class="brand" href="./"><img src="assets/icon.png" alt="" width="30" height="30">Whisker</a>
-        <a class="optional" href="./#parts">Parts</a>
-        <a href="./#source">Build</a>
+        <a class="brand" href="./"><img src="assets/icon.png" alt="" width="36" height="36">Whisker</a>
+        <span class="nav-purpose">Mouse &amp; trackball control for macOS</span>
         <a href="guide.html" aria-current="page">Guide</a>
-        <a href="https://github.com/MrAshRhodes/whisker">GitHub</a>
-        <span class="dwg-no" aria-hidden="true">DWG WHK-002 · SHEET 2/2</span>
+        <a href="https://github.com/MrAshRhodes/whisker">GitHub <span aria-hidden="true">↗</span></a>
+        <a class="nav-build" href="./#source">Build from source <span aria-hidden="true">↗</span></a>
       </nav>
     </header>
 
@@ -66,8 +61,7 @@
 
       <article class="doc">
         <header class="doc-head">
-          <p class="eyebrow">User guide</p>
-          <h1>Using <em>Whisker</em></h1>
+          <h1>Your Whisker guide.</h1>
           <p class="lede">Whisker is a menu bar app that changes what your mouse's buttons, wheel and pointer do, with profiles for each app and each mouse. This guide covers every setting.</p>
         </header>
 
@@ -170,7 +164,7 @@ make app</code></pre></li>
           <p><span class="ui">Reverse vertical scrolling</span> and <span class="ui">Reverse horizontal scrolling</span> are set for each mouse, so a mouse can scroll one way while your trackpad keeps the macOS setting. Reversing works on smooth scrolling too.</p>
           <h3 id="lines-per-notch">Lines per notch</h3>
           <p>Turn on <span class="ui">Set how far each notch scrolls</span> and choose 1 to 20 lines. With it off, each notch scrolls the distance macOS normally uses.</p>
-          <p><span class="ui">Speed up quick spins</span> makes fast spins travel further. Up to four notches a second, each notch scrolls the number of lines you chose. Faster than that, each notch scrolls more, in proportion to how fast you're spinning, measured over the last fifth of a second. The <a href="./#tuning">wheel figure</a> on the home page plots it.</p>
+          <p><span class="ui">Speed up quick spins</span> makes fast spins travel further. Up to four notches a second, each notch scrolls the number of lines you chose. Faster than that, each notch scrolls more, in proportion to how fast you're spinning, measured over the last fifth of a second. Try it in the <a href="./#tuning">scroll playground</a> on the home page.</p>
           <p><span class="ui">Scroll sideways while holding</span> a modifier key turns the wheel into a horizontal scroll while that key is down.</p>
           <h3 id="wheel-actions">Wheel actions</h3>
           <p>The wheel can trigger actions too. In <span class="ui">Settings › Buttons</span>, choose <span class="ui">Record Button…</span> and turn the wheel: each direction (up, down, left and right) is its own trigger, with any modifier keys. <kbd>⌥</kbd> + wheel up for Volume Up is a common one. Most people keep a modifier on wheel mappings so that plain scrolling still works.</p>
@@ -229,6 +223,7 @@ make app</code></pre></li>
 
         <section aria-labelledby="switching-installs">
           <h2 id="switching-installs">Switching an install between Homebrew and direct downloads</h2>
+          <p>These installation options will be available after the first signed release. Until then, <a href="#getting-started">build from source</a>.</p>
           <p>Your settings live outside the app, so they carry over either way.</p>
           <h3>From Homebrew to a direct download</h3>
           <ol>
@@ -277,16 +272,10 @@ make app</code></pre></li>
       </article>
     </main>
 
-    <footer class="tb">
-      <dl>
-        <div class="title"><dt>Project</dt><dd>Whisker</dd></div>
-        <div><dt>Document</dt><dd>User guide</dd></div>
-        <div><dt>Requires</dt><dd>macOS 14 or later</dd></div>
-        <div><dt>Licence</dt><dd><a href="https://github.com/MrAshRhodes/whisker/blob/main/LICENSE">MIT</a></dd></div>
-        <div><dt>Sheet</dt><dd>2 of 2</dd></div>
-        <div><dt>Related</dt><dd class="footer-links"><a href="./">Overview</a><a href="https://github.com/MrAshRhodes/whisker">Source</a><a href="https://github.com/MrAshRhodes/whisker/blob/main/CHANGELOG.md">Changelog</a><a href="https://github.com/MrAshRhodes/whisker/releases">Releases</a><a href="https://github.com/MrAshRhodes/whisker/issues">Issues</a></dd></div>
-      </dl>
+    <footer class="site-footer">
+      <a class="brand" href="./"><img src="assets/icon.png" alt="" width="36" height="36">Whisker</a>
+      <p>Made for your way of moving.</p>
+      <nav aria-label="Footer"><a href="./">Playground</a><a href="https://github.com/MrAshRhodes/whisker">Source</a><a href="https://github.com/MrAshRhodes/whisker/blob/main/CHANGELOG.md">Changelog</a><a href="https://github.com/MrAshRhodes/whisker/releases">Releases</a><a href="https://github.com/MrAshRhodes/whisker/issues">Issues</a><a href="https://github.com/MrAshRhodes/whisker/blob/main/LICENSE">MIT licence</a></nav>
     </footer>
-  </div>
 </body>
 </html>

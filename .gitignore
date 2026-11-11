@@ -36,3 +36,6 @@ research/screens/
 *private?key*
 .env
 .env.*
+
+# Local design-tool cache (machine-specific paths)
+.impeccable/hook.cache.json
