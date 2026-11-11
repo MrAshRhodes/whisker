@@ -163,7 +163,7 @@ extension WhiskerSettings {
         case .shortcut(let shortcut, _):
             guard shortcut.keyCode < 0x80 else { return "Key code \(shortcut.keyCode) is not a key." }
         case .open(let url):
-            guard let parsed = URL(string: url), parsed.scheme != nil else { return "“\(url)” is not an app, file or web address." }
+            guard Action.openURL(for: url) != nil else { return "“\(url)” is not an app, file or web address." }
         default:
             break
         }

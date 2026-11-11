@@ -97,6 +97,20 @@ struct SettingsTests {
         #expect(WhiskerSettings().validate().isEmpty)
     }
 
+    @Test func openPathsSurviveRepair() throws {
+        var settings = WhiskerSettings()
+        let paths = ["/Applications/Safari.app", "~/Documents", "https://example.com"]
+        settings.profiles[0].mappings = paths.enumerated().map { index, path in
+            Mapping(trigger: .button(3 + index), action: .open(url: path))
+        }
+        #expect(settings.validate().isEmpty)
+        let reloaded = try SettingsCodec.decodeRepairing(SettingsCodec.encode(settings)).settings
+        #expect(reloaded.profiles[0].mappings == settings.profiles[0].mappings)
+        #expect(Action.openURL(for: "~/Documents")?.path == NSString("~/Documents").expandingTildeInPath)
+        #expect(Action.openURL(for: "/Applications/Safari.app")?.isFileURL == true)
+        #expect(Action.openURL(for: "no scheme") == nil)
+    }
+
     @Test func repairFixesEveryKindOfProblem() {
         var settings = WhiskerSettings(schemaVersion: 1, profiles: [])
         settings.devices["not-a-device"] = DeviceSettings()

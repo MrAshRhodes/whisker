@@ -232,8 +232,20 @@ public enum Action: Hashable, Sendable {
         }
     }
 
+    /// What an Open action points at: an absolute or `~` path becomes a file URL, anything else must be a URL
+    /// with a scheme. Nil when the text is neither.
+    public static func openURL(for string: String) -> URL? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") {
+            return URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath)
+        }
+        guard let url = URL(string: trimmed), url.scheme != nil else { return nil }
+        return url
+    }
+
     static func openTitle(_ string: String) -> String {
-        guard let url = URL(string: string), !string.isEmpty else { return "Nothing" }
+        guard let url = openURL(for: string) else { return "Nothing" }
         if url.isFileURL {
             let name = url.deletingPathExtension().lastPathComponent
             return name.isEmpty ? url.path : name

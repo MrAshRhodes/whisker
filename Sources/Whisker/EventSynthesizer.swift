@@ -191,13 +191,7 @@ final class EventSynthesizer: @unchecked Sendable {
     }
 
     private static func open(_ string: String) {
-        let url: URL?
-        if string.hasPrefix("/") || string.hasPrefix("~") {
-            url = URL(fileURLWithPath: (string as NSString).expandingTildeInPath)
-        } else {
-            url = URL(string: string)
-        }
-        guard let url else {
+        guard let url = Action.openURL(for: string) else {
             NSSound.beep()
             return
         }
