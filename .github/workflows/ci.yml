@@ -44,6 +44,9 @@ jobs:
       - name: Test the update feed generator
         run: node --test .github/scripts/appcast.test.cjs
 
+      - name: Test the product site
+        run: node --test .github/scripts/site.test.cjs
+
       - name: Check the changelog
         run: |
           node --test .github/scripts/changelog.test.cjs
