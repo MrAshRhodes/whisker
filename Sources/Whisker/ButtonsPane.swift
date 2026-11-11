@@ -394,27 +394,23 @@ struct OpenField: View {
     }
 }
 
-/// Warns when the system keyboard shortcut an action posts is turned off or has no key.
+/// Warns when the system keyboard shortcut an action posts is turned off or has no key and there's no
+/// app to open instead.
 struct SystemShortcutNote: View {
     let action: Action
 
     var body: some View {
-        if let id = action.systemShortcut {
-            switch SystemShortcutReader().status(of: id) {
-            case .available:
-                EmptyView()
-            case .disabled, .unassigned:
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("“\(id.title)” is turned off in Keyboard Shortcuts, so this action won’t do anything until you turn it on.",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.footnote).foregroundStyle(.orange)
-                    Button("Open Keyboard Shortcuts") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
-                            NSWorkspace.shared.open(url)
-                        }
+        if case .unavailable(let id) = action.systemShortcutPlan(SystemShortcutReader()) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("“\(id.title)” is turned off in Keyboard Shortcuts, so this action won’t do anything until you turn it on.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+                Button("Open Keyboard Shortcuts") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
+                        NSWorkspace.shared.open(url)
                     }
-                    .controlSize(.small)
                 }
+                .controlSize(.small)
             }
         }
     }

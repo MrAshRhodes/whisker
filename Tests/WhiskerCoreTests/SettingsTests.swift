@@ -196,6 +196,38 @@ struct SettingsTests {
         #expect(DeviceIdentity.isExcluded(transport: "Bluetooth", product: "Magic Trackpad", vendorID: 0x05AC))
         #expect(DeviceIdentity.isExcluded(transport: "Bluetooth", product: "Magic Mouse", vendorID: 0x05AC))
         #expect(!DeviceIdentity.isExcluded(transport: "USB", product: "USB Receiver", vendorID: 0x046D))
+        #expect(DeviceIdentity.excludedKind(transport: "Bluetooth", product: "Magic Mouse", vendorID: 0x05AC) == .touchMouse)
+        #expect(DeviceIdentity.excludedKind(transport: "Bluetooth", product: "Magic Trackpad", vendorID: 0x05AC) == .trackpad)
+        #expect(DeviceIdentity.excludedKind(transport: "FIFO", product: "Apple Internal Keyboard / Trackpad", vendorID: 0x05AC) == .trackpad)
+        #expect(!ExcludedDeviceKind.touchMouse.listLabel.localizedCaseInsensitiveContains("trackpad"))
+    }
+
+    @Test func pointerSettingsOnlyApplyWhileWhiskerAndTheDeviceAreOn() {
+        let custom = PointerSettings(speed: 2)
+        var settings = WhiskerSettings()
+        settings.devices["046d:c52b"] = DeviceSettings(name: "Mouse", pointer: custom)
+        #expect(settings.activePointer(for: "046d:c52b") == custom)
+        #expect(settings.activePointer(for: "1234:5678") == nil)
+
+        settings.general.enabled = false
+        #expect(settings.activePointer(for: "046d:c52b") == nil)
+
+        settings.general.enabled = true
+        settings.devices["046d:c52b"]?.enabled = false
+        #expect(settings.activePointer(for: "046d:c52b") == nil)
+    }
+
+    @Test func missionControlAndLaunchpadOpenTheirAppWhenTheShortcutIsOff() {
+        let off = SymbolicHotKeyTable(entries: Dictionary(uniqueKeysWithValues: SystemShortcutID.allCases.map { ($0.rawValue, SystemShortcutStatus.disabled) }))
+        #expect(Action.missionControl(.missionControl).systemShortcutPlan(off) == .openApp(["Mission Control"]))
+        #expect(Action.missionControl(.launchpad).systemShortcutPlan(off) == .openApp(["Launchpad", "Apps"]))
+        #expect(Action.missionControl(.showDesktop).systemShortcutPlan(off) == .unavailable(.showDesktop))
+        #expect(Action.space(.left).systemShortcutPlan(off) == .unavailable(.moveLeftSpace))
+        #expect(Action.none.systemShortcutPlan(off) == nil)
+
+        let shortcut = KeyShortcut(keyCode: 0x7E, modifiers: .control)
+        let on = SymbolicHotKeyTable(entries: [SystemShortcutID.missionControl.rawValue: .available(shortcut)])
+        #expect(Action.missionControl(.missionControl).systemShortcutPlan(on) == .post(shortcut))
     }
 
     @Test func attributorPrefersRecentReportsThenTheOnlyMouse() {

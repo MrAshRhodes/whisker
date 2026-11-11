@@ -66,7 +66,8 @@ public struct PointingDevice: Hashable, Sendable, Identifiable {
     public var serial: String?
     public var transport: String?
     /// Trackpads and touch mice: listed, but Whisker leaves them alone.
-    public var isExcluded: Bool
+    public var excludedKind: ExcludedDeviceKind?
+    public var isExcluded: Bool { excludedKind != nil }
     /// `HIDInterfaceInfo.physicalKey` of every device that makes up this entry.
     public var physicalKeys: Set<String>
 }
@@ -92,7 +93,7 @@ public enum PointingDeviceClassifier {
                 name: DeviceIdentity.displayName(product: pointing.product, vendorID: pointing.vendorID, productID: pointing.productID),
                 vendorID: pointing.vendorID, productID: pointing.productID, serial: identity.serial,
                 transport: pointing.transport,
-                isExcluded: DeviceIdentity.isExcluded(transport: pointing.transport, product: pointing.product, vendorID: pointing.vendorID),
+                excludedKind: DeviceIdentity.excludedKind(transport: pointing.transport, product: pointing.product, vendorID: pointing.vendorID),
                 physicalKeys: [key]
             )
         }

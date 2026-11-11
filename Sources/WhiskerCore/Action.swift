@@ -88,7 +88,16 @@ public enum MissionControlTarget: String, Codable, CaseIterable, Sendable {
     }
 
     /// Whether opening an app in /System/Applications does the same job when the shortcut is off.
-    public var hasAppFallback: Bool { self == .missionControl || self == .launchpad }
+    public var hasAppFallback: Bool { !fallbackApps.isEmpty }
+
+    /// Apps in /System/Applications to try, in order, when the shortcut is off. Launchpad became Apps in macOS 26.
+    public var fallbackApps: [String] {
+        switch self {
+        case .missionControl: return ["Mission Control"]
+        case .launchpad: return ["Launchpad", "Apps"]
+        default: return []
+        }
+    }
 
     public var systemShortcut: SystemShortcutID {
         switch self {
@@ -170,6 +179,20 @@ public enum Action: Hashable, Sendable {
         case .space(let direction): return direction.systemShortcut
         default: return nil
         }
+    }
+
+    /// How a Mission Control or Spaces action gets carried out with the user's current keyboard shortcuts:
+    /// post the shortcut, open the fallback app when the shortcut is off, or nothing (nil) when neither works.
+    public func systemShortcutPlan(_ shortcuts: SystemShortcutProviding) -> SystemShortcutPlan? {
+        let id: SystemShortcutID
+        switch self {
+        case .missionControl(let target): id = target.systemShortcut
+        case .space(let direction): id = direction.systemShortcut
+        default: return nil
+        }
+        if let shortcut = shortcuts.status(of: id).shortcut { return .post(shortcut) }
+        if case .missionControl(let target) = self, !target.fallbackApps.isEmpty { return .openApp(target.fallbackApps) }
+        return .unavailable(id)
     }
 
     /// One line describing the action, for lists and the menu bar.
@@ -356,4 +379,12 @@ extension Action: Codable {
             try container.encode(url, forKey: .url)
         }
     }
+}
+
+public enum SystemShortcutPlan: Equatable, Sendable {
+    case post(KeyShortcut)
+    /// Open the first of these apps in /System/Applications that exists.
+    case openApp([String])
+    /// The shortcut is off or unassigned and there's no app to fall back on.
+    case unavailable(SystemShortcutID)
 }

@@ -47,12 +47,28 @@ public struct DeviceIdentity: Hashable, Sendable, Identifiable, CustomStringConv
 
     /// Trackpads and touch mice keep their own gestures and settings, so Whisker leaves them alone.
     public static func isExcluded(transport: String?, product: String?, vendorID: Int) -> Bool {
-        let transport = transport?.uppercased() ?? ""
-        if transport == "FIFO" || transport == "SPI" { return true }
+        excludedKind(transport: transport, product: product, vendorID: vendorID) != nil
+    }
+
+    public static func excludedKind(transport: String?, product: String?, vendorID: Int) -> ExcludedDeviceKind? {
         let product = product?.lowercased() ?? ""
-        if product.contains("trackpad") { return true }
-        if vendorID == appleVendorID, product.contains("magic mouse") { return true }
-        return false
+        if vendorID == appleVendorID, product.contains("magic mouse") { return .touchMouse }
+        let transport = transport?.uppercased() ?? ""
+        if transport == "FIFO" || transport == "SPI" || product.contains("trackpad") { return .trackpad }
+        return nil
+    }
+}
+
+/// Why a pointing device is left alone.
+public enum ExcludedDeviceKind: String, Hashable, Sendable {
+    case trackpad, touchMouse
+
+    /// What the Devices list says about it.
+    public var listLabel: String {
+        switch self {
+        case .trackpad: return "Trackpad — left alone"
+        case .touchMouse: return "Touch mouse — left alone"
+        }
     }
 }
 

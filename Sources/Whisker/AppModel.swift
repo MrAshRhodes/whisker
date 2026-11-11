@@ -127,6 +127,7 @@ final class AppModel: ObservableObject {
             if trusted { self.startEngine() } else { self.stopEngine() }
         }
         if permission.isTrusted { startEngine() }
+        permission.startPolling()
 
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
@@ -157,6 +158,7 @@ final class AppModel: ObservableObject {
     }
 
     func shutdown() {
+        permission.stopPolling()
         engine.stop()
         pointer.restoreAll()
         runState.cleanExit = true

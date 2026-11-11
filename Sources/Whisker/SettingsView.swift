@@ -479,7 +479,7 @@ struct DevicesPane: View {
                 }
                 ForEach(devices.devices) { device in
                     if device.isExcluded {
-                        LabeledContent(device.name) { Text("Trackpad — left alone").foregroundStyle(.secondary) }
+                        LabeledContent(device.name) { Text(device.excludedKind?.listLabel ?? "Left alone").foregroundStyle(.secondary) }
                     } else {
                         deviceRow(id: device.id, name: device.name)
                     }

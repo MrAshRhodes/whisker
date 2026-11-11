@@ -51,6 +51,13 @@ public struct WhiskerSettings: Equatable, Sendable {
     }
 
     /// The profile used for one app on every device, if there is one.
+    /// The pointer settings Whisker should have applied to a device right now: none while Whisker or the
+    /// device is switched off, so the system's own settings come back.
+    public func activePointer(for deviceID: String) -> PointerSettings? {
+        guard general.enabled, let device = devices[deviceID], device.enabled else { return nil }
+        return device.pointer
+    }
+
     public func appProfile(bundleID: String) -> Profile? {
         profiles.first { $0.id != Profile.defaultID && $0.match.apps == [bundleID] && $0.match.devices == [ProfileMatch.any] }
     }

@@ -60,8 +60,8 @@ final class EventSynthesizer: @unchecked Sendable {
             guard phase != .up else { return }
             queue.async { [weak self] in self?.postKey(direction.shortcut) }
         case .missionControl, .space:
-            guard phase != .up, let id = action.systemShortcut else { return }
-            queue.async { [weak self] in self?.postSystemShortcut(id, action: action) }
+            guard phase != .up, let plan = action.systemShortcutPlan(shortcuts) else { return }
+            queue.async { [weak self] in self?.perform(plan) }
         case .appSwitch(let direction):
             guard phase != .up else { return }
             let switchApp = self.switchApp
@@ -167,21 +167,23 @@ final class EventSynthesizer: @unchecked Sendable {
         event.post(tap: .cghidEventTap)
     }
 
-    private func postSystemShortcut(_ id: SystemShortcutID, action: Action) {
-        if let shortcut = shortcuts.status(of: id).shortcut {
+    private func perform(_ plan: SystemShortcutPlan) {
+        switch plan {
+        case .post(let shortcut):
             postKey(shortcut)
-            return
-        }
-        if case .missionControl(let target) = action, target.hasAppFallback {
-            let name = target == .launchpad ? "Launchpad" : "Mission Control"
+        case .openApp(let names):
             DispatchQueue.main.async {
-                let url = URL(fileURLWithPath: "/System/Applications/\(name).app")
+                let urls = names.map { URL(fileURLWithPath: "/System/Applications/\($0).app") }
+                guard let url = urls.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+                    NSSound.beep()
+                    return
+                }
                 NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
             }
-            return
+        case .unavailable(let id):
+            Log.events.notice("“\(id.title, privacy: .public)” has no keyboard shortcut in System Settings; nothing to post")
+            DispatchQueue.main.async { NSSound.beep() }
         }
-        Log.events.notice("“\(id.title, privacy: .public)” has no keyboard shortcut in System Settings; nothing to post")
-        DispatchQueue.main.async { NSSound.beep() }
     }
 
     private static func open(_ string: String) {

@@ -9,21 +9,24 @@ final class AccessibilityPermission: ObservableObject {
 
     @Published private(set) var isTrusted: Bool
     private var timer: Timer?
+    private let check: () -> Bool
     var onChange: ((Bool) -> Void)?
 
-    init() {
-        isTrusted = AXIsProcessTrusted()
+    init(check: @escaping () -> Bool = { AXIsProcessTrusted() }) {
+        self.check = check
+        isTrusted = check()
     }
 
     func refresh() {
-        let trusted = AXIsProcessTrusted()
+        let trusted = check()
         guard trusted != isTrusted else { return }
         isTrusted = trusted
         Log.permissions.info("Accessibility access \(trusted ? "granted" : "revoked", privacy: .public)")
         onChange?(trusted)
     }
 
-    /// Checks every second, for while the user is in System Settings.
+    /// Checks every second for as long as Whisker runs, so access granted or taken away in System Settings
+    /// starts or stops the event tap straight away.
     func startPolling() {
         guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in

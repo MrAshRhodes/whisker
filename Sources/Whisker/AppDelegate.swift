@@ -20,7 +20,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.onStatusChange = { [weak self] in self?.refreshStatusItem() }
         model.start()
         refreshStatusItem()
-        onboardingWindow.onClose = { [model] in model.permission.stopPolling() }
         if !model.permission.isTrusted {
             showOnboarding()
         }
@@ -146,7 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showOnboarding() {
         model.permission.refresh()
-        model.permission.startPolling()
         onboardingWindow.show()
     }
 }

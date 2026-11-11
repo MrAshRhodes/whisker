@@ -33,11 +33,11 @@ final class PointerController: ObservableObject {
         self.originals = originals
     }
 
-    /// Writes the settings for every connected device; restores devices whose pointer settings were cleared.
+    /// Writes the settings for every connected device; restores devices whose pointer settings were cleared or
+    /// switched off, including while Whisker as a whole is switched off.
     func apply(_ settings: WhiskerSettings, connected: [ConnectedDevice]) {
         for device in connected where !device.isExcluded {
-            let config = settings.devices[device.id]
-            let wanted = (config?.enabled ?? true) ? config?.pointer : nil
+            let wanted = settings.activePointer(for: device.id)
             guard applied[device.id] != wanted else { continue }
             if let wanted {
                 write(wanted, to: device)

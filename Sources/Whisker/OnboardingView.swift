@@ -71,13 +71,11 @@ private struct OnboardingContent: View {
         }
         .padding(24)
         .frame(width: 500)
-        .onAppear { permission.startPolling() }
+        .onAppear { permission.refresh() }
     }
 
     private func finish() {
         if choices.openAtLogin, !loginItem.isEnabled { loginItem.setEnabled(true) }
-        // Keep polling until access arrives so the event tap starts as soon as it's granted.
-        if permission.isTrusted { permission.stopPolling() }
         onFinish()
     }
 }
