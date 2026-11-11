@@ -6,13 +6,16 @@ import WhiskerCore
 /// The event tap: sees every mouse button and wheel event and applies the current settings to it.
 ///
 /// The tap runs on its own thread so a busy main thread can never stall the mouse. Settings reach it as an
-/// immutable `CompiledSettings` swapped under a lock.
+/// immutable `CompiledSettings` swapped under a lock. That same lock covers deciding what an event does and
+/// posting the synthetic events for it, so a cleanup can never post a release ahead of the press it releases.
 final class EventEngine: @unchecked Sendable {
     private struct State {
         var processor = EventProcessor()
         var compiled = CompiledSettings(.default)
         /// While the settings window is recording a button, every event passes through untouched.
         var capturing = false
+        /// Set by `stop()` so presses that arrive while the tap is being torn down pass through untouched.
+        var stopped = false
     }
 
     static let eventMask: CGEventMask = {
@@ -26,7 +29,7 @@ final class EventEngine: @unchecked Sendable {
     }()
 
     private let state = OSAllocatedUnfairLock(initialState: State())
-    private let synthesizer: EventSynthesizer
+    private let synthesizer: any ActionPerforming
     private let attribute: @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution?
     private let frontmostApp: @Sendable () -> String?
 
@@ -36,7 +39,7 @@ final class EventEngine: @unchecked Sendable {
     private var thread: Thread?
 
     init(
-        synthesizer: EventSynthesizer,
+        synthesizer: any ActionPerforming,
         attribute: @escaping @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution?,
         frontmostApp: @escaping @Sendable () -> String?
     ) {
@@ -53,24 +56,25 @@ final class EventEngine: @unchecked Sendable {
 
     func update(_ settings: WhiskerSettings) {
         let compiled = CompiledSettings(settings)
-        let released = state.withLock { state -> [(button: Int, action: Action)] in
+        let location = Self.cursorLocation()
+        state.withLock { state in
             state.compiled = compiled
-            return settings.general.enabled ? [] : state.processor.releaseAll()
+            if !settings.general.enabled { release(&state, at: location) }
         }
-        finish(released)
     }
 
     func setCapturing(_ capturing: Bool) {
-        let released = state.withLock { state -> [(button: Int, action: Action)] in
+        let location = Self.cursorLocation()
+        state.withLock { state in
             state.capturing = capturing
-            return capturing ? state.processor.releaseAll() : []
+            if capturing { release(&state, at: location) }
         }
-        finish(released)
     }
 
     /// Lets go of held buttons and repeating keys (sleep, switching users, quitting).
     func releaseAll() {
-        finish(state.withLock { $0.processor.releaseAll() })
+        let location = Self.cursorLocation()
+        state.withLock { release(&$0, at: location) }
     }
 
     /// Starts the tap. Returns false when the system refuses one (no Accessibility access).
@@ -93,6 +97,7 @@ final class EventEngine: @unchecked Sendable {
             return false
         }
         tap = port
+        state.withLock { $0.stopped = false }
         let ready = DispatchSemaphore(value: 0)
         let thread = Thread { [weak self] in
             guard let self, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0) else {
@@ -116,7 +121,11 @@ final class EventEngine: @unchecked Sendable {
     }
 
     func stop() {
-        releaseAll()
+        let location = Self.cursorLocation()
+        state.withLock { state in
+            state.stopped = true
+            release(&state, at: location)
+        }
         tapLock.lock()
         defer { tapLock.unlock() }
         guard let port = tap else { return }
@@ -129,18 +138,25 @@ final class EventEngine: @unchecked Sendable {
         Log.events.info("Event tap stopped")
     }
 
-    private func finish(_ released: [(button: Int, action: Action)]) {
-        let location = CGEvent(source: nil)?.location ?? .zero
-        for (_, action) in released {
-            synthesizer.perform(action, phase: .up, at: location, flags: [])
+    /// Call with the state lock held.
+    private func release(_ state: inout State, at location: CGPoint) {
+        for (_, action) in state.processor.releaseAll() {
+            synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
         synthesizer.releaseAll()
     }
 
+    private static func cursorLocation() -> CGPoint {
+        CGEvent(source: nil)?.location ?? .zero
+    }
+
     // MARK: Tap thread
 
-    private func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+    func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            // Releases may have been missed while the tap was off, so nothing held is trusted any more.
+            let location = Self.cursorLocation()
+            state.withLock { release(&$0, at: location) }
             tapLock.lock()
             let port = tap
             tapLock.unlock()
@@ -168,8 +184,16 @@ final class EventEngine: @unchecked Sendable {
             device: attribute(reportKind, now),
             app: frontmostApp()
         )
+        let location = event.location
+        let flags = CGEventFlags(rawValue: event.flags.rawValue & ModifierSet([.shift, .control, .option, .command]).eventFlags)
+        let clickState = event.getIntegerValueField(.mouseEventClickState)
         let plan = state.withLock { state -> EventPlan in
-            state.capturing ? .passThrough : state.processor.process(input, settings: state.compiled)
+            guard !state.capturing, !state.stopped else { return .passThrough }
+            let plan = state.processor.process(input, settings: state.compiled)
+            if case let .perform(action, phase) = plan {
+                synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: clickState)
+            }
+            return plan
         }
         return apply(plan, to: event)
     }
@@ -180,9 +204,8 @@ final class EventEngine: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         case .swallow:
             return nil
-        case let .perform(action, phase):
-            let flags = CGEventFlags(rawValue: event.flags.rawValue & ModifierSet([.shift, .control, .option, .command]).eventFlags)
-            synthesizer.perform(action, phase: phase, at: event.location, flags: flags)
+        case .perform:
+            // Already posted under the state lock in `handle`.
             return nil
         case let .dragAs(button, modifiers):
             switch button {

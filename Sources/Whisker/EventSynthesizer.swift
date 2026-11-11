@@ -10,11 +10,19 @@ struct SystemShortcutReader: SystemShortcutProviding {
     }
 }
 
+/// Turns mapped actions into events and commands. The event engine talks to this rather than to
+/// `EventSynthesizer` so tests can watch what it asks for.
+protocol ActionPerforming: AnyObject, Sendable {
+    /// `clickState` is the click count of the real press, carried over to synthetic clicks.
+    func perform(_ action: Action, phase: ActionPhase, at location: CGPoint, flags: CGEventFlags, clickState: Int64)
+    func releaseAll()
+}
+
 /// Posts the events and runs the commands that mapped actions turn into.
 ///
 /// Clicks are posted straight away from the event tap so they stay in order with the real events around them;
 /// everything else runs on a serial queue (or the main thread) so the tap never waits.
-final class EventSynthesizer: @unchecked Sendable {
+final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     /// Marks Whisker's own events so the tap lets them through.
     static let marker: Int64 = 0x5748_4B52
 
@@ -29,18 +37,19 @@ final class EventSynthesizer: @unchecked Sendable {
     }
 
     /// Runs on the event tap thread.
-    func perform(_ action: Action, phase: ActionPhase, at location: CGPoint, flags: CGEventFlags) {
+    func perform(_ action: Action, phase: ActionPhase, at location: CGPoint, flags: CGEventFlags, clickState: Int64) {
         switch action {
         case .passthrough, .none:
             return
         case let .click(button, modifiers):
             let held = CGEventFlags(rawValue: flags.rawValue | modifiers.eventFlags)
+            let count = max(1, clickState)
             switch phase {
-            case .down: postMouse(button: button, down: true, at: location, flags: held, clickState: 1)
-            case .up: postMouse(button: button, down: false, at: location, flags: held, clickState: 1)
+            case .down: postMouse(button: button, down: true, at: location, flags: held, clickState: count)
+            case .up: postMouse(button: button, down: false, at: location, flags: held, clickState: count)
             case .once:
-                postMouse(button: button, down: true, at: location, flags: held, clickState: 1)
-                postMouse(button: button, down: false, at: location, flags: held, clickState: 1)
+                postMouse(button: button, down: true, at: location, flags: held, clickState: count)
+                postMouse(button: button, down: false, at: location, flags: held, clickState: count)
             }
         case .doubleClick(let modifiers):
             guard phase != .up else { return }
