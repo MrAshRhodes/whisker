@@ -28,6 +28,8 @@ extension WhiskerSettings {
     public func repairedWithIssues() -> (settings: WhiskerSettings, issues: [ValidationIssue]) {
         var issues: [ValidationIssue] = []
         var result = self
+        // Pruned once at the end rather than after each of the many repairs below.
+        result.nestedUnknownFields = nil
 
         if schemaVersion != Self.currentSchemaVersion {
             issues.append(ValidationIssue("schemaVersion", "Expected \(Self.currentSchemaVersion), found \(schemaVersion)."))
@@ -175,6 +177,8 @@ extension WhiskerSettings {
         }
 
         result.profiles = profiles
+        result.nestedUnknownFields = nestedUnknownFields
+        result.pruneNestedUnknownFields()
         return (result, issues)
     }
 

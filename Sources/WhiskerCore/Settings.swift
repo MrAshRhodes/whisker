@@ -7,11 +7,13 @@ public struct WhiskerSettings: Equatable, Sendable {
     public var schemaVersion: Int
     public var general: GeneralSettings
     /// Per-device settings keyed by `DeviceIdentity.id`.
-    public var devices: [String: DeviceSettings]
+    public var devices: [String: DeviceSettings] { didSet { pruneNestedUnknownFields() } }
     /// The first profile with id `default` is the global profile; the rest are per app or per device.
-    public var profiles: [Profile]
+    public var profiles: [Profile] { didSet { pruneNestedUnknownFields() } }
     /// Top-level keys this version doesn't know, kept so a newer file survives a round trip.
     public var unknownKeys: [String: JSONValue]
+    /// Unmodelled nested fields, owned and reapplied by SettingsCodec only where their objects survive.
+    var nestedUnknownFields: SettingsCodec.SettingsUnknownFields?
 
     public init(
         schemaVersion: Int = WhiskerSettings.currentSchemaVersion,
@@ -28,6 +30,23 @@ public struct WhiskerSettings: Equatable, Sendable {
     }
 
     public static let `default` = WhiskerSettings()
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.schemaVersion == rhs.schemaVersion, lhs.general == rhs.general, lhs.devices == rhs.devices,
+              lhs.profiles == rhs.profiles, lhs.unknownKeys == rhs.unknownKeys else { return false }
+        if lhs.nestedUnknownFields == rhs.nestedUnknownFields { return true }
+        // Preserved fields can differ in form, e.g. one copy still tracks a field edits made inert, while the file
+        // both copies write is the same; compare that.
+        guard let left = try? SettingsCodec.encode(lhs), let right = try? SettingsCodec.encode(rhs) else { return false }
+        return left == right
+    }
+
+    /// Forgets preserved fields of deleted objects as soon as they go, so a later object with the same identity
+    /// doesn't inherit them. Only does work for files that had unknown nested fields.
+    mutating func pruneNestedUnknownFields() {
+        guard nestedUnknownFields != nil else { return }
+        nestedUnknownFields = SettingsCodec.unknownFieldsInUse(by: self)
+    }
 
     public var defaultProfile: Profile {
         profiles.first { $0.id == Profile.defaultID } ?? .makeDefault()
@@ -653,7 +672,7 @@ extension WhiskerSettings: Codable {
 }
 
 /// Any JSON value, for keys Whisker passes through without understanding.
-public enum JSONValue: Equatable, Sendable, Codable {
+public enum JSONValue: Hashable, Sendable, Codable {
     case null
     case bool(Bool)
     case number(Double)

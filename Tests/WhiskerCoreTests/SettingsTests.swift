@@ -2,6 +2,18 @@ import Foundation
 import Testing
 @testable import WhiskerCore
 
+private extension JSONValue {
+    subscript(key: String) -> JSONValue? {
+        guard case .object(let values) = self else { return nil }
+        return values[key]
+    }
+
+    subscript(index: Int) -> JSONValue? {
+        guard case .array(let values) = self, values.indices.contains(index) else { return nil }
+        return values[index]
+    }
+}
+
 @Suite("Settings model")
 struct SettingsTests {
     // MARK: Modifiers and shortcuts
@@ -80,6 +92,388 @@ struct SettingsTests {
         let decoded = try SettingsCodec.decode(data)
         #expect(decoded == settings)
         #expect(decoded.profile(id: "safari")?.inherits == nil)
+    }
+
+    @Test(arguments: [0, 1, 2])
+    func nestedDeviceSettingsSurviveEditsAndExportImport(version: Int) throws {
+        let json = """
+        {"schemaVersion":\(version),"future":{"kept":null},
+         "general":{"futureGeneral":{"values":[true,null,3]}},
+         "devices":{"046d:c52b":{
+           "futureDevice":"kept","rotationDegrees":90,
+           "pointer":{"speed":1.5,"acceleration":0.5,"futureCurve":{"points":[1,{"x":null}]}},
+           "wheel":{"invertHorizontal":true,"futureWheel":null},
+           "extraButtons":{"discoveryEnabled":true,"futureAdapter":{"controls":[{"id":"vendor:one","flags":[1,2]}]}}
+         }}}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        settings.general.enabled = false
+        settings.devices["046d:c52b"]?.pointer?.speed = 2
+        settings.devices["046d:c52b"]?.rotationDegrees = 450
+        settings.devices["046d:c52b"]?.extraButtons.discoveryEnabled = false
+
+        let exported = try SettingsCodec.encode(settings)
+        let imported = try SettingsCodec.decodeValidated(exported)
+        let saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(imported))
+        #expect(imported.schemaVersion == 2)
+        #expect(!imported.general.enabled)
+        #expect(imported.device("046d:c52b").pointer == PointerSettings(speed: 2, acceleration: 0.5))
+        #expect(imported.device("046d:c52b").rotationDegrees == 90)
+        #expect(!imported.device("046d:c52b").extraButtons.discoveryEnabled)
+        #expect(saved["future"] == .object(["kept": .null]))
+        #expect(saved["general"]?["futureGeneral"] == .object(["values": .array([.bool(true), .null, .number(3)])]))
+        let device = try #require(saved["devices"]?["046d:c52b"])
+        #expect(device["futureDevice"] == .string("kept"))
+        #expect(device["pointer"]?["futureCurve"] == .object(["points": .array([.number(1), .object(["x": .null])])]))
+        #expect(device["wheel"]?["futureWheel"] == .null)
+        #expect(device["extraButtons"]?["discoveryEnabled"] == .bool(false))
+        #expect(device["extraButtons"]?["futureAdapter"] == .object([
+            "controls": .array([.object(["id": .string("vendor:one"), "flags": .array([.number(1), .number(2)])])]),
+        ]))
+    }
+
+    @Test func profileAndMappingExtensionsFollowTheirKeysAfterReorderingAndDeletion() throws {
+        let json = """
+        {"schemaVersion":2,"profiles":[
+          {"id":"default","futureProfile":"global","mappings":[
+            {"trigger":{"type":"button","button":3,"futureTrigger":"slow"},
+             "modifiers":["command","shift"],"futureMapping":"slow",
+             "action":{"kind":"slowPointer","factor":0.4,"futureAction":{"curve":[1,null]}}},
+            {"trigger":{"type":"button","button":4},"futureMapping":"deleted",
+             "action":{"kind":"none","futureAction":"deleted"}},
+            {"trigger":{"type":"button","button":5},"futureMapping":"navigation",
+             "action":{"kind":"navigate","direction":"back","futureAction":"navigation"}}
+          ]},
+          {"id":"deleted","futureProfile":"deleted"},
+          {"id":"app","futureProfile":"app","match":{"apps":["com.example.app"],"devices":["*"],"futureMatch":true}}
+        ]}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        settings.profiles[0].mappings[0].action = .slowPointer(factor: 0.25)
+        settings.profiles[0].mappings.remove(at: 1)
+        settings.profiles[0].mappings.reverse()
+        settings.profiles[0].mappings.append(Mapping(trigger: .button(6), action: .none))
+        settings.profiles.remove(at: 1)
+        settings.profiles.reverse()
+        settings.profiles[0].name = "Renamed"
+
+        let saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        let app = try #require(saved["profiles"]?[0])
+        let global = try #require(saved["profiles"]?[1])
+        #expect(app["id"] == .string("app"))
+        #expect(app["name"] == .string("Renamed"))
+        #expect(app["futureProfile"] == .string("app"))
+        #expect(app["match"]?["futureMatch"] == .bool(true))
+        #expect(global["id"] == .string("default"))
+        #expect(global["futureProfile"] == .string("global"))
+        #expect(saved["profiles"]?[2] == nil)
+        let navigation = try #require(global["mappings"]?[0])
+        let slow = try #require(global["mappings"]?[1])
+        #expect(navigation["futureMapping"] == .string("navigation"))
+        #expect(navigation["action"]?["futureAction"] == .string("navigation"))
+        #expect(slow["futureMapping"] == .string("slow"))
+        #expect(slow["trigger"]?["futureTrigger"] == .string("slow"))
+        #expect(slow["action"]?["factor"] == .number(0.25))
+        #expect(slow["action"]?["futureAction"] == .object(["curve": .array([.number(1), .null])]))
+        #expect(global["mappings"]?[2]?["futureMapping"] == nil)
+        #expect(global["mappings"]?[2]?["action"]?["futureAction"] == nil)
+        #expect(try SettingsCodec.encode(SettingsCodec.decodeValidated(SettingsCodec.encode(settings))) == SettingsCodec.encode(settings))
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)) == settings)
+    }
+
+    @Test func deviceCollectionsKeepExtensionsOnlyOnSurvivingIdentities() throws {
+        let json = """
+        {"schemaVersion":2,"devices":{
+          "046d:c52b":{"futureDevice":"kept","pointer":{"speed":2},"activePointerPresetID":"fast",
+            "pointerPresets":[
+              {"id":"deleted","name":"Deleted","speed":1,"futurePreset":"deleted"},
+              {"id":"slow","name":"Slow","speed":0.5,"futurePreset":"slow"},
+              {"id":"fast","name":"Fast","speed":2,"futurePreset":"fast"}],
+            "controlLabels":[
+              {"trigger":{"type":"button","button":3},"name":"Deleted","futureLabel":"deleted"},
+              {"trigger":{"type":"button","button":4},"name":"Four","futureLabel":"four"},
+              {"trigger":{"type":"button","button":5},"name":"Five","futureLabel":"five"}],
+            "clickDebounce":{"buttons":[3],"interval":0.03,"futureDebounce":null},
+            "extraButtonMappings":{
+              "vendor:deleted":{"futureControl":"deleted"},
+              "vendor:kept":{"action":{"futureAction":[null,true]},"futureControl":"kept"},
+              "vendor:edited":{"futureControl":"deliberately replaced"}}},
+          "1234:5678":{"futureDevice":"deleted","pointer":{"speed":1,"futurePointer":"deleted"}}
+        }}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        var device = try #require(settings.devices["046d:c52b"])
+        device.pointerPresets.remove(at: 0)
+        device.pointerPresets.reverse()
+        device.pointerPresets[0].name = "Renamed"
+        device.pointerPresets[0].speed = 3
+        device.pointerPresets.append(PointerPreset(id: "new", name: "New", speed: 1))
+        device.activePointerPresetID = nil
+        device.controlLabels.remove(at: 0)
+        device.controlLabels.reverse()
+        device.controlLabels[0].name = "Renamed five"
+        device.controlLabels.append(ControlLabel(trigger: .button(6), name: "New"))
+        device.clickDebounce?.interval = 0.04
+        device.extraButtonMappings["vendor:deleted"] = nil
+        device.extraButtonMappings["vendor:edited"] = .object(["replacement": .bool(true)])
+        device.extraButtonMappings["vendor:new"] = .object(["new": .null])
+        settings.devices["046d:c52b"] = device
+        settings.devices["1234:5678"] = nil
+        settings.devices["1234:5679"] = DeviceSettings(pointer: PointerSettings(speed: 1))
+
+        let saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        let kept = try #require(saved["devices"]?["046d:c52b"])
+        #expect(saved["devices"]?["1234:5678"] == nil)
+        #expect(saved["devices"]?["1234:5679"]?["futureDevice"] == nil)
+        #expect(saved["devices"]?["1234:5679"]?["pointer"]?["futurePointer"] == nil)
+        #expect(kept["futureDevice"] == .string("kept"))
+        #expect(kept["activePointerPresetID"] == nil)
+        #expect(kept["pointerPresets"]?[0]?["futurePreset"] == .string("fast"))
+        #expect(kept["pointerPresets"]?[0]?["speed"] == .number(3))
+        #expect(kept["pointerPresets"]?[1]?["futurePreset"] == .string("slow"))
+        #expect(kept["pointerPresets"]?[2]?["futurePreset"] == nil)
+        #expect(kept["controlLabels"]?[0]?["futureLabel"] == .string("five"))
+        #expect(kept["controlLabels"]?[0]?["name"] == .string("Renamed five"))
+        #expect(kept["controlLabels"]?[1]?["futureLabel"] == .string("four"))
+        #expect(kept["controlLabels"]?[2]?["futureLabel"] == nil)
+        #expect(kept["clickDebounce"]?["futureDebounce"] == .null)
+        #expect(kept["clickDebounce"]?["interval"] == .number(0.04))
+        #expect(kept["extraButtonMappings"] == .object(device.extraButtonMappings))
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)) == settings)
+    }
+
+    @Test func removedSettingsAndChangedActionKindsDoNotReturnFromPreservedFields() throws {
+        let json = """
+        {"schemaVersion":2,"future":"deleted","devices":{"046d:c52b":{
+          "pointer":{"speed":2,"futurePointer":true},"rotationDegrees":90,"swapPrimarySecondary":true,
+          "wheel":{"native":{"enabled":true,"speed":2,"acceleration":0.5,"futureNative":true}}
+        }},"profiles":[
+          {"id":"default","scroll":{"linesPerNotch":5,"smoothScrolling":true,"smoothDuration":200,"futureScroll":true,
+             "modifierScaling":{"modifiers":["option"],"multiplier":2,"futureScaling":true}},
+           "mappings":[
+             {"trigger":{"type":"button","button":3},"futureMapping":true,
+              "action":{"kind":"slowPointer","factor":0.4,"futureAction":"slow"}},
+             {"trigger":{"type":"button","button":4},"action":{"kind":"none"},"gestures":{
+                "up":{"kind":"navigate","direction":"back","futureAction":"up"},
+                "down":{"kind":"media","key":"playPause","futureAction":"down"},
+                "tap":{"kind":"navigate","direction":"forward","futureAction":"tap"},
+                "threshold":120,"futureGestures":true}},
+             {"trigger":{"type":"wheel","direction":"left"},"action":{"kind":"space","direction":"left"},
+              "repeatPerNotch":true,"continuousInput":{"distance":80,"futureInput":true}}
+           ]},
+          {"id":"app","inherits":"default","scroll":{"futureScroll":"removed"}}
+        ]}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        settings.unknownKeys["future"] = nil
+        settings.devices["046d:c52b"]?.pointer = nil
+        settings.devices["046d:c52b"]?.rotationDegrees = 0
+        settings.devices["046d:c52b"]?.swapPrimarySecondary = false
+        settings.devices["046d:c52b"]?.wheel.native?.speed = nil
+        settings.profiles[0].scroll?.linesPerNotch = nil
+        settings.profiles[0].scroll?.smoothScrolling = false
+        settings.profiles[0].scroll?.smoothDuration = ScrollMath.defaultSmoothDuration
+        settings.profiles[0].scroll?.modifierScaling = nil
+        settings.profiles[0].mappings[0].action = .none
+        settings.profiles[0].mappings[1].gestures?.up = nil
+        settings.profiles[0].mappings[1].gestures?.down = .media(.volumeDown)
+        settings.profiles[0].mappings[1].gestures?.tap = .doubleClick(modifiers: [])
+        settings.profiles[0].mappings[1].gestures?.threshold = 80
+        settings.profiles[0].mappings[2].repeatPerNotch = false
+        settings.profiles[0].mappings[2].continuousInput = nil
+        settings.profiles[1].inherits = nil
+        settings.profiles[1].scroll = nil
+
+        let saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        let device = try #require(saved["devices"]?["046d:c52b"])
+        #expect(saved["future"] == nil)
+        #expect(device["pointer"] == nil)
+        #expect(device["rotationDegrees"] == nil)
+        #expect(device["swapPrimarySecondary"] == nil)
+        #expect(device["wheel"]?["native"]?["speed"] == nil)
+        #expect(device["wheel"]?["native"]?["futureNative"] == .bool(true))
+        let profile = try #require(saved["profiles"]?[0])
+        #expect(profile["scroll"]?["linesPerNotch"] == nil)
+        #expect(profile["scroll"]?["smoothScrolling"] == nil)
+        #expect(profile["scroll"]?["smoothDuration"] == nil)
+        #expect(profile["scroll"]?["modifierScaling"] == nil)
+        #expect(profile["scroll"]?["futureScroll"] == .bool(true))
+        #expect(profile["mappings"]?[0]?["futureMapping"] == .bool(true))
+        #expect(profile["mappings"]?[0]?["action"] == .object(["kind": .string("none")]))
+        let gestures = try #require(profile["mappings"]?[1]?["gestures"])
+        #expect(gestures["up"] == nil)
+        #expect(gestures["down"]?["key"] == .string("volumeDown"))
+        #expect(gestures["down"]?["futureAction"] == .string("down"))
+        #expect(gestures["tap"]?["direction"] == nil)
+        #expect(gestures["tap"]?["futureAction"] == nil)
+        #expect(gestures["futureGestures"] == .bool(true))
+        #expect(gestures["threshold"] == .number(80))
+        #expect(profile["mappings"]?[2]?["repeatPerNotch"] == nil)
+        #expect(profile["mappings"]?[2]?["continuousInput"] == nil)
+        #expect(saved["profiles"]?[1]?["inherits"] == .null)
+        #expect(saved["profiles"]?[1]?["scroll"] == .null)
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)) == settings)
+    }
+
+    @Test func chordExtensionsFollowTheUnorderedPairAndDisappearWithTheList() throws {
+        let json = """
+        {"schemaVersion":2,"profiles":[{"id":"default","chords":[
+          {"first":2,"second":3,"action":{"kind":"click","button":2},"futureChord":"deleted"},
+          {"first":4,"second":5,"action":{"kind":"click","button":2,"futureAction":"middle"},"futureChord":"middle"},
+          {"first":6,"second":7,"action":{"kind":"navigate","direction":"back","futureAction":"navigation"},"futureChord":"navigation"}
+        ]}]}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        var chords = try #require(settings.profiles[0].chords)
+        chords.remove(at: 0)
+        chords.reverse()
+        chords[0].first = 7
+        chords[0].second = 6
+        chords[0].pressWindow = 120
+        chords[0].action = .navigate(.forward)
+        chords.append(ButtonChord(first: 8, second: 9, action: .click(button: 2, modifiers: [])))
+        settings.profiles[0].chords = chords
+        var saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        let list = try #require(saved["profiles"]?[0]?["chords"])
+        #expect(list[0]?["futureChord"] == .string("navigation"))
+        #expect(list[0]?["action"]?["futureAction"] == .string("navigation"))
+        #expect(list[0]?["action"]?["direction"] == .string("forward"))
+        #expect(list[0]?["pressWindow"] == .number(120))
+        #expect(list[1]?["futureChord"] == .string("middle"))
+        #expect(list[1]?["action"]?["futureAction"] == .string("middle"))
+        #expect(list[2]?["futureChord"] == nil)
+        #expect(list[2]?["action"]?["futureAction"] == nil)
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)) == settings)
+
+        settings.profiles[0].chords = nil
+        saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        #expect(saved["profiles"]?[0]?["chords"] == nil)
+        settings.profiles[0].chords = []
+        saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        #expect(saved["profiles"]?[0]?["chords"] == .array([]))
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)).defaultProfile.chords == [])
+    }
+
+    @Test func sequenceExtensionsRequireUniqueUneditedStepsRatherThanArrayPositions() throws {
+        let json = """
+        {"schemaVersion":2,"profiles":[{"id":"default","mappings":[
+          {"trigger":{"type":"button","button":3},"action":{"kind":"shortcutSequence","futureAction":true,"steps":[
+            {"keyCode":0,"delayAfterMs":10,"futureStep":"deleted"},
+            {"keyCode":1,"delayAfterMs":20,"futureStep":"edited"},
+            {"keyCode":2,"futureStep":{"kept":[true,null]}},
+            {"keyCode":3,"futureStep":"ambiguous A"},
+            {"keyCode":3,"futureStep":"ambiguous B"}
+          ]}}
+        ]}]}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        guard case .shortcutSequence(let steps) = settings.defaultProfile.mappings[0].action else {
+            Issue.record("Expected a shortcut sequence")
+            return
+        }
+        let unchanged = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        let originalList = try #require(unchanged["profiles"]?[0]?["mappings"]?[0]?["action"]?["steps"])
+        #expect(originalList[0]?["futureStep"] == .string("deleted"))
+        #expect(originalList[1]?["futureStep"] == .string("edited"))
+        // There are no step ids. Even before editing, identical known values cannot safely own different extras.
+        #expect(originalList[3]?["futureStep"] == nil)
+        #expect(originalList[4]?["futureStep"] == nil)
+
+        var edited = steps[1]
+        edited.delayAfterMs = 30
+        settings.profiles[0].mappings[0].action = .shortcutSequence([steps[2], edited, steps[3]])
+        var saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        let action = try #require(saved["profiles"]?[0]?["mappings"]?[0]?["action"])
+        #expect(action["futureAction"] == .bool(true))
+        #expect(action["steps"]?[0]?["futureStep"] == .object(["kept": .array([.bool(true), .null])]))
+        #expect(action["steps"]?[1]?["delayAfterMs"] == .number(30))
+        #expect(action["steps"]?[1]?["futureStep"] == nil)
+        #expect(action["steps"]?[2]?["futureStep"] == nil)
+        #expect(action["steps"]?[3] == nil)
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)) == settings)
+
+        settings.profiles[0].mappings[0].action = .shortcutSequence([steps[2], steps[2]])
+        saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        #expect(saved["profiles"]?[0]?["mappings"]?[0]?["action"]?["steps"]?[0]?["futureStep"] == nil)
+        #expect(saved["profiles"]?[0]?["mappings"]?[0]?["action"]?["steps"]?[1]?["futureStep"] == nil)
+    }
+
+    @Test func objectsRecreatedWithAnOldIdentityStartWithoutItsPreservedFields() throws {
+        let json = """
+        {"schemaVersion":2,"devices":{
+          "046d:c52b":{"futureDevice":"forgotten","pointer":{"speed":2,"futurePointer":"forgotten"}},
+          "046d:c077":{"futureDevice":"kept","pointer":{"speed":1.5,"futurePointer":"reset"},
+            "pointerPresets":[{"id":"fast","name":"Fast","speed":2,"futurePreset":"deleted"}]}
+        },"profiles":[{"id":"default",
+          "scroll":{"linesPerNotch":5,"futureScroll":"cleared"},
+          "chords":[{"first":2,"second":3,"action":{"kind":"click","button":2},"futureChord":"cleared"}],
+          "mappings":[
+            {"trigger":{"type":"button","button":3},"futureMapping":"kept",
+             "action":{"kind":"slowPointer","factor":0.4,"futureAction":"switched away"}},
+            {"trigger":{"type":"button","button":4},"futureMapping":"deleted",
+             "action":{"kind":"navigate","direction":"forward","futureAction":"deleted"}}
+          ]}]}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        // Each removal is a separate edit, as in the settings window, before something with the same identity returns.
+        settings.devices["046d:c52b"] = nil
+        settings.devices["046d:c52b"] = DeviceSettings(pointer: PointerSettings(speed: 2))
+        settings.devices["046d:c077"]?.pointer = nil
+        settings.devices["046d:c077"]?.pointer = PointerSettings(speed: 1.5)
+        settings.devices["046d:c077"]?.pointerPresets = []
+        settings.devices["046d:c077"]?.pointerPresets = [PointerPreset(id: "fast", name: "Fast", speed: 2)]
+        settings.profiles[0].scroll = nil
+        settings.profiles[0].scroll = ScrollSettings(linesPerNotch: 5)
+        settings.profiles[0].chords = nil
+        settings.profiles[0].chords = [ButtonChord(first: 2, second: 3, action: .click(button: 2, modifiers: []))]
+        settings.profiles[0].mappings[0].action = .none
+        settings.profiles[0].mappings[0].action = .slowPointer(factor: 0.4)
+        settings.profiles[0].mappings.remove(at: 1)
+        settings.profiles[0].mappings.append(Mapping(trigger: .button(4), action: .navigate(.forward)))
+
+        let saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        #expect(saved["devices"]?["046d:c52b"]?["futureDevice"] == nil)
+        #expect(saved["devices"]?["046d:c52b"]?["pointer"]?["futurePointer"] == nil)
+        let device = try #require(saved["devices"]?["046d:c077"])
+        #expect(device["futureDevice"] == .string("kept"))
+        #expect(device["pointer"]?["futurePointer"] == nil)
+        #expect(device["pointerPresets"]?[0]?["futurePreset"] == nil)
+        let profile = try #require(saved["profiles"]?[0])
+        #expect(profile["scroll"]?["futureScroll"] == nil)
+        #expect(profile["chords"]?[0]?["futureChord"] == nil)
+        #expect(profile["mappings"]?[0]?["futureMapping"] == .string("kept"))
+        #expect(profile["mappings"]?[0]?["action"]?["futureAction"] == nil)
+        #expect(profile["mappings"]?[1]?["futureMapping"] == nil)
+        #expect(profile["mappings"]?[1]?["action"]?["futureAction"] == nil)
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)) == settings)
+    }
+
+    @Test func objectsDroppedWhileRepairingDoNotLendTheirFieldsToReplacements() throws {
+        let json = """
+        {"schemaVersion":2,"general":null,"devices":{"046d:c52b":{
+          "wheel":null,"extraButtons":null,"futureDevice":[1,{"deep":[[null]]}],
+          "pointer":{"speed":99,"futurePointer":{"kept":true}},
+          "controlLabels":[{"trigger":{"type":"button","button":3},"name":"  ","futureLabel":"dropped"}]
+        }},"profiles":[{"id":"default","scroll":null,"futureProfile":{"kept":[]},"mappings":[
+          {"trigger":{"type":"button","button":5},"futureMapping":"dropped",
+           "action":{"kind":"pointerPreset","device":"046d:c52b","preset":"gone"}}
+        ]}]}
+        """
+        var settings = try SettingsCodec.decodeRepairing(Data(json.utf8)).settings
+        #expect(settings.device("046d:c52b").controlLabels.isEmpty)
+        #expect(settings.defaultProfile.mappings.isEmpty)
+        settings.devices["046d:c52b"]?.controlLabels = [ControlLabel(trigger: .button(3), name: "Three")]
+        settings.profiles[0].mappings.append(Mapping(trigger: .button(5), action: .navigate(.back)))
+
+        let saved = try JSONDecoder().decode(JSONValue.self, from: SettingsCodec.encode(settings))
+        let device = try #require(saved["devices"]?["046d:c52b"])
+        #expect(device["futureDevice"] == .array([.number(1), .object(["deep": .array([.array([.null])])])]))
+        #expect(device["pointer"]?["speed"] == .number(PointerMath.speedRange.upperBound))
+        #expect(device["pointer"]?["futurePointer"] == .object(["kept": .bool(true)]))
+        #expect(device["controlLabels"]?[0]?["name"] == .string("Three"))
+        #expect(device["controlLabels"]?[0]?["futureLabel"] == nil)
+        #expect(saved["profiles"]?[0]?["futureProfile"] == .object(["kept": .array([])]))
+        #expect(saved["profiles"]?[0]?["mappings"]?[0]?["futureMapping"] == nil)
     }
 
     @Test func dormantOrientationRoundTripsWithoutEnablingSpeedOrChangingWheels() throws {
