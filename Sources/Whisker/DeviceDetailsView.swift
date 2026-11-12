@@ -55,6 +55,8 @@ struct DeviceDetailsRows: View {
             row("Product ID", details.productIDText)
             serialRow
             row("Input Monitoring", details.identification.title)
+            row("Battery", details.battery.text(time: DeviceDetailsRows.time))
+            footnote(BatteryState.caveat)
             row("Attribution", details.attribution.title)
             footnote(details.attribution.explanation)
             row("Reported buttons", details.controlsButtonsText)
@@ -62,6 +64,10 @@ struct DeviceDetailsRows: View {
             footnote(DeviceDetails.controlsCaveat)
             ForEach(details.notes, id: \.self) { footnote($0.text) }
         }
+    }
+
+    static func time(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
     }
 
     private var serialRow: some View {

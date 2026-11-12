@@ -351,6 +351,8 @@ public struct DeviceDetails: Hashable, Sendable, Identifiable {
     public let identification: IdentificationStatus
     public let attribution: AttributionBasis
     public let notes: [DeviceNote]
+    /// Best-effort, read-only; `.disconnected` until a connected device is given a state.
+    public var battery: BatteryState = .disconnected
 
     public var isConnected: Bool {
         if case .connected = presence { return true }
@@ -424,11 +426,13 @@ public enum DeviceDetailsBuilder {
     /// - Parameters:
     ///   - controls: what each device reported, by device id; a device without an entry counts as unavailable.
     ///   - recentInput: ids of devices that sent a button or wheel report recently (see `AttributionEvidence`).
+    ///   - batteries: battery state by device id; a connected device without one is unavailable, never 0%.
     public static func details(
         for devices: [PointingDevice],
         controls: [String: ControlsReport] = [:],
         identification: IdentificationStatus,
-        recentInput: Set<String> = []
+        recentInput: Set<String> = [],
+        batteries: [String: BatteryState] = [:]
     ) -> [DeviceDetails] {
         let eligible = devices.filter { !$0.isExcluded }.count
         return devices.map { device in
@@ -463,7 +467,8 @@ public enum DeviceDetailsBuilder {
                 serial: device.serial.map(SerialNumber.reported) ?? .notReported,
                 transport: device.transport.flatMap(DeviceIdentity.productName),
                 presence: .connected(physicalDevices: physicalDevices), excludedKind: device.excludedKind,
-                controls: report, identification: identification, attribution: attribution, notes: notes
+                controls: report, identification: identification, attribution: attribution, notes: notes,
+                battery: batteries[device.id] ?? .unavailable(.notDescribed)
             )
         }
     }

@@ -674,6 +674,9 @@ struct DevicesPane: View {
                     VStack(alignment: .leading) {
                         Text(details.name)
                         Text(details.summaryText).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        if let battery = details.battery.inlineText(time: DeviceDetailsRows.time) {
+                            Text(battery).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Spacer()

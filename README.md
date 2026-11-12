@@ -182,7 +182,7 @@ Whisker window brings Whisker to the front, which ends the bypass until you swit
 ## Device details
 
 Open **Details** under a mouse in **Settings › Devices** to see what Whisker knows about it. It is
-read-only: opening it changes no setting, does not ask for Input Monitoring and does not touch
+read-only: opening it changes no setting, does not ask for Input Monitoring and never writes to
 the device. A mouse that is not connected shows only what its saved settings record.
 
 - **Who it is.** The product name, the connection (such as USB or Bluetooth) and the vendor and
@@ -216,6 +216,31 @@ the device. A mouse that is not connected shows only what its saved settings rec
   and treats it as recent for 60 seconds. It does not keep what was sent or a history, never
   saves, logs or sends it anywhere, and forgets it when the mouse is unplugged or Whisker quits.
   Details add nothing to the settings file.
+- **Battery (best effort).** Details has a **Battery** row, and a percentage also appears beside
+  the mouse's name when there is one. Whisker only reads what the mouse itself declares through
+  macOS's public HID interface, and only once Input Monitoring is allowed. It tries two sources:
+  the standard Generic Device Controls *Battery Strength* element and the Battery System
+  *Absolute State of Charge* element, and shows a percentage only when the element's range is
+  exactly 0 to 100. Charging is shown only when the mouse declares an explicit charging flag,
+  never guessed from USB or a rising level. Whisker never uses the Mac's own battery or a UPS,
+  never writes to the mouse and never asks for a permission for this.
+  - **Not supported**: the mouse declares no battery element.
+  - **Waiting for a reading**: the mouse has one, and Whisker hasn't received a value yet.
+  - **Unavailable — …**: Input Monitoring is off, macOS didn't describe the device, a read
+    failed, the value was out of range, the battery is in a format Whisker doesn't recognise, or
+    Whisker can't tell which device the battery belongs to (identical mice without serial numbers,
+    a wireless receiver, or several battery elements). It never shows another mouse's reading.
+  - **Stale — 80%, last read 10:42**: the last good reading is older than 15 minutes or a later
+    read failed.
+  - **Disconnected**: the mouse is not connected.
+  - A percentage, optionally with "charging" or "not charging".
+
+  Readings are refreshed when the mouse reports a new value, when you open Details and at most
+  every ten minutes for a couple of hours after it connects. They stay in memory and are never
+  saved. If the row says anything but a percentage, check the battery in the Bluetooth menu or
+  Control Centre instead. **No mouse or receiver model has been verified yet**, including Magic
+  Mouse (which Whisker leaves alone and whose battery macOS shows in its own menus), so do not
+  expect a reading from any particular model.
 
 ## Privacy
 

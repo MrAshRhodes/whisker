@@ -127,7 +127,7 @@ make app</code></pre>
             <li>Choose <span class="ui">Details</span> under any device to see what Whisker knows about it.</li>
           </ul>
           <h3 id="device-details">Details</h3>
-          <p>Choose <span class="ui">Details</span> under a device to open a read-only summary. Opening it changes no setting, doesn't ask for Input Monitoring and doesn't touch the device. For a mouse that isn't connected it shows only what its saved settings record.</p>
+          <p>Choose <span class="ui">Details</span> under a device to open a read-only summary. Opening it changes no setting, doesn't ask for Input Monitoring and never writes to the device. For a mouse that isn't connected it shows only what its saved settings record.</p>
           <ul>
             <li>Who it is: <span class="ui">Product name</span>, <span class="ui">Connection</span> (such as USB or Bluetooth), <span class="ui">Vendor ID</span> and <span class="ui">Product ID</span>. Anything a device doesn't report says <span class="ui">Not reported</span>, and a device without a name is listed by its ids.</li>
             <li><span class="ui">Serial number</span>: whether the device reports one. The number stays hidden until you choose <span class="ui">Show</span>, and it's hidden again when you close the details. Whisker already uses it as part of the mouse's identity in your settings, and saves nothing more.</li>
@@ -136,9 +136,20 @@ make app</code></pre>
             <li>Shared settings: mice with the same vendor and product ids and no serial number have the same identity, so they share one set of settings, and the details say how many connected devices share it. Whisker can only notice this when each device reports where it's connected: two such mice that don't are listed as one. A mouse that reports a serial number is kept apart from the others.</li>
             <li>Left alone: a trackpad or touch mouse's details say why Whisker leaves it alone, and it isn't counted as a second mouse.</li>
             <li>Privacy: Whisker keeps only when each mouse last sent a button press or wheel turn, in memory, and treats it as recent for 60 seconds. It doesn't keep what was sent or a history, never saves, logs or sends it anywhere, and forgets it when the mouse is unplugged or Whisker quits. Details add nothing to the settings file.</li>
+            <li><span class="ui">Battery</span> (best effort): shown here, and beside the mouse's name when there's a percentage. Whisker only reads what the mouse itself declares through macOS's public HID interface, once Input Monitoring is allowed. It tries two sources, the standard Generic Device Controls <em>Battery Strength</em> element and the Battery System <em>Absolute State of Charge</em> element, and shows a percentage only when the element's range is exactly 0 to 100. <span class="ui">Charging</span> appears only when the mouse declares an explicit charging flag, never guessed from USB or a rising level. Whisker never uses the Mac's own battery or a UPS, never writes to the mouse and never asks for a permission for this. The row can say:
+              <ul>
+                <li><span class="ui">Not supported</span>: the mouse declares no battery element.</li>
+                <li><span class="ui">Waiting for a reading</span>: the mouse has one and Whisker hasn't received a value yet.</li>
+                <li><span class="ui">Unavailable — …</span>: Input Monitoring is off, macOS didn't describe the device, a read failed, the value was out of range, the battery is in a format Whisker doesn't recognise, or Whisker can't tell which device the battery belongs to (identical mice without serial numbers, a wireless receiver or several battery elements). It never shows another mouse's reading.</li>
+                <li><span class="ui">Stale — 80%, last read 10:42</span>: the last good reading is older than 15 minutes, or a later read failed.</li>
+                <li><span class="ui">Disconnected</span>: the mouse isn't connected.</li>
+                <li>A percentage, optionally with <span class="ui">charging</span> or <span class="ui">not charging</span>.</li>
+              </ul>
+              Readings refresh when the mouse reports a new value, when you open Details and at most every ten minutes for a couple of hours after it connects. They stay in memory and are never saved. If the row says anything but a percentage, check the battery in the Bluetooth menu or Control Centre instead.</li>
           </ul>
           <div class="callout-note">
             <p>Not yet verified on hardware: reported buttons and wheels. In one test on macOS 26.6 with Input Monitoring off, macOS gave Whisker no controls for any of twelve built-in, USB and Bluetooth interfaces, so every mouse showed <span class="ui">Unavailable</span>. Other versions of macOS, other connections and what you see once Input Monitoring is allowed haven't been tried, and neither has how closely <span class="ui">Recent matching input</span> follows real use.</p>
+            <p>Not yet verified on hardware: battery status. No mouse or receiver model has been verified to supply a reading, including Magic Mouse (which Whisker leaves alone, and whose battery macOS shows in its own menus), so don't expect a reading from any particular model.</p>
           </div>
 
           <h3 id="duplicate-clicks">Duplicate clicks</h3>

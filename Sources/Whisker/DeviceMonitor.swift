@@ -19,6 +19,8 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     @Published private(set) var controls: [String: ControlsReport] = [:]
     /// Devices that sent a button or wheel report within `AttributionEvidence.window`.
     @Published private(set) var recentInput: Set<String> = []
+    /// Best-effort battery state by device id. In memory only, and never reaches `onChange` or the event path.
+    @Published private(set) var batteries: [String: BatteryState] = [:]
     var onChange: (([ConnectedDevice]) -> Void)?
 
     var canIdentifyDevices: Bool { identification == .listening }
@@ -38,6 +40,28 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     /// Main thread only. One time per device, never saved or logged.
     private var evidence = AttributionEvidence()
     private var expiryTimer: Timer?
+    private let hidAccess: HIDDeviceAccess
+    private let batteryProvider: BatteryProvider
+    /// The runtime id `hidAccess` gave each interface; never reused, so a late read can't reach a reconnected device.
+    private var runtimeIDs: [IOHIDDevice: Int] = [:]
+    private let inputMonitoringCheck: () -> Bool
+
+    init(
+        hidAccess: HIDDeviceAccess = IOKitHIDAccess(),
+        inputMonitoringAllowed: @escaping () -> Bool = { DeviceMonitor.inputMonitoringAllowed }
+    ) {
+        self.hidAccess = hidAccess
+        self.inputMonitoringCheck = inputMonitoringAllowed
+        batteryProvider = BatteryProvider(
+            access: hidAccess, clock: { DeviceMonitor.clock() },
+            schedule: { delay, action in
+                let timer = Timer(timeInterval: delay, repeats: false) { _ in action() }
+                RunLoop.main.add(timer, forMode: .common)
+                return { timer.invalidate() }
+            }
+        )
+        batteryProvider.onChange = { [weak self] in self?.publishBatteries() }
+    }
 
     /// Called from the event tap thread.
     func attribute(_ kind: DeviceAttributor.ReportKind, at time: TimeInterval) -> DeviceAttribution? {
@@ -55,12 +79,30 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
 
     /// Details for the connected devices, for the Devices pane.
     var connectedDetails: [DeviceDetails] {
-        DeviceDetailsBuilder.details(for: devices, controls: controls, identification: identification, recentInput: recentInput)
+        DeviceDetailsBuilder.details(for: devices, controls: controls, identification: identification, recentInput: recentInput, batteries: batteries)
     }
 
     /// Limited details for a mouse with saved settings that isn't connected.
     func rememberedDetails(id: String, name: String) -> DeviceDetails {
         DeviceDetailsBuilder.remembered(id: id, name: name, identification: identification)
+    }
+
+    /// Battery state as the Devices pane shows it, for each connected device.
+    private func publishBatteries() {
+        let states = BatteryStates.states(
+            for: devices, tracker: batteryProvider.tracker, at: Self.clock(), inputMonitoringAllowed: inputMonitoringCheck()
+        )
+        if states != batteries { batteries = states }
+    }
+
+    /// Hands the battery provider the listed devices and the interfaces that belong to each. Reads nothing
+    /// until Input Monitoring is allowed.
+    private func syncBatteries(_ listed: [ConnectedDevice]) {
+        var byDevice: [String: [Int]] = [:]
+        for (device, id) in deviceIDs {
+            if let runtimeID = runtimeIDs[device] { byDevice[id, default: []].append(runtimeID) }
+        }
+        batteryProvider.update(devices: listed, interfaces: byDevice, allowed: inputMonitoringCheck())
     }
 
     func start() {
@@ -70,6 +112,7 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         for manager in [manager, keyboardManager].compactMap({ $0 }) {
             for device in (IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>) ?? [] {
                 interfaces[device] = Self.info(for: device)
+                runtimeIDs[device] = hidAccess.register(device)
             }
         }
         readControls()
@@ -121,12 +164,14 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         Log.devices.info("Device identification \(self.opened ? "on" : "unavailable", privacy: .public)")
         // macOS may only describe a device's controls once the manager has opened it.
         if opened { refreshControls() }
+        publishBatteries()
     }
 
     private func added(_ device: IOHIDDevice) {
         guard interfaces[device] == nil else { return }
         let info = Self.info(for: device)
         interfaces[device] = info
+        runtimeIDs[device] = hidAccess.register(device)
         if info.isPointing { interfaceControls[device] = Self.report(for: device, allowed: Self.inputMonitoringAllowed) }
         refresh()
     }
@@ -135,6 +180,7 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         guard interfaces.removeValue(forKey: device) != nil else { return }
         interfaceControls[device] = nil
         refresh()
+        if let runtimeID = runtimeIDs.removeValue(forKey: device) { hidAccess.forget(runtimeID: runtimeID) }
     }
 
     /// Reads what every pointing interface reports again, for when the answer may have changed: Input
@@ -142,6 +188,8 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     func refreshControls() {
         readControls()
         publishControls()
+        syncBatteries(devices)
+        for id in devices.map(\.id) { batteryProvider.refresh(deviceID: id) }
     }
 
     private func readControls() {
@@ -160,7 +208,7 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         if combined != controls { controls = combined }
     }
 
-    private static var inputMonitoringAllowed: Bool {
+    static var inputMonitoringAllowed: Bool {
         IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
     }
 
@@ -215,7 +263,10 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         deviceIDs = interfaces.compactMapValues { $0.isPointing ? owner[$0.physicalKey] : nil }
         publishControls()
         pruneEvidence(keeping: Set(listed.map(\.id)))
-        guard listed != devices else { return }
+        guard listed != devices else {
+            syncBatteries(listed)
+            return
+        }
         let before = Set(devices.map(\.id)), after = Set(listed.map(\.id))
         for device in listed where !before.contains(device.id) {
             Log.devices.info("Connected \(device.name, privacy: .public) [\(device.id, privacy: .public)]\(device.isExcluded ? " (left alone)" : "", privacy: .public)")
@@ -224,6 +275,7 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
             Log.devices.info("Disconnected [\(id, privacy: .public)]")
         }
         devices = listed
+        syncBatteries(listed)
         changed()
     }
 
@@ -238,6 +290,11 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     }
 
     private func input(_ value: IOHIDValue, from device: IOHIDDevice) {
+        let reported = IOHIDValueGetElement(value)
+        if let runtimeID = runtimeIDs[device], BatteryDiscovery.isBatteryUsage(page: Int(IOHIDElementGetUsagePage(reported)), usage: Int(IOHIDElementGetUsage(reported))) {
+            batteryProvider.notified(runtimeID: runtimeID)
+            return
+        }
         guard let id = deviceIDs[device], IOHIDValueGetIntegerValue(value) != 0 else { return }
         let element = IOHIDValueGetElement(value)
         let page = Int(IOHIDElementGetUsagePage(element))
