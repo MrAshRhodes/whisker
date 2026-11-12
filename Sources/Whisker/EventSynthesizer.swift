@@ -51,6 +51,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     private let queue = DispatchQueue(label: "io.github.mrashrhodes.whisker.actions", qos: .userInteractive)
     private let shortcuts: SystemShortcutProviding
     private let switchApp: @MainActor (AppSwitchDirection) -> Void
+    private let selectPointerPreset: @MainActor (_ deviceID: String, _ presetID: String) -> Void
     private let clicks: ClickScheduler
     private let tripleClickTiming: @Sendable () -> ClickTiming
     private let sequences: ShortcutSequenceRunner
@@ -62,6 +63,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     init(
         shortcuts: SystemShortcutProviding = SystemShortcutReader(),
         switchApp: @escaping @MainActor (AppSwitchDirection) -> Void,
+        selectPointerPreset: @escaping @MainActor (_ deviceID: String, _ presetID: String) -> Void = { _, _ in },
         clicks: ClickScheduler = ClickScheduler(post: { EventSynthesizer.postClick($0, at: $1, flags: $2) }),
         tripleClickTiming: @escaping @Sendable () -> ClickTiming = { .immediate },
         sequences: ShortcutSequenceRunner = ShortcutSequenceRunner(
@@ -70,6 +72,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     ) {
         self.shortcuts = shortcuts
         self.switchApp = switchApp
+        self.selectPointerPreset = selectPointerPreset
         self.clicks = clicks
         self.tripleClickTiming = tripleClickTiming
         self.sequences = sequences
@@ -133,6 +136,11 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
         case .open(let string):
             guard phase != .up else { return }
             DispatchQueue.main.async { Self.open(string) }
+        case let .pointerPreset(deviceID, presetID):
+            guard phase != .up else { return }
+            // The pointer controller is the main actor's, and the tap thread never waits for it.
+            let select = self.selectPointerPreset
+            DispatchQueue.main.async { MainActor.assumeIsolated { select(deviceID, presetID) } }
         }
     }
 

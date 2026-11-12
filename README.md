@@ -18,7 +18,8 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   repeating while the button is held), go back or forward, send a media key (play/pause, track,
   volume, mute or display brightness), open Mission Control, App Windows, Show Desktop,
   Launchpad or Notification Centre, move to the Space on the left or right, switch apps, scroll,
-  open an app, file (by full path or a `~/` path) or web address, or do nothing at all.
+  open an app, file (by full path or a `~/` path) or web address, switch a mouse to one of its
+  pointer speed presets, or do nothing at all.
 - **Triple click.** One press sends three left clicks in a row at the pointer, with optional
   modifier keys, like Double Click. It is a mouse gesture, not a "select paragraph" command: what
   three clicks do is up to the app, and Whisker does not promise that any app responds to them.
@@ -92,6 +93,11 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   you turn Whisker off, while an app on the bypass list is in front, when Whisker quits, or at
   the next launch if it did not quit cleanly. Turning Whisker back on reapplies your settings.
   If macOS will not take a mouse's values back, Whisker says so and keeps trying.
+- **Pointer speed presets.** Save a mouse's custom speed under a name, such as "Fast — ×1.5", and
+  switch between that mouse's presets from Settings, the menu bar menu or a mouse button. A
+  preset is a software speed, not the mouse's DPI, and is not yet verified on hardware. A switch
+  to a much faster speed goes through the same keep-or-revert check as any other speed change.
+  See [Pointer speed presets](#pointer-speed-presets).
 - **Devices.** Lists connected mice and trackballs, including ones you plug in or pair while
   Whisker is running. With several mice connected, allow Input Monitoring so Whisker can tell
   which one each click came from and apply that mouse's settings. Trackpads and touch mice such
@@ -173,8 +179,8 @@ covers every mouse, and changes to the list apply straight away.
 
 - **What stops.** Button remapping, wheel actions and scroll changes, so the app gets the mouse
   as macOS delivers it, and each mouse's own pointer speed and acceleration come back from the
-  system. When you switch to another app your latest settings apply again; anything you edit in
-  the meantime waits until then.
+  system. Pointer speed presets cannot be switched while the app is in front. When you switch to
+  another app your latest settings apply again; anything you edit in the meantime waits until then.
 - **What does not change.** Your profiles and the **Enabled** switch stay as they are, and bypass
   never turns Whisker on: with Whisker off, it stays off. It works with or without Input
   Monitoring and does not change which permissions Whisker needs.
@@ -194,6 +200,40 @@ compatibility with anti-cheat software. Games often start from a launcher, and w
 launcher or the game's own program is in front while you play depends on the game. That has not
 been verified for particular games, so add whichever app is in front while you play. Opening a
 Whisker window brings Whisker to the front, which ends the bypass until you switch back.
+
+## Pointer speed presets
+
+Name the speeds you use and switch between them without dragging a slider. Under
+**Settings › Pointer**, turn on **Custom pointer speed** for a mouse, set the speed and choose
+**Save Current Speed as Preset…**. Each mouse keeps its own list of up to 12 presets, shown as
+"Fast — ×1.5", which you can rename or delete from the same pane. A custom speed that matches
+none of them reads **Custom**.
+
+- **Switching.** Pick a preset in **Settings › Pointer**, from that mouse's **Pointer Speed**
+  submenu in the menu bar menu, or give a button the **Pointer Speed Preset** action under
+  **Buttons** and choose the mouse and the preset. A preset sets the speed only: the mouse's
+  acceleration and **Linear** setting stay as they are. Deleting a preset also removes the button
+  mappings that switch to it, after asking.
+- **Software speed, not DPI.** A preset is a multiplier on the movement the mouse reports. It does
+  not change the mouse's own DPI, which only its maker's software can do.
+- **Keep or revert.** A switch that makes the pointer more than twice as fast waits for you to
+  keep it, like any big speed increase. In Settings press Return to **Keep** or Esc to
+  **Revert**; in the menu choose **Keep Pointer Speed** or **Revert Pointer Speed**. With no
+  answer it goes back by itself after 5 seconds. While one change is waiting, no other switch
+  is accepted, for any mouse.
+- **Recovery.** **Use System Settings**, in the Pointer pane, the menu and the waiting prompt,
+  hands that mouse's speed straight back to the system. If macOS refuses a switch or takes only
+  part of it, Whisker puts the previous speed back and tells you. If it cannot even do that, it
+  keeps the original values and tries again, as it does for any other pointer change.
+- **When it does nothing.** Presets are dormant while Whisker or the mouse is switched off, while
+  **Custom pointer speed** is off for the mouse, while it is not connected (or is one of several
+  identical mice Whisker cannot tell apart), and while the app in front is on the bypass list. The
+  Pointer pane or menu says which. When a mouse reconnects, Whisker applies the last speed you
+  kept, never one that was still waiting to be kept.
+- **Not yet verified on hardware.** Presets have only been tested against a stand-in for the
+  system's pointer settings, not against real mice. If Whisker is force-quit or crashes within
+  the 5 seconds, the speed it was waiting on stays saved and applies at the next launch; use
+  **Use System Settings** to drop it.
 
 ## Device details
 
@@ -304,7 +344,15 @@ brew update && brew upgrade --cask whisker
 - **Two mice share one set of settings.** They report the same vendor and product ids and no
   serial number, so Whisker cannot tell them apart. Their **Details** say so.
 - **The pointer is suddenly too fast.** Wait a few seconds without confirming and Whisker reverts
-  the change. Quitting Whisker also restores the original speed.
+  the change, or press Esc in Settings or choose **Revert Pointer Speed** in the menu. **Use
+  System Settings** hands that mouse back to the system at once, and quitting Whisker also
+  restores the original speed.
+- **A pointer speed preset will not switch.** The preset is greyed out in the menu, or **Use** is
+  greyed out in Settings › Pointer, and pointing at it says why: another speed change is waiting
+  to be kept, Whisker or the mouse is switched off, **Custom pointer speed** is off for the
+  mouse, the mouse is not connected, or the app in front is on the bypass list. If macOS refuses
+  a switch, Whisker puts the previous speed back and says so in the Pointer pane. See
+  [Pointer speed presets](#pointer-speed-presets).
 - **Whisker still changes my mouse in an app I have bypassed.** Bypass follows the app that is in
   front, which in a game may be its launcher or its own program; add the one that is in front
   while you play. Opening a Whisker window ends the bypass until you switch back. See
@@ -344,7 +392,6 @@ Planned after 0.1, in no particular order:
 
 - Tilt-wheel buttons and two-button chords.
 - Auto-scroll and click lock.
-- Quick-switch pointer speed presets.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
 
 ## Contributing

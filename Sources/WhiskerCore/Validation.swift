@@ -98,6 +98,9 @@ extension WhiskerSettings {
                 }
             }
             result.devices[id]?.controlLabels = labels
+            if let current = result.devices[id] {
+                result.devices[id] = Self.repairPresets(of: current, path: path, issues: &issues)
+            }
         }
 
         for (id, device) in result.devices.sorted(by: { $0.key < $1.key }) {
@@ -130,7 +133,7 @@ extension WhiskerSettings {
             if profile.match.devices.isEmpty || profile.match.apps.isEmpty {
                 issues.append(ValidationIssue("\(path).match", "A profile must match at least one device and one app (use “*” for any)."))
             }
-            profiles.append(Self.repair(profile, path: path, allowPrimary: general.allowPrimaryButtonRemap, issues: &issues))
+            profiles.append(Self.repair(profile, path: path, allowPrimary: general.allowPrimaryButtonRemap, devices: result.devices, issues: &issues))
         }
 
         if !profiles.contains(where: \.isDefault) {
@@ -169,7 +172,57 @@ extension WhiskerSettings {
         return (result, issues)
     }
 
-    private static func repair(_ profile: Profile, path: String, allowPrimary: Bool, issues: inout [ValidationIssue]) -> Profile {
+    /// Fixes one device's presets: drops the ones that can't be addressed (no id, a repeated id, over the limit),
+    /// clamps speeds, gives nameless presets a name, and forgets an active preset that isn't usable.
+    private static func repairPresets(of device: DeviceSettings, path: String, issues: inout [ValidationIssue]) -> DeviceSettings {
+        var device = device
+        var seen = Set<String>()
+        var kept: [PointerPreset] = []
+        for (index, preset) in device.pointerPresets.enumerated() {
+            let presetPath = "\(path).pointerPresets[\(index)]"
+            guard !preset.id.isEmpty else {
+                issues.append(ValidationIssue(presetPath, "Preset has no id."))
+                continue
+            }
+            guard seen.insert(preset.id).inserted else {
+                issues.append(ValidationIssue(presetPath, "Another preset already uses the id “\(preset.id)”."))
+                continue
+            }
+            guard kept.count < PointerPreset.maxPerDevice else {
+                issues.append(ValidationIssue(presetPath, "A mouse can have at most \(PointerPreset.maxPerDevice) presets."))
+                continue
+            }
+            var fixed = preset
+            fixed.speed = PointerMath.speedRange.clamp(preset.speed)
+            if fixed.speed != preset.speed || !preset.speed.isFinite {
+                issues.append(ValidationIssue("\(presetPath).speed", "Must be between \(PointerMath.speedRange.lowerBound) and \(PointerMath.speedRange.upperBound)."))
+            }
+            let name = PointerPreset.cleanedName(preset.name)
+            if name.isEmpty {
+                issues.append(ValidationIssue("\(presetPath).name", "A preset needs a name."))
+                fixed.name = PointerPreset.defaultName
+            } else {
+                if preset.name.count > PointerPreset.maxNameLength || preset.name.contains(where: \.isNewline) {
+                    issues.append(ValidationIssue("\(presetPath).name", "A name is one line of at most \(PointerPreset.maxNameLength) characters."))
+                }
+                fixed.name = name
+            }
+            kept.append(fixed)
+        }
+        device.pointerPresets = kept
+        if let active = device.activePointerPresetID {
+            if !kept.contains(where: { $0.id == active }) {
+                issues.append(ValidationIssue("\(path).activePointerPresetID", "No preset has the id “\(active)”."))
+                device.activePointerPresetID = nil
+            } else if device.pointer == nil {
+                issues.append(ValidationIssue("\(path).activePointerPresetID", "A preset is only in use while a custom pointer speed is on."))
+                device.activePointerPresetID = nil
+            }
+        }
+        return device
+    }
+
+    private static func repair(_ profile: Profile, path: String, allowPrimary: Bool, devices: [String: DeviceSettings], issues: inout [ValidationIssue]) -> Profile {
         var profile = profile
         if var scroll = profile.scroll {
             if let lines = scroll.linesPerNotch, !ScrollMath.linesRange.contains(lines) {
@@ -211,6 +264,10 @@ extension WhiskerSettings {
             let mappingPath = "\(path).mappings[\(index)]"
             if let problem = problem(with: mapping, allowPrimary: allowPrimary) {
                 issues.append(ValidationIssue(mappingPath, problem))
+                continue
+            }
+            if case let .pointerPreset(deviceID, presetID) = mapping.action, devices[deviceID]?.pointerPreset(id: presetID) == nil {
+                issues.append(ValidationIssue(mappingPath, "The pointer speed preset doesn’t exist for that mouse."))
                 continue
             }
             guard seenKeys.insert(mapping.key).inserted else {
@@ -258,6 +315,9 @@ extension WhiskerSettings {
             if let problem = ShortcutSequenceLimits.problem(with: steps) { return problem }
         case .open(let url):
             guard Action.openURL(for: url) != nil else { return "“\(url)” is not an app, file or web address." }
+        case let .pointerPreset(deviceID, presetID):
+            guard DeviceIdentity(id: deviceID) != nil else { return "Choose a mouse for the pointer speed preset." }
+            guard !presetID.isEmpty else { return "Choose a pointer speed preset." }
         default:
             break
         }

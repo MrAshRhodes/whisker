@@ -99,10 +99,15 @@ public struct DeviceSettings: Equatable, Sendable {
     public var controlLabels: [ControlLabel]
     /// Opt-in filter for very short duplicate clicks; `nil` leaves clicks alone.
     public var clickDebounce: ClickDebounceSettings?
+    /// Named speeds saved for this device, in the order they are listed. See `PointerPreset`.
+    public var pointerPresets: [PointerPreset]
+    /// The preset the current custom speed was switched to. Nil for a speed set by hand or no custom speed.
+    public var activePointerPresetID: String?
 
     public init(
         name: String = "", enabled: Bool = true, pointer: PointerSettings? = nil, wheel: WheelSettings = WheelSettings(),
-        clickDebounce: ClickDebounceSettings? = nil, controlLabels: [ControlLabel] = []
+        clickDebounce: ClickDebounceSettings? = nil, controlLabels: [ControlLabel] = [],
+        pointerPresets: [PointerPreset] = [], activePointerPresetID: String? = nil
     ) {
         self.name = name
         self.enabled = enabled
@@ -110,6 +115,8 @@ public struct DeviceSettings: Equatable, Sendable {
         self.wheel = wheel
         self.clickDebounce = clickDebounce
         self.controlLabels = controlLabels
+        self.pointerPresets = pointerPresets
+        self.activePointerPresetID = activePointerPresetID
     }
 }
 
@@ -341,7 +348,7 @@ extension GeneralSettings: Codable {
 }
 
 extension DeviceSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel, clickDebounce, controlLabels }
+    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel, clickDebounce, controlLabels, pointerPresets, activePointerPresetID }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -351,6 +358,8 @@ extension DeviceSettings: Codable {
         wheel = try c.decodeIfPresent(WheelSettings.self, forKey: .wheel) ?? WheelSettings()
         clickDebounce = try c.decodeIfPresent(ClickDebounceSettings.self, forKey: .clickDebounce)
         controlLabels = try c.decodeIfPresent([ControlLabel].self, forKey: .controlLabels) ?? []
+        pointerPresets = try c.decodeIfPresent([PointerPreset].self, forKey: .pointerPresets) ?? []
+        activePointerPresetID = try c.decodeIfPresent(String.self, forKey: .activePointerPresetID)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -361,6 +370,8 @@ extension DeviceSettings: Codable {
         try c.encode(wheel, forKey: .wheel)
         try c.encodeIfPresent(clickDebounce, forKey: .clickDebounce)
         if !controlLabels.isEmpty { try c.encode(controlLabels, forKey: .controlLabels) }
+        if !pointerPresets.isEmpty { try c.encode(pointerPresets, forKey: .pointerPresets) }
+        try c.encodeIfPresent(activePointerPresetID, forKey: .activePointerPresetID)
     }
 }
 

@@ -76,10 +76,11 @@ final class AppModel: ObservableObject {
         let store = store ?? SettingsStore()
         self.store = store
         runState = store.loadRunState()
-        pointer = PointerController(originals: runState.originalPointers)
-        wheel = WheelController(records: runState.originalWheels)
         let frontApp = self.frontApp
         let devices = self.devices
+        let pointer = PointerController(originals: runState.originalPointers, store: store, connected: { devices.devices })
+        self.pointer = pointer
+        wheel = WheelController(records: runState.originalWheels)
         let sequences = ShortcutSequenceRunner(
             environment: SystemSequenceEnvironment(frontmost: { frontApp.frontmostInstance }, marker: EventSynthesizer.marker),
             stopped: { reason in
@@ -89,7 +90,13 @@ final class AppModel: ObservableObject {
             }
         )
         self.sequences = sequences
-        let synthesizer = EventSynthesizer(switchApp: { frontApp.switchApp($0) }, sequences: sequences)
+        let synthesizer = EventSynthesizer(
+            switchApp: { frontApp.switchApp($0) },
+            selectPointerPreset: { deviceID, presetID in
+                if case .rejected = pointer.selectPreset(presetID, on: deviceID) { NSSound.beep() }
+            },
+            sequences: sequences
+        )
         engine = EventEngine(
             synthesizer: synthesizer,
             attribute: { devices.attribute($0, at: $1) },
@@ -136,9 +143,6 @@ final class AppModel: ObservableObject {
             self.runState.originalWheels = records
             self.store.saveRunState(self.runState)
         }
-        pointer.revert = { [weak self] deviceID, previous in
-            self?.store.settings.devices[deviceID, default: DeviceSettings()].pointer = previous
-        }
 
         frontApp.start()
         refreshBypass(using: store.settings)
@@ -153,7 +157,8 @@ final class AppModel: ObservableObject {
         frontApp.onActivation = { [weak self] in self?.engine.applicationActivated() }
         devices.onChange = { [weak self] connected in
             guard let self else { return }
-            self.applyPointers(self.store.settings, connected: connected)
+            self.pointer.devicesChanged(connected, bypassed: self.bypassedApp != nil)
+            self.wheel.apply(self.store.settings, connected: connected, bypassed: self.bypassedApp != nil)
             self.engine.devicesChanged(connected: Set(connected.filter { !$0.isExcluded }.map(\.id)))
         }
         devices.start()
@@ -301,6 +306,8 @@ final class AppModel: ObservableObject {
         for id in Array(clickFilterTrials.keys) { revertClickFilter(device: id) }
         permission.stopPolling()
         engine.stop()
+        // A speed still waiting to be kept goes back first, so it isn't saved as if it had been.
+        pointer.revertPending()
         pointer.restoreAll()
         wheel.restoreAll()
         // A mouse that wouldn't take its values back keeps its record, so the next launch tries again.

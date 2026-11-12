@@ -77,6 +77,7 @@ struct ButtonsPane: View {
                 ForEach(profile.wrappedValue.mappings.indices, id: \.self) { index in
                     MappingRow(
                         mapping: mappingBinding(profile, index),
+                        settings: store.settings,
                         allowPrimary: store.settings.general.allowPrimaryButtonRemap,
                         onDelete: { profile.wrappedValue.mappings.remove(at: index) }
                     )
@@ -125,7 +126,7 @@ struct ButtonsPane: View {
                         HStack {
                             TriggerLabel(mapping: item.mapping)
                             Spacer()
-                            Label(item.mapping.action.summary, systemImage: item.mapping.action.symbolName)
+                            Label(store.settings.summary(of: item.mapping.action), systemImage: item.mapping.action.symbolName)
                                 .foregroundStyle(.secondary)
                             Text("from \(store.settings.profile(id: item.sourceProfileID)?.name ?? item.sourceProfileID)")
                                 .font(.footnote).foregroundStyle(.tertiary)
@@ -191,6 +192,7 @@ struct TriggerLabel: View {
 
 struct MappingRow: View {
     @Binding var mapping: Mapping
+    let settings: WhiskerSettings
     let allowPrimary: Bool
     let onDelete: () -> Void
 
@@ -215,7 +217,7 @@ struct MappingRow: View {
                 .buttonStyle(.borderless)
                 .help("Remove this mapping")
             }
-            ActionEditor(action: $mapping.action)
+            ActionEditor(action: $mapping.action, settings: settings)
             if case .wheel = mapping.trigger {
                 Toggle("Repeat for every notch", isOn: $mapping.repeatPerNotch)
             }
@@ -257,14 +259,27 @@ struct MappingRow: View {
 struct ActionEditor: View {
     @EnvironmentObject private var model: AppModel
     @Binding var action: Action
+    let settings: WhiskerSettings
+
+    /// Pointer speed presets are offered once there is a preset to switch to.
+    private var kinds: [ActionKind] {
+        ActionKind.allCases.filter { $0 != .pointerPreset || action.kind == .pointerPreset || settings.firstPointerPreset() != nil }
+    }
+
+    private func newAction(for kind: ActionKind) -> Action {
+        if kind == .pointerPreset, let first = settings.firstPointerPreset() {
+            return .pointerPreset(deviceID: first.deviceID, presetID: first.presetID)
+        }
+        return kind.defaultAction
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Picker("Action", selection: Binding(
                 get: { action.kind },
-                set: { kind in if kind != action.kind { action = kind.defaultAction } }
+                set: { kind in if kind != action.kind { action = newAction(for: kind) } }
             )) {
-                ForEach(ActionKind.allCases) { kind in
+                ForEach(kinds) { kind in
                     Label(kind.title, systemImage: kind.symbolName).tag(kind)
                 }
             }
@@ -350,6 +365,8 @@ struct ActionEditor: View {
                 get: { lines },
                 set: { action = .scroll(direction: direction, lines: $0) }
             ), in: ScrollMath.linesRange)
+        case let .pointerPreset(deviceID, presetID):
+            PointerPresetPicker(action: $action, settings: settings, deviceID: deviceID, presetID: presetID)
         case let .holdToScroll(config):
             Picker("Scroll", selection: Binding(
                 get: { config.axes },
@@ -393,6 +410,57 @@ struct ActionEditor: View {
             }
         case .open(let url):
             OpenField(url: Binding(get: { url }, set: { action = .open(url: $0) }))
+        }
+    }
+}
+
+/// Picks the mouse and the saved speed a button switches to.
+struct PointerPresetPicker: View {
+    @Binding var action: Action
+    let settings: WhiskerSettings
+    let deviceID: String
+    let presetID: String
+
+    private struct MouseChoice: Identifiable {
+        let id: String
+        let name: String
+    }
+
+    /// Mice with presets, and the one this mapping points at even when it has none left. Mice that share a
+    /// name are told apart by their id.
+    private var choices: [MouseChoice] {
+        let listed = settings.devices
+            .filter { !$0.value.pointerPresets.isEmpty || $0.key == deviceID }
+            .sorted { ($0.value.name, $0.key) < ($1.value.name, $1.key) }
+        let names = listed.map { $0.value.name.isEmpty ? $0.key : $0.value.name }
+        return zip(listed, names).map { entry, name in
+            MouseChoice(id: entry.key, name: names.filter { $0 == name }.count > 1 ? "\(name) (\(entry.key))" : name)
+        }
+    }
+
+    var body: some View {
+        let device = settings.devices[deviceID]
+        let preset = device?.pointerPreset(id: presetID)
+        Picker("Mouse", selection: Binding(
+            get: { deviceID },
+            set: { id in action = .pointerPreset(deviceID: id, presetID: settings.devices[id]?.pointerPresets.first?.id ?? "") }
+        )) {
+            ForEach(choices) { Text($0.name).tag($0.id) }
+            if device == nil { Text("Unknown mouse").tag(deviceID) }
+        }
+        Picker("Preset", selection: Binding(
+            get: { presetID },
+            set: { action = .pointerPreset(deviceID: deviceID, presetID: $0) }
+        )) {
+            ForEach(device?.pointerPresets ?? []) { Text($0.label).tag($0.id) }
+            if preset == nil { Text("No preset").tag(presetID) }
+        }
+        if preset == nil {
+            Label("That preset no longer exists. Choose another, or remove this mapping.", systemImage: "exclamationmark.triangle")
+                .font(.footnote).foregroundStyle(.orange)
+        } else {
+            Text("Switches this mouse to the preset’s speed. A big increase has to be kept within a few seconds, or it goes back.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -149,6 +149,9 @@ public enum Action: Hashable, Sendable {
     case holdToScroll(HoldScroll)
     /// An app, file or web address.
     case open(url: String)
+    /// Switch one device's pointer speed to a saved preset. Both ids are explicit, so the mapping keeps
+    /// working when presets are renamed or reordered and never lands on another device.
+    case pointerPreset(deviceID: String, presetID: String)
 
     public var kind: ActionKind {
         switch self {
@@ -167,6 +170,7 @@ public enum Action: Hashable, Sendable {
         case .appSwitch: return .appSwitch
         case .holdToScroll: return .holdToScroll
         case .open: return .open
+        case .pointerPreset: return .pointerPreset
         }
     }
 
@@ -237,6 +241,7 @@ public enum Action: Hashable, Sendable {
         case .appSwitch(let direction): return "Switch to \(direction.title)"
         case .holdToScroll(let config): return config.summary
         case .open(let url): return "Open \(Self.openTitle(url))"
+        case .pointerPreset: return "Pointer Speed Preset"
         }
     }
 
@@ -275,7 +280,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, open
+    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, pointerPreset, open
 
     public var id: String { rawValue }
 
@@ -295,6 +300,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return "Switch App"
         case .scroll: return "Scroll"
         case .holdToScroll: return "Hold to Scroll (Experimental)"
+        case .pointerPreset: return "Pointer Speed Preset"
         case .open: return "Open App, File or Website"
         }
     }
@@ -315,11 +321,13 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return "rectangle.stack"
         case .scroll: return "arrow.up.and.down"
         case .holdToScroll: return "arrow.up.and.down.and.arrow.left.and.right"
+        case .pointerPreset: return "cursorarrow.motionlines"
         case .open: return "arrow.up.forward.app"
         }
     }
 
-    /// The action a new mapping of this kind starts with.
+    /// The action a new mapping of this kind starts with. A pointer speed preset starts without a mouse or
+    /// preset, which validation rejects: pick them (`WhiskerSettings.firstPointerPreset`) before saving.
     public var defaultAction: Action {
         switch self {
         case .passthrough: return .passthrough
@@ -340,6 +348,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return .appSwitch(.next)
         case .scroll: return .scroll(direction: .down, lines: 3)
         case .holdToScroll: return .holdToScroll(HoldScroll())
+        case .pointerPreset: return .pointerPreset(deviceID: "", presetID: "")
         case .open: return .open(url: "")
         }
     }
@@ -348,6 +357,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
 extension Action: Codable {
     private enum CodingKeys: String, CodingKey {
         case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, steps, axes, sensitivity, invertVertical, invertHorizontal
+        case device, preset
     }
 
     public init(from decoder: Decoder) throws {
@@ -386,6 +396,11 @@ extension Action: Codable {
                 invertHorizontal: try container.decodeIfPresent(Bool.self, forKey: .invertHorizontal) ?? false
             ))
         case "open": self = .open(url: try container.decode(String.self, forKey: .url))
+        case "pointerPreset":
+            self = .pointerPreset(
+                deviceID: try container.decode(String.self, forKey: .device),
+                presetID: try container.decode(String.self, forKey: .preset)
+            )
         default:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "Unknown action “\(kind)”.")
         }
@@ -442,6 +457,10 @@ extension Action: Codable {
         case .open(let url):
             try container.encode("open", forKey: .kind)
             try container.encode(url, forKey: .url)
+        case let .pointerPreset(deviceID, presetID):
+            try container.encode("pointerPreset", forKey: .kind)
+            try container.encode(deviceID, forKey: .device)
+            try container.encode(presetID, forKey: .preset)
         }
     }
 }

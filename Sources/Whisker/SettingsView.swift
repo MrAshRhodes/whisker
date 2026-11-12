@@ -349,13 +349,19 @@ struct PointerPane: View {
         Form {
             if let pending = pointer.pending {
                 Section {
-                    HStack {
-                        Label("Keep this pointer speed? It changes back in a few seconds otherwise.", systemImage: "exclamationmark.triangle")
+                    PendingSpeedBanner(store: store, pointer: pointer, pending: pending)
+                        .id(pending.deadline)
+                }
+            }
+            if let notice = pointer.notice {
+                Section {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label(notice.message, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
-                        Button("Revert") { pointer.revertPending() }
-                        Button("Keep") { pointer.confirmPending() }.keyboardShortcut(.defaultAction)
+                        Button("Dismiss") { pointer.dismissNotice() }
                     }
-                    .id(pending.deadline)
                 }
             }
             let mice = devices.devices.filter { !$0.isExcluded }
@@ -363,43 +369,121 @@ struct PointerPane: View {
                 Section { Text("No mouse is connected.").foregroundStyle(.secondary) }
             }
             ForEach(mice) { device in
-                Section(device.name) { deviceSettings(device) }
+                Section(device.name) {
+                    PointerDeviceControls(store: store, devices: devices, pointer: pointer, device: device)
+                }
             }
             Section {
-                Text("Pointer settings apply while Whisker is running and go back to the system’s when it quits, or while an app you’ve bypassed is in front. Trackpads keep their own settings.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Speed here is a software multiplier on what the mouse reports. It isn’t the mouse’s own DPI, which only its maker’s software can change. Pointer settings apply while Whisker is running and go back to the system’s when it quits, or while an app you’ve bypassed is in front. Trackpads keep their own settings.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
+        .onDisappear { pointer.endSpeedEdit() }
     }
+}
 
-    @ViewBuilder private func deviceSettings(_ device: ConnectedDevice) -> some View {
-        let binding = model.deviceBinding(device.id, name: device.name)
-        Toggle("Custom pointer speed", isOn: Binding(
-            get: { binding.wrappedValue.pointer != nil },
-            set: { binding.wrappedValue.pointer = $0 ? PointerSettings() : nil }
-        ))
-        if let current = binding.wrappedValue.pointer {
-            LabeledContent("Speed") {
-                Slider(value: Binding(
-                    get: { current.speed },
-                    set: { binding.wrappedValue.pointer?.speed = $0 }
-                ), in: PointerMath.speedRange) {
-                    EmptyView()
-                } minimumValueLabel: { Text("Slow") } maximumValueLabel: { Text("Fast") } onEditingChanged: { editing in
-                    if editing {
-                        startSpeed[device.id] = binding.wrappedValue.pointer
-                    } else if let before = startSpeed.removeValue(forKey: device.id),
-                              let after = binding.wrappedValue.pointer,
-                              PointerMath.needsConfirmation(confirmed: before?.speed ?? 1, new: after.speed) {
-                        pointer.beginConfirmation(deviceID: device.id, previous: before)
-                    }
+/// Keep, Revert or Use System Settings for a big speed increase, which goes back by itself otherwise.
+struct PendingSpeedBanner: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var pointer: PointerController
+    let pending: PointerController.PendingChange
+
+    var body: some View {
+        let name = store.settings.devices[pending.deviceID]?.name ?? ""
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Keep this pointer speed?", systemImage: "exclamationmark.triangle").font(.headline)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let seconds = max(0, Int(pending.deadline.timeIntervalSince(context.date).rounded(.up)))
+                    Text("\(name.isEmpty ? "This mouse" : name) is now at \(Self.speedText(pending.proposed)). \(seconds > 0 ? "In \(seconds) \(seconds == 1 ? "second" : "seconds") it" : "It") goes back to \(Self.speedText(pending.previous)) unless you keep it.")
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            HStack {
+                Spacer()
+                Button("Use System Settings") { pointer.useSystemSettings(on: pending.deviceID) }
+                Button("Revert") { pointer.revertPending() }.keyboardShortcut(.cancelAction)
+                Button("Keep") { pointer.confirmPending() }.keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private static func speedText(_ selection: PointerSelection) -> String {
+        selection.pointer.map { PointerMath.speedLabel($0.speed) } ?? "the system’s speed"
+    }
+}
+
+/// What is being typed while a preset is renamed or a new one is named. SwiftUI's `@State` isn't available in
+/// this build setup, so a small object holds it.
+final class PresetEditState: ObservableObject {
+    @Published var renamingID: String?
+    @Published var isSaving = false
+    @Published var text = ""
+
+    func startRenaming(_ preset: PointerPreset) {
+        isSaving = false
+        renamingID = preset.id
+        text = preset.name
+    }
+
+    func startSaving() {
+        renamingID = nil
+        isSaving = true
+        text = ""
+    }
+
+    func finish() {
+        renamingID = nil
+        isSaving = false
+        text = ""
+    }
+}
+
+/// One mouse's speed, acceleration and saved speed presets.
+struct PointerDeviceControls: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var devices: DeviceMonitor
+    @ObservedObject var pointer: PointerController
+    let device: ConnectedDevice
+    @StateObject private var edit = PresetEditState()
+
+    var body: some View {
+        let binding = model.deviceBinding(device.id, name: device.name)
+        let saved = binding.wrappedValue
+        // While a change waits to be kept, nothing else may change the speed.
+        let waiting = pointer.pending != nil
+        Toggle("Custom pointer speed", isOn: Binding(
+            get: { saved.pointer != nil },
+            set: { on in
+                if on { binding.wrappedValue.pointer = PointerSettings() } else { pointer.useSystemSettings(on: device.id) }
+            }
+        ))
+        .disabled(waiting && saved.pointer == nil)
+        if let current = saved.pointer {
+            LabeledContent("Speed") {
+                HStack {
+                    Slider(value: Binding(
+                        get: { current.speed },
+                        set: { binding.wrappedValue.setPointerSpeed($0) }
+                    ), in: PointerMath.speedRange) {
+                        EmptyView()
+                    } minimumValueLabel: { Text("Slow") } maximumValueLabel: { Text("Fast") } onEditingChanged: { editing in
+                        if editing { pointer.beginSpeedEdit(on: device.id) } else { pointer.endSpeedEdit() }
+                    }
+                    .accessibilityLabel("Pointer speed")
+                    .accessibilityValue(PointerMath.speedLabel(current.speed))
+                    Text(PointerMath.speedLabel(current.speed)).monospacedDigit().frame(minWidth: 44, alignment: .trailing)
+                }
+            }
+            .disabled(waiting)
+            LabeledContent("Current") { Text(saved.pointerSpeedLabel ?? "Custom").foregroundStyle(.secondary) }
             Toggle("Linear (no acceleration)", isOn: Binding(
                 get: { current.linear },
                 set: { binding.wrappedValue.pointer?.linear = $0 }
             ))
+            .disabled(waiting)
             if !current.linear {
                 LabeledContent("Acceleration") {
                     Slider(value: Binding(
@@ -409,6 +493,7 @@ struct PointerPane: View {
                         EmptyView()
                     } minimumValueLabel: { Text("Less") } maximumValueLabel: { Text("More") }
                 }
+                .disabled(waiting)
             }
             if pointer.unsupported.contains(device.id) {
                 Text("macOS didn’t accept a pointer change for this mouse.").font(.footnote).foregroundStyle(.orange)
@@ -416,26 +501,110 @@ struct PointerPane: View {
         }
         if pointer.restoreFailures.contains(device.id) {
             Text("Whisker couldn’t put this mouse’s own pointer settings back, so its speed and acceleration may still be in use. It keeps trying, and tries again when it next starts.")
-                .font(.footnote).foregroundStyle(.orange)
+                .font(.footnote).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+        }
+        ForEach(saved.pointerPresets) { preset in
+            presetRow(preset, saved: saved)
+        }
+        if saved.pointer != nil { saveRow(saved) }
+        if let reason = dormantReason(saved) {
+            Text(reason).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    // Speeds at the start of a slider drag, to compare against when the drag ends.
-    private var startSpeed: SpeedMemo { SpeedMemo.shared }
-}
+    // MARK: Presets
 
-/// Holds the value a slider started from; SwiftUI's `@State` isn't available in this build setup.
-final class SpeedMemo {
-    @MainActor static let shared = SpeedMemo()
-    private var values: [String: PointerSettings?] = [:]
-
-    subscript(id: String) -> PointerSettings?? {
-        get { values[id] }
-        set { values[id] = newValue }
+    @ViewBuilder private func presetRow(_ preset: PointerPreset, saved: DeviceSettings) -> some View {
+        let active = saved.activePointerPreset?.id == preset.id
+        let refusal = pointer.refusal(forPreset: preset.id, on: device.id)
+        HStack {
+            Image(systemName: "checkmark")
+                .opacity(active ? 1 : 0)
+                .accessibilityHidden(true)
+            if edit.renamingID == preset.id {
+                TextField("Preset name", text: $edit.text)
+                    .onSubmit { commitRename(preset) }
+                Button("Save") { commitRename(preset) }
+                    .disabled(PointerPreset.cleanedName(edit.text).isEmpty)
+                Button("Cancel") { edit.finish() }
+            } else {
+                Text(preset.label)
+                Spacer()
+                if active {
+                    Text("In use").foregroundStyle(.secondary)
+                } else {
+                    Button("Use") { pointer.selectPreset(preset.id, on: device.id) }
+                        .disabled(refusal != nil)
+                        .help(refusal?.message(device: device.name) ?? "Switch \(device.name) to \(preset.label)")
+                        .accessibilityLabel("Use \(preset.name)")
+                }
+                Button { edit.startRenaming(preset) } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Rename this preset")
+                    .accessibilityLabel("Rename \(preset.name)")
+                Button { delete(preset) } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Delete this preset")
+                    .accessibilityLabel("Delete \(preset.name)")
+            }
+        }
     }
 
-    func removeValue(forKey id: String) -> PointerSettings?? {
-        values.removeValue(forKey: id)
+    @ViewBuilder private func saveRow(_ saved: DeviceSettings) -> some View {
+        if edit.isSaving {
+            HStack {
+                TextField("Preset name", text: $edit.text)
+                    .onSubmit { commitSave() }
+                Button("Save") { commitSave() }
+                Button("Cancel") { edit.finish() }
+            }
+        } else if saved.pointerPresets.count < PointerPreset.maxPerDevice {
+            Button("Save Current Speed as Preset…") { edit.startSaving() }
+                .disabled(pointer.isBusy)
+        } else {
+            Text("A mouse can have \(PointerPreset.maxPerDevice) presets. Delete one to save another.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Why switching presets does nothing for now, when that is down to settings rather than the mouse.
+    private func dormantReason(_ saved: DeviceSettings) -> String? {
+        guard let first = saved.pointerPresets.first,
+              let refusal = store.settings.pointerPresetRefusal(deviceID: device.id, presetID: first.id, connected: devices.devices),
+              [PointerPresetRefusal.whiskerOff, .deviceOff, .customSpeedOff].contains(refusal)
+        else { return nil }
+        return refusal.message(device: device.name)
+    }
+
+    private func commitSave() {
+        var settings = store.settings
+        guard settings.devices[device.id]?.savePointerPreset(named: edit.text) != nil else { return }
+        store.settings = settings
+        edit.finish()
+    }
+
+    private func commitRename(_ preset: PointerPreset) {
+        var settings = store.settings
+        guard settings.devices[device.id]?.renamePointerPreset(id: preset.id, to: edit.text) == true else { return }
+        store.settings = settings
+        edit.finish()
+    }
+
+    private func delete(_ preset: PointerPreset) {
+        let uses = store.settings.mappingCount(usingPointerPreset: preset.id, on: device.id)
+        if uses > 0 {
+            let alert = NSAlert()
+            alert.messageText = "Delete “\(preset.name)”?"
+            alert.informativeText = uses == 1
+                ? "A button mapping switches to this preset. It is removed too."
+                : "\(uses) button mappings switch to this preset. They are removed too."
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            alert.buttons.first?.hasDestructiveAction = true
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        store.settings.deletePointerPreset(id: preset.id, on: device.id)
+        if edit.renamingID == preset.id { edit.finish() }
     }
 }
 
@@ -666,7 +835,7 @@ struct DevicesPane: View {
                         deviceRow(
                             devices.rememberedDetails(id: entry.id, name: entry.settings.name),
                             name: entry.settings.name.isEmpty ? entry.id : entry.settings.name,
-                            forget: { store.settings.devices[entry.id] = nil }
+                            forget: { store.settings.forgetDevice(id: entry.id) }
                         )
                     }
                 }

@@ -49,8 +49,7 @@
           <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li><li><a href="#duplicate-clicks">Duplicate clicks</a></li></ol></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#tilt-wheel">Tilt-wheel controls</a></li><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li></ol></li>
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#smooth-notched-scrolling">Smooth notched scrolling</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
-          <li><a href="#pointer">Pointer</a></li>
-          <li><a href="#profiles">Profiles</a></li>
+          <li><a href="#pointer">Pointer</a><ol><li><a href="#pointer-presets">Speed presets</a></li></ol></li>          <li><a href="#profiles">Profiles</a></li>
           <li><a href="#application-bypass">Application bypass</a></li>
           <li><a href="#settings-file">Settings file</a></li>
           <li><a href="#updates">Updates</a></li>
@@ -107,6 +106,8 @@ make app</code></pre>
               <tr><th scope="row">Profile: <i>name</i></th><td>The profile in use for the app in front. Shows <span class="ui">Grant Accessibility Access…</span> instead when access is missing.</td></tr>
               <tr><th scope="row">Bypassed for <i>app</i></th><td>Shown instead of the profile while an app on your <a href="#application-bypass">bypass list</a> is in front. Whisker is standing aside for it, and <span class="ui">Enabled</span> is unchanged.</td></tr>
               <tr><th scope="row">Pointer settings couldn't be restored…</th><td>Appears when macOS wouldn't take a mouse's pointer speed or acceleration back. It opens <span class="ui">Settings › Pointer</span>, and Whisker keeps trying.</td></tr>
+              <tr><th scope="row">Pointer Speed — <i>mouse</i></th><td>A submenu for each connected mouse that has <a href="#pointer-presets">saved speed presets</a>: a row for each preset, ticked while it's in use, then <span class="ui">Custom</span> while the speed matches none of them and <span class="ui">Use System Settings</span>. A row that can't be used right now is greyed out, and pointing at it says why.</td></tr>
+              <tr><th scope="row"><i>Mouse</i> is at <i>speed</i>. Keep it?</th><td>Shown while a big speed increase is waiting, with <span class="ui">Keep Pointer Speed</span>, <span class="ui">Revert Pointer Speed</span> and <span class="ui">Use System Settings</span>. See <a href="#pointer-presets">Speed presets</a>.</td></tr>
               <tr><th scope="row">Settings…</th><td>Opens the settings window.</td></tr>
               <tr><th scope="row">Check for Updates…</th><td>Looks for a new version now. See <a href="#updates">Updates</a>.</td></tr>
               <tr><th scope="row">About Whisker</th><td>Version, licence and links.</td></tr>
@@ -212,7 +213,7 @@ make app</code></pre>
               <tr><th scope="row">Switch App</th><td>Brings forward the app you used last, or the one you've used least recently.</td></tr>
               <tr><th scope="row">Scroll</th><td>Scrolls up, down, left or right by 1 to 20 lines.</td></tr>
               <tr><th scope="row">Hold to Scroll (Experimental)</th><td>While you hold the button, rolling the ball scrolls instead of moving the pointer, which stays put and doesn't jump when you let go. Choose vertical, horizontal, both directions or Automatic Axis Lock (each hold picks vertical or horizontal from its first movement, drops sideways drift, and a diagonal counts as vertical; its threshold is provisional and has not been checked on thumb or finger trackballs), a speed from ×0.1 to ×5 and whether each direction is reversed. It needs <a href="#permissions">Input Monitoring</a>, has not yet been verified on hardware, and falls back to normal pointer movement when Whisker can't tell which mouse you're using.</td></tr>
-              <tr><th scope="row">Open App, File or Website</th><td>Opens an app, file, folder or web address. Paths can be full paths or start with <code>~/</code>.</td></tr>
+              <tr><th scope="row">Pointer Speed Preset</th><td>Switches one mouse to one of its saved <a href="#pointer-presets">pointer speed presets</a>. It's offered once a mouse has a preset; choose the <span class="ui">Mouse</span> and the <span class="ui">Preset</span>. It follows the same rules as switching in Settings or the menu, including keep-or-revert, and a switch that isn't allowed beeps and changes nothing.</td></tr>              <tr><th scope="row">Open App, File or Website</th><td>Opens an app, file, folder or web address. Paths can be full paths or start with <code>~/</code>.</td></tr>
             </tbody>
           </table>
 
@@ -300,9 +301,25 @@ make app</code></pre>
             <li><span class="ui">Acceleration</span>, from 0 to 3. The macOS default is about 0.69.</li>
             <li><span class="ui">Linear (no acceleration)</span>, so the pointer moves the same distance however fast you move.</li>
           </ul>
-          <p>If you more than double the speed, Whisker asks <span class="ui">Keep this pointer speed? It changes back in a few seconds otherwise.</span> Choose <span class="ui">Keep</span>, or wait five seconds or choose <span class="ui">Revert</span> to go back. This saves you from a pointer too fast to reach the button.</p>
+          <p>If you more than double the speed, by dragging the slider or switching to a faster preset, Whisker asks <span class="ui">Keep this pointer speed?</span> and counts down five seconds. Choose <span class="ui">Keep</span> (<kbd>Return</kbd>), or choose <span class="ui">Revert</span> (<kbd>Esc</kbd>) or wait to go back. <span class="ui">Use System Settings</span> hands the mouse back to macOS instead. This saves you from a pointer too fast to reach the button.</p>
           <p>Whisker applies your settings again when the mouse reconnects. Switching Whisker off, quitting it, or bringing an app on your <a href="#application-bypass">bypass list</a> to the front puts your Mac's own settings back, and if Whisker ever stops unexpectedly, it puts them back the next time it opens.</p>
           <p>Some mice don't accept pointer changes. If so, Whisker shows <span class="ui">macOS didn't accept a pointer change for this mouse.</span> If a mouse won't take its own settings back, Whisker says so and keeps trying; see <a href="#troubleshooting">Troubleshooting</a>.</p>
+
+          <h3 id="pointer-presets">Speed presets</h3>
+          <p>Name the speeds you use and switch between them without dragging a slider. With <span class="ui">Custom pointer speed</span> on, set the speed and choose <span class="ui">Save Current Speed as Preset…</span>. Each mouse keeps its own list of up to 12 presets, shown as <span class="ui">Fast — ×1.5</span>, which you can rename or delete from the same pane. A custom speed that matches none of them reads <span class="ui">Custom</span>.</p>
+          <ul>
+            <li>Switching: choose <span class="ui">Use</span> beside a preset in <span class="ui">Settings › Pointer</span>, pick it from that mouse's <span class="ui">Pointer Speed</span> submenu in the <a href="#menu-bar">menu bar</a>, or map a button to <a href="#actions">Pointer Speed Preset</a>. A preset sets the speed only: the mouse's acceleration and <span class="ui">Linear</span> setting stay as they are.</li>
+            <li>Software speed, not DPI: a preset is a multiplier on the movement the mouse reports, the same as the speed slider. It doesn't change the mouse's own DPI, which only its maker's software can do.</li>
+            <li>Keep or revert: a switch that more than doubles the speed gets the same prompt as the slider. In Settings, <kbd>Return</kbd> keeps it and <kbd>Esc</kbd> reverts it; in the menu, choose <span class="ui">Keep Pointer Speed</span> or <span class="ui">Revert Pointer Speed</span>. With no answer it goes back by itself after five seconds. When a button starts a switch that needs keeping, Whisker opens <span class="ui">Settings › Pointer</span> so the keys work.</li>
+            <li>One change at a time: while a change is waiting to be kept or reverted, no other switch is accepted, for any mouse, and the preset rows are greyed out.</li>
+            <li>Recovery: <span class="ui">Use System Settings</span>, in the Pointer pane, the menu and the waiting prompt, hands that mouse's speed straight back to macOS. If macOS refuses a switch or takes only part of it, Whisker puts the previous speed back and says so in the Pointer pane. If it can't even do that, it keeps the original values and tries again, as for any other pointer change.</li>
+            <li>When it does nothing: switching is refused while Whisker or the mouse is switched off, while <span class="ui">Custom pointer speed</span> is off for the mouse, while it isn't connected (or is one of several identical mice Whisker can't tell apart), and while the app in front is on your <a href="#application-bypass">bypass list</a>. The Pointer pane says why, and a greyed-out menu row shows the reason when you point at it.</li>
+            <li>Reconnecting: when a mouse comes back, Whisker applies the last speed you kept, never one that was still waiting to be kept.</li>
+            <li>Deleting: deleting a preset also removes the button mappings that switch to it, and Whisker asks first when there are any. Forgetting a mouse under <span class="ui">Not Connected</span> in <span class="ui">Settings › Devices</span> removes its presets and those mappings too.</li>
+          </ul>
+          <div class="callout-note">
+            <p>Not yet verified on hardware: speed presets have only been tested against a stand-in for the system's pointer settings, not against real mice, so how each mouse responds to a switch hasn't been confirmed. If Whisker is force-quit or crashes within the five seconds, the speed it was waiting on stays saved and applies at the next launch; choose <span class="ui">Use System Settings</span> to drop it.</p>
+          </div>
         </section>
 
         <section aria-labelledby="profiles">
@@ -321,7 +338,7 @@ make app</code></pre>
           <h2 id="application-bypass">Application bypass</h2>
           <p>If an app, such as a game, should get your mouse exactly as macOS delivers it, you can tell Whisker to stand aside while that app is in front. Add the app under <span class="ui">Settings › Applications › Application Bypass</span> with <span class="ui">Bypass Running App</span> or <span class="ui">Choose App to Bypass…</span>, or tick <span class="ui">Bypass Whisker in this application</span> on an app profile. It covers every mouse, and changes to the list apply straight away.</p>
           <ul>
-            <li>What stops: button remapping, wheel actions and scroll changes. Each mouse's own pointer speed and acceleration come back from the system too.</li>
+            <li>What stops: button remapping, wheel actions and scroll changes. Each mouse's own pointer speed and acceleration come back from the system too, and <a href="#pointer-presets">pointer speed presets</a> can't be switched until you leave the app.</li>
             <li>What doesn't change: your profiles and the <span class="ui">Enabled</span> switch stay as they are. Bypass never turns Whisker on, so if Whisker is off it stays off. The menu shows <span class="ui">Bypassed for <i>app</i></span> separately from <span class="ui">Enabled</span>.</li>
             <li>When the app comes forward: anything Whisker was holding, such as a button held down for a drag or a shortcut that's repeating, is let go once. The real release that follows isn't passed on to an app that never saw the press.</li>
             <li>When you switch to another app: your latest settings apply again. Anything you edit in the meantime waits until then.</li>
@@ -412,6 +429,10 @@ make app</code></pre>
           <p>If you turned on <a href="#duplicate-clicks">Duplicate clicks</a>, a quick deliberate double-click can be ignored. Press <span class="ui">Turn Off Filter</span> under the mouse in Settings › Devices, or lower the time.</p>
           <h3>Pointer speed won't change</h3>
           <p>Some mice don't accept pointer changes from macOS. Whisker tells you when that happens.</p>
+          <h3>A pointer speed preset won't switch</h3>
+          <p>The preset is greyed out in the menu, or <span class="ui">Use</span> is greyed out in <span class="ui">Settings › Pointer</span>; point at it to see why. Another speed change may be waiting to be kept or reverted, Whisker or the mouse may be switched off, <span class="ui">Custom pointer speed</span> may be off for the mouse, the mouse may not be connected, or the app in front may be on your <a href="#application-bypass">bypass list</a>. When a switch from a mapped button isn't allowed, Whisker beeps and changes nothing. If macOS refuses the new speed, Whisker puts the previous one back and says so in the Pointer pane. See <a href="#pointer-presets">Speed presets</a>.</p>
+          <h3>The pointer is suddenly too fast</h3>
+          <p>Wait for the countdown: unless you keep it, Whisker goes back to the speed from before the change after five seconds. To go back at once, press <kbd>Esc</kbd> in <span class="ui">Settings › Pointer</span> or choose <span class="ui">Revert Pointer Speed</span> in the menu. <span class="ui">Use System Settings</span> hands the mouse back to macOS, and quitting Whisker also puts your Mac's own settings back.</p>
           <h3>Whisker still changes my mouse in an app I've bypassed</h3>
           <p>Bypass follows the app that's in front, which for a game may be its launcher or its own program. Add the one that's in front while you play. Opening a Whisker window ends the bypass until you switch back. See <a href="#application-bypass">Application bypass</a>.</p>
           <h3>The menu says pointer settings couldn't be restored</h3>

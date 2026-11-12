@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = UpdateController.shared
         NSApp.mainMenu = makeMainMenu()
         model.onStatusChange = { [weak self] in self?.refreshStatusItem() }
+        model.pointer.onAttention = { [weak self] in self?.showPointerSettings() }
         model.start()
         refreshStatusItem()
         if !model.permission.isTrusted {
@@ -125,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             grant.target = self
             menu.addItem(grant)
         }
+        addPointerItems(to: menu)
         if !model.pointer.restoreFailures.isEmpty {
             let warning = NSMenuItem(title: "Pointer settings couldn’t be restored…", action: #selector(showPointerSettings), keyEquivalent: "")
             warning.target = self
@@ -150,6 +152,90 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(about)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Whisker", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    }
+
+    /// What a pointer speed menu item stands for.
+    private struct PointerChoice {
+        var deviceID: String
+        var presetID: String?
+    }
+
+    /// A speed change waiting to be kept or reverted, and a submenu for each mouse that has saved speed presets.
+    private func addPointerItems(to menu: NSMenu) {
+        let pointer = model.pointer
+        let settings = model.store.settings
+        var items: [NSMenuItem] = []
+        if let pending = pointer.pending {
+            let mouse = settings.devices[pending.deviceID]?.name ?? ""
+            let speed = pending.proposed.pointer.map { PointerMath.speedLabel($0.speed) } ?? "the system speed"
+            items.append(NSMenuItem(title: "\(mouse.isEmpty ? "This mouse" : mouse) is at \(speed). Keep it?", action: nil, keyEquivalent: ""))
+            items.append(pointerItem("Keep Pointer Speed", #selector(keepPointerSpeed)))
+            items.append(pointerItem("Revert Pointer Speed", #selector(revertPointerSpeed)))
+            items.append(pointerItem("Use System Settings", #selector(useSystemPointerSpeed(_:)), choice: PointerChoice(deviceID: pending.deviceID)))
+        }
+        var seen = Set<String>()
+        for device in model.devices.devices where !device.isExcluded && seen.insert(device.id).inserted {
+            guard let saved = settings.devices[device.id], !saved.pointerPresets.isEmpty else { continue }
+            items.append(pointerSubmenuItem(for: device, saved: saved))
+        }
+        guard !items.isEmpty else { return }
+        menu.addItem(.separator())
+        items.forEach(menu.addItem)
+    }
+
+    private func pointerItem(_ title: String, _ action: Selector, choice: PointerChoice? = nil) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = choice
+        return item
+    }
+
+    /// "Pointer Speed — MX Master", with a row per preset, "Custom" while the speed matches none of them, and
+    /// Use System Settings. A row that can't be used right now is greyed out and says why in its tooltip.
+    private func pointerSubmenuItem(for device: ConnectedDevice, saved: DeviceSettings) -> NSMenuItem {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for preset in saved.pointerPresets {
+            let refusal = model.pointer.refusal(forPreset: preset.id, on: device.id)
+            let row = pointerItem(preset.label, #selector(selectPointerPreset(_:)), choice: PointerChoice(deviceID: device.id, presetID: preset.id))
+            row.state = saved.activePointerPreset?.id == preset.id ? .on : .off
+            row.isEnabled = refusal == nil
+            row.toolTip = refusal?.message(device: device.name)
+            submenu.addItem(row)
+        }
+        if saved.pointer != nil, saved.activePointerPreset == nil {
+            let custom = NSMenuItem(title: "Custom", action: nil, keyEquivalent: "")
+            custom.state = .on
+            custom.isEnabled = false
+            submenu.addItem(custom)
+        }
+        submenu.addItem(.separator())
+        let system = pointerItem("Use System Settings", #selector(useSystemPointerSpeed(_:)), choice: PointerChoice(deviceID: device.id))
+        system.state = saved.pointer == nil ? .on : .off
+        system.isEnabled = saved.pointer != nil
+        submenu.addItem(system)
+
+        let item = NSMenuItem(title: "Pointer Speed — \(device.name)", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func selectPointerPreset(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? PointerChoice, let presetID = choice.presetID else { return }
+        if case .rejected = model.pointer.selectPreset(presetID, on: choice.deviceID) { NSSound.beep() }
+    }
+
+    @objc private func useSystemPointerSpeed(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? PointerChoice else { return }
+        model.pointer.useSystemSettings(on: choice.deviceID)
+    }
+
+    @objc private func keepPointerSpeed() {
+        model.pointer.confirmPending()
+    }
+
+    @objc private func revertPointerSpeed() {
+        model.pointer.revertPending()
     }
 
     @objc private func cancelSequence() {

@@ -32,8 +32,9 @@ public enum SettingsCodec {
             // shape; anything missing takes its default when decoded, and an empty file gets the default profile.
             if json["profiles"] == nil { json["profiles"] = [] as [Any] }
         case 1:
-            // Version 2 only adds the shortcutSequence action, which a version 1 file can't contain. The bump
-            // makes a Whisker that predates it leave a file that uses one alone instead of failing to read it.
+            // Version 2 added the shortcutSequence action and, per device, pointer presets and the pointerPreset
+            // action. A version 1 file can't contain any of them, so it already has the version 2 shape. The bump
+            // makes a Whisker that predates them leave a file that uses them alone instead of failing to read it.
             break
         default:
             throw Failure.unreadable("No upgrade from schema \(version).")

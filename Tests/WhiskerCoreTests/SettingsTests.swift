@@ -47,6 +47,7 @@ struct SettingsTests {
             .missionControl(.appWindows), .space(.right), .appSwitch(.previous),
             .holdToScroll(HoldScroll(axes: .free, sensitivity: 2.5, invertVertical: true, invertHorizontal: false)),
             .open(url: "https://example.com"),
+            .pointerPreset(deviceID: "046d:c52b", presetID: "fast"),
             .shortcutSequence([
                 SequenceStep(shortcut: KeyShortcut(keyCode: 0x00, modifiers: .command), delayAfterMs: 150),
                 SequenceStep(shortcut: KeyShortcut(keyCode: 0x08, modifiers: [.command, .shift])),
@@ -177,6 +178,47 @@ struct SettingsTests {
         #expect(settings.profiles == [.makeDefault()])
     }
 
+    @Test func versionOneFilesUpgradeKeepingEverythingTheyHad() throws {
+        let json = """
+        {"schemaVersion":1,"future":{"x":[1,true,null]},"general":{"enabled":false},
+         "devices":{"046d:c52b":{"name":"Mouse","pointer":{"speed":1.5,"acceleration":0.5,"linear":true},"wheel":{"invertVertical":true}}},
+         "profiles":[{"id":"default","mappings":[{"trigger":{"type":"button","button":3},"action":{"kind":"none"}}]}]}
+        """
+        let settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        #expect(settings.schemaVersion == WhiskerSettings.currentSchemaVersion)
+        #expect(settings.general.enabled == false)
+        #expect(settings.devices["046d:c52b"] == DeviceSettings(
+            name: "Mouse", pointer: PointerSettings(speed: 1.5, acceleration: 0.5, linear: true), wheel: WheelSettings(invertVertical: true)
+        ))
+        #expect(settings.defaultProfile.mappings == [Mapping(trigger: .button(3), action: .none)])
+
+        // Saving adds nothing the old file didn't have, and keeps what this version doesn't know about.
+        let saved = try #require(JSONSerialization.jsonObject(with: SettingsCodec.encode(settings)) as? [String: Any])
+        #expect(saved["schemaVersion"] as? Int == WhiskerSettings.currentSchemaVersion)
+        #expect(saved["future"] != nil)
+        let device = try #require((saved["devices"] as? [String: [String: Any]])?["046d:c52b"])
+        #expect(device["pointerPresets"] == nil)
+        #expect(device["activePointerPresetID"] == nil)
+    }
+
+    @Test func presetsAndTheirActionsKeepTheirFileFormat() throws {
+        let json = """
+        {"schemaVersion":2,"devices":{"046d:c52b":{"pointer":{"speed":1.5},"activePointerPresetID":"fast",
+         "pointerPresets":[{"id":"fast","name":"Fast","speed":1.5},{"id":"slow","name":"Slow","speed":0.5}]}},
+         "profiles":[{"id":"default","mappings":[{"trigger":{"type":"button","button":3},
+         "action":{"kind":"pointerPreset","device":"046d:c52b","preset":"slow"}}]}]}
+        """
+        let settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        let device = try #require(settings.devices["046d:c52b"])
+        #expect(device.pointerPresets == [PointerPreset(id: "fast", name: "Fast", speed: 1.5), PointerPreset(id: "slow", name: "Slow", speed: 0.5)])
+        #expect(device.activePointerPresetID == "fast")
+        #expect(settings.defaultProfile.mappings.map(\.action) == [.pointerPreset(deviceID: "046d:c52b", presetID: "slow")])
+        #expect(try SettingsCodec.decode(SettingsCodec.encode(settings)) == settings)
+
+        let missingPreset = #"{"kind":"pointerPreset","device":"046d:c52b"}"#
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(Action.self, from: Data(missingPreset.utf8)) }
+    }
+
     @Test func filesWithoutABypassListDecodeAsBefore() throws {
         let json = #"{"schemaVersion":1,"general":{"enabled":false,"showMenuBarIcon":false,"allowPrimaryButtonRemap":true},"future":1}"#
         let settings = try SettingsCodec.decode(Data(json.utf8))
@@ -291,6 +333,59 @@ struct SettingsTests {
         let json = #"{"schemaVersion":1,"profiles":[{"id":"default","mappings":[{"trigger":{"type":"button","button":0},"action":{"kind":"none"}}]}]}"#
         #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decodeValidated(Data(json.utf8)) }
         #expect(try SettingsCodec.decodeRepairing(Data(json.utf8)).settings.defaultProfile.mappings.isEmpty)
+    }
+
+    @Test func repairFixesPointerPresets() throws {
+        let id = "046d:c52b"
+        var settings = WhiskerSettings()
+        settings.devices[id] = DeviceSettings(
+            pointer: PointerSettings(speed: 1.5),
+            pointerPresets: [
+                PointerPreset(id: "ok", name: "Fast", speed: 1.5),
+                PointerPreset(id: "", name: "No id", speed: 1),
+                PointerPreset(id: "ok", name: "Repeated id", speed: 2),
+                PointerPreset(id: "wild", name: "  ", speed: 50),
+                PointerPreset(id: "long", name: String(repeating: "x", count: 60) + "\nsecond line", speed: 1),
+            ],
+            activePointerPresetID: "gone"
+        )
+        settings.devices["1234:5678"] = DeviceSettings(pointerPresets: [PointerPreset(id: "p", name: "P", speed: 2)], activePointerPresetID: "p")
+        settings.devices["9abc:def0"] = DeviceSettings(
+            pointerPresets: (0..<PointerPreset.maxPerDevice + 2).map { PointerPreset(id: "p\($0)", name: "Preset \($0)", speed: 1) }
+        )
+        settings.profiles[0].mappings = [
+            Mapping(trigger: .button(3), action: .pointerPreset(deviceID: id, presetID: "ok")),
+            Mapping(trigger: .button(4), action: .pointerPreset(deviceID: id, presetID: "missing")),
+            Mapping(trigger: .button(5), action: .pointerPreset(deviceID: "0000:0001", presetID: "ok")),
+            Mapping(trigger: .button(6), action: .pointerPreset(deviceID: "", presetID: "")),
+        ]
+
+        let (repaired, issues) = settings.repairedWithIssues()
+        #expect(!issues.isEmpty)
+        #expect(repaired.validate().isEmpty)
+        let device = try #require(repaired.devices[id])
+        #expect(device.pointerPresets.map(\.id) == ["ok", "wild", "long"])
+        #expect(device.pointerPresets[1] == PointerPreset(id: "wild", name: PointerPreset.defaultName, speed: 5))
+        #expect(device.pointerPresets[2].name == String(repeating: "x", count: PointerPreset.maxNameLength))
+        #expect(device.activePointerPresetID == nil)
+        #expect(repaired.devices["1234:5678"]?.activePointerPresetID == nil)
+        #expect(repaired.devices["9abc:def0"]?.pointerPresets.count == PointerPreset.maxPerDevice)
+        #expect(repaired.defaultProfile.mappings.map(\.trigger) == [.button(3)])
+    }
+
+    @Test func importsWithBrokenPresetsAreRejectedAndRepairedOnLoad() throws {
+        let json = """
+        {"schemaVersion":2,"devices":{"046d:c52b":{"pointer":{"speed":2},"activePointerPresetID":"a",
+         "pointerPresets":[{"id":"a","name":"A","speed":2},{"id":"a","name":"B","speed":3}]}},
+         "profiles":[{"id":"default","mappings":[{"trigger":{"type":"button","button":3},
+         "action":{"kind":"pointerPreset","device":"046d:c52b","preset":"zzz"}}]}]}
+        """
+        #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decodeValidated(Data(json.utf8)) }
+        let loaded = try SettingsCodec.decodeRepairing(Data(json.utf8))
+        #expect(!loaded.issues.isEmpty)
+        #expect(loaded.settings.devices["046d:c52b"]?.pointerPresets == [PointerPreset(id: "a", name: "A", speed: 2)])
+        #expect(loaded.settings.devices["046d:c52b"]?.activePointerPresetID == "a")
+        #expect(loaded.settings.defaultProfile.mappings.isEmpty)
     }
 
     @Test func repairTidiesTheBypassList() throws {
@@ -485,6 +580,216 @@ struct SettingsTests {
         #expect(table.status(of: .moveLeftSpace) == .disabled)
         #expect(table.status(of: .moveRightSpace) == .unassigned)
         #expect(table.status(of: .showDesktop) == SystemShortcutID.showDesktop.factoryDefault)
+    }
+
+    // MARK: Pointer speed presets
+
+    private static let mouseID = "046d:c52b"
+
+    private func presetDevice() -> DeviceSettings {
+        DeviceSettings(
+            name: "Mouse", pointer: PointerSettings(speed: 1, acceleration: 0.25, linear: true),
+            pointerPresets: [PointerPreset(id: "fast", name: "Fast", speed: 1.5), PointerPreset(id: "slow", name: "Slow", speed: 0.5)]
+        )
+    }
+
+    private func presetSettings() -> WhiskerSettings {
+        var settings = WhiskerSettings()
+        settings.devices[Self.mouseID] = presetDevice()
+        return settings
+    }
+
+    @Test func speedsAreLabelledAsMultipliers() {
+        #expect(PointerMath.speedLabel(1.5) == "×1.5")
+        #expect(PointerMath.speedLabel(2) == "×2")
+        #expect(PointerMath.speedLabel(0.25) == "×0.25")
+        #expect(PointerMath.speedLabel(1.000_000_1) == "×1")
+        #expect(PointerMath.speedLabel(50) == "×5")
+        #expect(PointerPreset(name: "Fast", speed: 1.5).label == "Fast — ×1.5")
+    }
+
+    @Test func savedPresetsGetCleanUniqueNamesUpToTheLimit() throws {
+        var device = DeviceSettings(pointer: PointerSettings(speed: 1.5))
+        let saved = device.savePointerPreset(named: "  Fast ")
+        let first = try #require(saved)
+        #expect(first.name == "Fast")
+        #expect(first.speed == 1.5)
+        #expect(device.activePointerPresetID == first.id)
+        let repeated = device.savePointerPreset(named: "fast")
+        let blank = device.savePointerPreset(named: "\n ")
+        let long = device.savePointerPreset(named: String(repeating: "y", count: 80))
+        #expect(repeated?.name == "fast 2")
+        #expect(blank?.name == PointerPreset.defaultName)
+        #expect(long?.name.count == PointerPreset.maxNameLength)
+        while device.pointerPresets.count < PointerPreset.maxPerDevice { device.savePointerPreset(named: "Another") }
+        let overflow = device.savePointerPreset(named: "One too many")
+        #expect(overflow == nil)
+        #expect(Set(device.pointerPresets.map { $0.name.lowercased() }).count == PointerPreset.maxPerDevice)
+        #expect(Set(device.pointerPresets.map(\.id)).count == PointerPreset.maxPerDevice)
+
+        // Presets are saved from a custom speed, so there is nothing to save while the system speed is in use.
+        var system = DeviceSettings()
+        let nothing = system.savePointerPreset(named: "Fast")
+        #expect(nothing == nil)
+        #expect(system.pointerPresets.isEmpty)
+    }
+
+    @Test func renamingAndDeletingPresets() {
+        var device = presetDevice()
+        device.selectPointerPreset(id: "fast")
+        let renamedSlow = device.renamePointerPreset(id: "slow", to: "FAST")
+        let renamedFast = device.renamePointerPreset(id: "fast", to: " Fast ")
+        let blankName = device.renamePointerPreset(id: "fast", to: "  ")
+        let unknown = device.renamePointerPreset(id: "gone", to: "Name")
+        #expect(renamedSlow && renamedFast)
+        #expect(!blankName && !unknown)
+        #expect(device.pointerPreset(id: "slow")?.name == "FAST 2")
+        #expect(device.pointerPreset(id: "fast")?.name == "Fast")
+        #expect(device.pointerPresets.map(\.id) == ["fast", "slow"])
+        #expect(device.pointerSpeedLabel == "Fast — ×1.5")
+
+        // Deleting the preset in use keeps the speed it set, which now counts as a custom one.
+        let deleted = device.deletePointerPreset(id: "fast")
+        let deletedAgain = device.deletePointerPreset(id: "fast")
+        #expect(deleted && !deletedAgain)
+        #expect(device.pointer?.speed == 1.5)
+        #expect(device.activePointerPresetID == nil)
+        #expect(device.pointerSpeedLabel == "Custom")
+        #expect(device.pointerPresets.map(\.id) == ["slow"])
+    }
+
+    @Test func selectingAPresetOnlyChangesTheSpeed() {
+        var device = presetDevice()
+        #expect(device.pointerSpeedLabel == "Custom")
+        let selected = device.selectPointerPreset(id: "fast")
+        #expect(selected)
+        #expect(device.pointer == PointerSettings(speed: 1.5, acceleration: 0.25, linear: true))
+        #expect(device.pointerSpeedLabel == "Fast — ×1.5")
+        #expect(device.pointerSelection == PointerSelection(pointer: device.pointer, presetID: "fast"))
+
+        // A speed set by hand is no longer the preset's, whether or not it happens to land on the same number.
+        device.setPointerSpeed(1.5)
+        #expect(device.activePointerPresetID == nil)
+        #expect(device.pointerSpeedLabel == "Custom")
+
+        let before = device
+        let unknown = device.selectPointerPreset(id: "gone")
+        #expect(!unknown)
+        #expect(device == before)
+
+        device.pointerSelection = .system
+        let withoutCustomSpeed = device.selectPointerPreset(id: "fast")
+        #expect(!withoutCustomSpeed)
+        #expect(device.pointer == nil)
+        #expect(device.pointerSpeedLabel == nil)
+        #expect(device.pointerPresets.count == 2)
+    }
+
+    @Test func aPresetOnlyCountsWhileItsSpeedIsInUse() {
+        var device = presetDevice()
+        device.pointer = PointerSettings(speed: 3)
+        device.activePointerPresetID = "fast"
+        #expect(device.activePointerPreset == nil)
+        #expect(device.pointerSpeedLabel == "Custom")
+        device.pointer = nil
+        #expect(device.activePointerPreset == nil)
+    }
+
+    @Test func deletingAPresetAlsoRemovesTheButtonsThatSwitchToIt() {
+        var settings = presetSettings()
+        let fast = Action.pointerPreset(deviceID: Self.mouseID, presetID: "fast")
+        let slow = Action.pointerPreset(deviceID: Self.mouseID, presetID: "slow")
+        settings.profiles[0].mappings = [Mapping(trigger: .button(3), action: fast), Mapping(trigger: .button(4), action: slow)]
+        settings.profiles.append(Profile(id: "app", name: "App", match: ProfileMatch(apps: ["com.example.app"]), mappings: [Mapping(trigger: .button(3), action: fast)]))
+        #expect(settings.mappingCount(usingPointerPreset: "fast", on: Self.mouseID) == 2)
+        #expect(settings.mappingCount(usingPointerPreset: "fast", on: "1234:5678") == 0)
+
+        let removed = settings.deletePointerPreset(id: "fast", on: Self.mouseID)
+        #expect(removed == 2)
+        #expect(settings.devices[Self.mouseID]?.pointerPresets.map(\.id) == ["slow"])
+        #expect(settings.defaultProfile.mappings.map(\.action) == [slow])
+        #expect(settings.profile(id: "app")?.mappings.isEmpty == true)
+        #expect(settings.validate().isEmpty)
+        let removedAgain = settings.deletePointerPreset(id: "fast", on: Self.mouseID)
+        let wrongMouse = settings.deletePointerPreset(id: "slow", on: "1234:5678")
+        #expect(removedAgain == nil)
+        #expect(wrongMouse == nil)
+    }
+
+    @Test func buttonsNameTheirPresetAndMouse() {
+        var settings = WhiskerSettings()
+        #expect(settings.firstPointerPreset() == nil)
+        settings.devices["046d:c52b"] = DeviceSettings(name: "Zed", pointerPresets: [PointerPreset(id: "z", name: "Zippy", speed: 2)])
+        settings.devices["1234:5678"] = DeviceSettings(name: "Alpha", pointerPresets: [PointerPreset(id: "a", name: "Slow", speed: 0.5)])
+        settings.devices["9abc:def0"] = DeviceSettings(name: "Beta")
+        #expect(settings.firstPointerPreset()?.deviceID == "1234:5678")
+        #expect(settings.firstPointerPreset()?.presetID == "a")
+        #expect(settings.pointerPresetTitle(deviceID: "046d:c52b", presetID: "z") == "Zippy — ×2 · Zed")
+        #expect(settings.pointerPresetTitle(deviceID: "046d:c52b", presetID: "a") == nil)
+        #expect(settings.pointerPresetTitle(deviceID: "0000:0001", presetID: "z") == nil)
+    }
+
+    @Test func buttonsSummariseThePresetTheySwitchTo() {
+        let settings = presetSettings()
+        let fast = Action.pointerPreset(deviceID: Self.mouseID, presetID: "fast")
+        let gone = Action.pointerPreset(deviceID: Self.mouseID, presetID: "gone")
+        #expect(settings.summary(of: fast) == "Pointer speed: Fast — ×1.5 · Mouse")
+        #expect(settings.summary(of: gone) == gone.summary)
+        #expect(settings.summary(of: .click(button: 2, modifiers: [])) == Action.click(button: 2, modifiers: []).summary)
+    }
+
+    @Test func forgettingAMouseAlsoDropsTheButtonsThatSwitchIt() {
+        var settings = presetSettings()
+        settings.devices["1234:5678"] = DeviceSettings(name: "Other", pointerPresets: [PointerPreset(id: "fast", name: "Fast", speed: 2)])
+        let mine = Action.pointerPreset(deviceID: Self.mouseID, presetID: "fast")
+        let theirs = Action.pointerPreset(deviceID: "1234:5678", presetID: "fast")
+        settings.profiles[0].mappings = [
+            Mapping(trigger: .button(3), action: mine), Mapping(trigger: .button(4), action: theirs), Mapping(trigger: .button(5), action: Action.none),
+        ]
+        settings.profiles.append(Profile(id: "app", name: "App", match: ProfileMatch(apps: ["com.example.app"]), mappings: [Mapping(trigger: .button(3), action: mine)]))
+
+        settings.forgetDevice(id: Self.mouseID)
+        #expect(settings.devices.keys.sorted() == ["1234:5678"])
+        #expect(settings.defaultProfile.mappings.map(\.action) == [theirs, Action.none])
+        #expect(settings.profile(id: "app")?.mappings.isEmpty == true)
+        #expect(settings.validate().isEmpty)
+    }
+
+    @Test func presetSwitchesAreRefusedForEveryUnsafeTarget() {
+        let mouse = PointingDevice(
+            id: Self.mouseID, name: "Mouse", vendorID: 0x046D, productID: 0xC52B, serial: nil, transport: "USB", excludedKind: nil, physicalKeys: ["usb"]
+        )
+        func refusal(
+            preset: String = "fast", connected: [PointingDevice]? = nil, _ change: (inout WhiskerSettings) -> Void = { _ in }
+        ) -> PointerPresetRefusal? {
+            var settings = presetSettings()
+            change(&settings)
+            return settings.pointerPresetRefusal(deviceID: Self.mouseID, presetID: preset, connected: connected ?? [mouse])
+        }
+
+        #expect(refusal() == nil)
+        #expect(refusal { $0.general.enabled = false } == .whiskerOff)
+        #expect(refusal { $0.devices[Self.mouseID]?.enabled = false } == .deviceOff)
+        #expect(refusal { $0.devices[Self.mouseID]?.pointer = nil } == .customSpeedOff)
+        #expect(refusal { $0.devices[Self.mouseID] = nil } == .unknownDevice)
+        #expect(refusal(preset: "gone") == .unknownPreset)
+        #expect(refusal { $0.devices[Self.mouseID]?.pointerPresets.append(PointerPreset(id: "fast", name: "Twin", speed: 2)) } == .unknownPreset)
+        #expect(refusal(connected: []) == .notConnected)
+
+        var otherMouse = mouse
+        otherMouse.id = "1234:5678"
+        #expect(refusal(connected: [otherMouse]) == .notConnected)
+        #expect(refusal(connected: [otherMouse, mouse]) == nil)
+
+        var trackpad = mouse
+        trackpad.excludedKind = .trackpad
+        #expect(refusal(connected: [trackpad]) == .excludedDevice)
+
+        // Two mice of one model can't be told apart: both as separate entries and as one entry made of two devices.
+        #expect(refusal(connected: [mouse, mouse]) == .ambiguousDevice)
+        var twin = mouse
+        twin.physicalKeys = ["usb-1", "usb-2"]
+        #expect(refusal(connected: [twin]) == .ambiguousDevice)
     }
 
     // MARK: Pointer and scroll math
