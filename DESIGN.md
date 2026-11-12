@@ -73,11 +73,11 @@ it is not needed or loaded by the website.
 
 ## Contracts and validation
 
-Build from source remains primary until a signed release exists. Planned
-features remain explicitly unshipped. Keep all guide anchors, relative Pages
-URLs and nested-404 root-relative URLs. Keep strict self-only CSP, local
-assets, font licences, no runtime network JS and the 250 KiB index/CSS/JS/font
-budget. No update feed is checked into `site/`.
+Download is the primary action; Homebrew and build from source follow it in the
+install scene. Planned features remain explicitly unshipped. Keep all guide
+anchors, relative Pages URLs and nested-404 root-relative URLs. Keep strict
+self-only CSP, local assets, font licences, no runtime network JS and the
+250 KiB index/CSS/JS/font budget. No update feed is checked into `site/`.
 
 All controls remain native and labelled. Hidden controls stay hidden without
 JavaScript. The guide has a skip link, landmarks, deep links and a scroll-aware

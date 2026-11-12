@@ -147,12 +147,10 @@ administrators, can turn off the rules marked "no bypass".
 
 ## Cutting a release
 
-No release has been cut yet, so there is no published build, update feed or Homebrew cask. If a
-credential is missing, the workflow stops rather than publish an un-notarized build.
-
 Releases are built, signed, notarized and published only by `.github/workflows/release.yml`.
 Credentials live in the protected GitHub **release** environment; see the
-[signing and notarization guide](packaging/signing/README.md).
+[signing and notarization guide](packaging/signing/README.md). If a credential is missing, the
+workflow stops rather than publish an un-notarized build.
 
 1. On a branch from `main`, run `make prepare-release VERSION=X.Y.Z`. It moves the Unreleased
    changelog entries into a new `## [X.Y.Z] - YYYY-MM-DD` section dated today, updates the

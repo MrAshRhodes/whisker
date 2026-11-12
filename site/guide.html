@@ -35,7 +35,7 @@
         <span class="nav-purpose">Mouse &amp; trackball control for macOS</span>
         <a href="guide.html" aria-current="page">Guide</a>
         <a href="https://github.com/MrAshRhodes/whisker">GitHub <span aria-hidden="true">↗</span></a>
-        <a class="nav-build" href="./#source">Build from source <span aria-hidden="true">↗</span></a>
+        <a class="nav-build" href="./#install">Download <span aria-hidden="true">↗</span></a>
       </nav>
     </header>
 
@@ -67,19 +67,19 @@
 
         <section aria-labelledby="getting-started">
           <h2 id="getting-started">Getting started</h2>
-          <p>Whisker needs macOS 14 Sonoma or later. It's in pre-release: no signed build has been published yet, so for now you build it from source.</p>
+          <p>Whisker needs macOS 14 Sonoma or later. Releases are signed with an Apple Developer ID and notarised by Apple, and Gatekeeper stays on.</p>
           <ol>
-            <li>Install Xcode, or just the Command Line Tools with <code class="nowrap">xcode-select --install</code>. Whisker needs Swift 5.9 or later.</li>
-            <li>Build the app:
-<pre><code>git clone https://github.com/MrAshRhodes/whisker.git
-cd whisker
-make app</code></pre></li>
-            <li>Move <code>dist/Whisker.app</code> to your Applications folder and open it. (<code class="nowrap">make run</code> builds and opens it in one step.)</li>
+            <li>Install Whisker with Homebrew:
+<pre><code>brew install --cask mrashrhodes/tap/whisker</code></pre>
+Or download the DMG or ZIP from the <a href="https://github.com/MrAshRhodes/whisker/releases/latest">latest release</a> and check it against its <code>.sha256</code> file; the release notes show how. Open the DMG or unzip the ZIP, then move <code>Whisker.app</code> to your Applications folder. If macOS refuses to open it, stop and <a href="https://github.com/MrAshRhodes/whisker/issues">report it</a> rather than bypassing the warning.</li>
+            <li>Open Whisker from your Applications folder or Spotlight.</li>
           </ol>
           <p>The first time Whisker opens, the <span class="ui">Welcome to Whisker</span> window explains the one permission it needs. Choose <span class="ui">Open Accessibility Settings</span>, turn Whisker on in the list, and you're done. You can also tick <span class="ui">Open Whisker at login</span> there. <span class="ui">Continue Without Access</span> lets you look around first.</p>
           <div class="callout-note">
-            <p>Once the first signed release is out, you'll be able to download Whisker from the <a href="https://github.com/MrAshRhodes/whisker/releases">Releases page</a> or install it with Homebrew:</p>
-            <pre><code>brew install --cask mrashrhodes/tap/whisker</code></pre>
+            <p>Prefer to build it yourself? You need Xcode, or just the Command Line Tools with <code class="nowrap">xcode-select --install</code>, and Swift 5.9 or later. Run these commands, then move <code>dist/Whisker.app</code> to your Applications folder and open it. (<code class="nowrap">make run</code> builds and opens it in one step.)</p>
+            <pre><code>git clone https://github.com/MrAshRhodes/whisker.git
+cd whisker
+make app</code></pre>
           </div>
         </section>
 
@@ -213,8 +213,8 @@ make app</code></pre></li>
         <section aria-labelledby="updates">
           <h2 id="updates">Updates</h2>
           <p>Whisker only checks for updates when you ask. In <span class="ui">Settings › Updates</span>, <span class="ui">Check for updates automatically</span> can be Never (the default), Daily, Weekly or Monthly. <span class="ui">Check Now</span>, or <span class="ui">Check for Updates…</span> in the menu, checks straight away. Updates are signed, and Whisker checks the signature before installing one.</p>
-          <p>Whisker is in pre-release, so checks find nothing until the first release is out.</p>
           <ul>
+            <li>Downloaded from the Releases page: Whisker updates itself. It asks before downloading an update and again before installing it.</li>
             <li>Installed with Homebrew: Whisker doesn't update itself, so that Homebrew stays in charge. It shows the command to run, with <span class="ui">Copy Command</span>:
 <pre><code>brew update &amp;&amp; brew upgrade --cask whisker</code></pre></li>
             <li>Built from source: <span class="ui">This copy of Whisker can't update itself.</span> Pull the latest source and build again, or use <span class="ui">Open the Releases Page</span>.</li>
@@ -223,7 +223,6 @@ make app</code></pre></li>
 
         <section aria-labelledby="switching-installs">
           <h2 id="switching-installs">Switching an install between Homebrew and direct downloads</h2>
-          <p>These installation options will be available after the first signed release. Until then, <a href="#getting-started">build from source</a>.</p>
           <p>Your settings live outside the app, so they carry over either way.</p>
           <h3>From Homebrew to a direct download</h3>
           <ol>
