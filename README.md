@@ -235,6 +235,26 @@ none of them reads **Custom**.
   the 5 seconds, the speed it was waiting on stays saved and applies at the next launch; use
   **Use System Settings** to drop it.
 
+## Pointer orientation — foundation only
+
+**Not available as a pointer setting.** The maintainer decision on rewriting pointer coordinates
+is **pending** ([#32](https://github.com/MrAshRhodes/whisker/issues/32)). This work adds tested
+rotation maths, fractional-count handling and confidence calculations for deliberately recorded
+forward strokes, not a calibration wizard or usable global rotation. Confidence measures how
+closely stroke directions agree; its thresholds are provisional, not verified on hardware.
+
+The per-device JSON key `rotationDegrees` defaults to zero, rejects non-finite numbers and
+normalises equivalent angles to −180° inclusive through 180° exclusive. It is dormant: editing
+it does not rotate movement or drags, enable custom pointer speed, change a speed preset, reverse
+a wheel or alter button identities. The primary-button guard is unchanged. Unknown top-level
+settings still survive a round trip, but unknown nested keys do not; that part of #32 remains unmet.
+
+Before any global control can be offered, a public-API prototype must demonstrate exact motion
+attribution (never inferred from one listed mouse), coherent pointer and drag coordinates across
+mixed-scale displays and edges, and keyboard cancellation, timeout, disable and interruption
+recovery without jumps or drift. These checks and raw-input compatibility are **unverified**.
+No hardware compatibility is claimed; repositioning the trackball remains the available workaround.
+
 ## Device details
 
 Open **Details** under a mouse in **Settings › Devices** to see what Whisker knows about it. It is

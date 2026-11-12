@@ -60,6 +60,12 @@ extension WhiskerSettings {
                 result.devices[id] = nil
                 continue
             }
+            if let angle = PointerOrientationMath.normalisedDegrees(device.rotationDegrees) {
+                result.devices[id]?.rotationDegrees = angle
+            } else {
+                issues.append(ValidationIssue("\(path).rotationDegrees", "Must be a finite angle."))
+                result.devices[id]?.rotationDegrees = 0
+            }
             if let pointer = device.pointer {
                 var fixed = pointer
                 fixed.speed = PointerMath.speedRange.clamp(pointer.speed)

@@ -79,6 +79,84 @@ struct SettingsTests {
         #expect(decoded.profile(id: "safari")?.inherits == nil)
     }
 
+    @Test func dormantOrientationRoundTripsWithoutEnablingSpeedOrChangingWheels() throws {
+        var settings = WhiskerSettings()
+        settings.devices["046d:c52b"] = DeviceSettings(wheel: WheelSettings(invertVertical: true), rotationDegrees: 450)
+        settings.unknownKeys["future"] = .object(["kept": .bool(true)])
+        let decoded = try SettingsCodec.decodeValidated(SettingsCodec.encode(settings))
+        #expect(decoded == settings)
+        #expect(decoded.device("046d:c52b").rotationDegrees == 90)
+        #expect(decoded.activePointer(for: "046d:c52b") == nil)
+        #expect(decoded.device("046d:c52b").wheel == WheelSettings(invertVertical: true))
+        #expect(decoded.general.allowPrimaryButtonRemap == false)
+        #expect(decoded.defaultProfile.mappings == settings.defaultProfile.mappings)
+    }
+
+    @Test func orientationDoesNotFollowSpeedPresetSelectionOrReset() throws {
+        var settings = WhiskerSettings()
+        var device = DeviceSettings(
+            pointer: PointerSettings(speed: 1.5, acceleration: 0.5, linear: true),
+            wheel: WheelSettings(invertHorizontal: true),
+            pointerPresets: [PointerPreset(id: "slow", name: "Slow", speed: 0.5)],
+            rotationDegrees: -45
+        )
+        let switched = device.selectPointerPreset(id: "slow")
+        #expect(switched)
+        #expect(device.rotationDegrees == -45)
+        settings.devices["046d:c52b"] = device
+        let decoded = try SettingsCodec.decodeValidated(SettingsCodec.encode(settings))
+        #expect(decoded == settings)
+        #expect(decoded.activePointer(for: "046d:c52b") == PointerSettings(speed: 0.5, acceleration: 0.5, linear: true))
+        device.useSystemPointer()
+        #expect(device.pointer == nil)
+        #expect(device.rotationDegrees == -45)
+        #expect(device.wheel == WheelSettings(invertHorizontal: true))
+    }
+
+    @Test func olderFilesDefaultToZeroOrientationWithoutAddingTheKey() throws {
+        let json = #"{"schemaVersion":1,"devices":{"046d:c52b":{"wheel":{"invertHorizontal":true}}}}"#
+        let settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        #expect(settings.device("046d:c52b") == DeviceSettings(wheel: WheelSettings(invertHorizontal: true)))
+        let encoded = String(decoding: try SettingsCodec.encode(settings), as: UTF8.self)
+        #expect(!encoded.contains("rotationDegrees"))
+        #expect(!encoded.contains("\"pointer\""))
+    }
+
+    @Test func orientationIsNormalisedOnDecodeRepairAndEncode() throws {
+        let json = #"{"schemaVersion":2,"devices":{"046d:c52b":{"rotationDegrees":-450}}}"#
+        var settings = try SettingsCodec.decodeValidated(Data(json.utf8))
+        #expect(settings.device("046d:c52b").rotationDegrees == -90)
+        settings.devices["046d:c52b"]?.rotationDegrees = 900
+        #expect(settings.validate().isEmpty)
+        #expect(settings.repaired().device("046d:c52b").rotationDegrees == -180)
+        #expect(try SettingsCodec.decodeValidated(SettingsCodec.encode(settings)).device("046d:c52b").rotationDegrees == -180)
+    }
+
+    @Test(arguments: [Double.nan, .infinity, -.infinity])
+    func invalidOrientationCannotBeSavedAndRepairDoesNotChangeOtherSettings(angle: Double) throws {
+        var settings = WhiskerSettings()
+        let pointer = PointerSettings(speed: 1.5, acceleration: 0.5, linear: true)
+        let wheel = WheelSettings(invertVertical: true, invertHorizontal: true)
+        settings.devices["046d:c52b"] = DeviceSettings(pointer: pointer, wheel: wheel, rotationDegrees: angle)
+        #expect(throws: EncodingError.self) { try SettingsCodec.encode(settings) }
+        let (repaired, issues) = settings.repairedWithIssues()
+        #expect(issues.map(\.path) == ["devices[046d:c52b].rotationDegrees"])
+        #expect(repaired.device("046d:c52b") == DeviceSettings(pointer: pointer, wheel: wheel))
+    }
+
+    @Test func orientationRejectsNonFiniteDecodeEvenWithPermissiveDecoder() {
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "Inf", negativeInfinity: "-Inf", nan: "NaN")
+        for value in ["Inf", "-Inf", "NaN"] {
+            #expect(throws: DecodingError.self) {
+                try decoder.decode(DeviceSettings.self, from: Data("{\"rotationDegrees\":\"\(value)\"}".utf8))
+            }
+        }
+        #expect(throws: SettingsCodec.Failure.self) {
+            try SettingsCodec.decodeValidated(Data(#"{"devices":{"046d:c52b":{"rotationDegrees":1e999}}}"#.utf8))
+        }
+    }
+
     @Test func tripleClickCodesAsItsOwnKindAndModifiersAreOptional() throws {
         func decode(_ json: String) throws -> Action { try JSONDecoder().decode(Action.self, from: Data(json.utf8)) }
         #expect(try decode(#"{"kind":"tripleClick"}"#) == .tripleClick(modifiers: []))

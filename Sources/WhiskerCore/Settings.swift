@@ -103,11 +103,13 @@ public struct DeviceSettings: Equatable, Sendable {
     public var pointerPresets: [PointerPreset]
     /// The preset the current custom speed was switched to. Nil for a speed set by hand or no custom speed.
     public var activePointerPresetID: String?
+    /// Reserved orientation correction, independent of custom speed. Dormant: global rotation is not supported.
+    public var rotationDegrees: Double
 
     public init(
         name: String = "", enabled: Bool = true, pointer: PointerSettings? = nil, wheel: WheelSettings = WheelSettings(),
         clickDebounce: ClickDebounceSettings? = nil, controlLabels: [ControlLabel] = [],
-        pointerPresets: [PointerPreset] = [], activePointerPresetID: String? = nil
+        pointerPresets: [PointerPreset] = [], activePointerPresetID: String? = nil, rotationDegrees: Double = 0
     ) {
         self.name = name
         self.enabled = enabled
@@ -117,6 +119,7 @@ public struct DeviceSettings: Equatable, Sendable {
         self.controlLabels = controlLabels
         self.pointerPresets = pointerPresets
         self.activePointerPresetID = activePointerPresetID
+        self.rotationDegrees = PointerOrientationMath.normalisedDegrees(rotationDegrees) ?? rotationDegrees
     }
 }
 
@@ -348,7 +351,7 @@ extension GeneralSettings: Codable {
 }
 
 extension DeviceSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel, clickDebounce, controlLabels, pointerPresets, activePointerPresetID }
+    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel, clickDebounce, controlLabels, pointerPresets, activePointerPresetID, rotationDegrees }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -360,6 +363,11 @@ extension DeviceSettings: Codable {
         controlLabels = try c.decodeIfPresent([ControlLabel].self, forKey: .controlLabels) ?? []
         pointerPresets = try c.decodeIfPresent([PointerPreset].self, forKey: .pointerPresets) ?? []
         activePointerPresetID = try c.decodeIfPresent(String.self, forKey: .activePointerPresetID)
+        let angle = try c.decodeIfPresent(Double.self, forKey: .rotationDegrees) ?? 0
+        guard let normalised = PointerOrientationMath.normalisedDegrees(angle) else {
+            throw DecodingError.dataCorruptedError(forKey: .rotationDegrees, in: c, debugDescription: "Rotation must be a finite angle.")
+        }
+        rotationDegrees = normalised
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -372,6 +380,10 @@ extension DeviceSettings: Codable {
         if !controlLabels.isEmpty { try c.encode(controlLabels, forKey: .controlLabels) }
         if !pointerPresets.isEmpty { try c.encode(pointerPresets, forKey: .pointerPresets) }
         try c.encodeIfPresent(activePointerPresetID, forKey: .activePointerPresetID)
+        guard let angle = PointerOrientationMath.normalisedDegrees(rotationDegrees) else {
+            throw EncodingError.invalidValue(rotationDegrees, .init(codingPath: c.codingPath + [CodingKeys.rotationDegrees], debugDescription: "Rotation must be a finite angle."))
+        }
+        if angle != 0 { try c.encode(angle, forKey: .rotationDegrees) }
     }
 }
 
