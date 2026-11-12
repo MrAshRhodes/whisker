@@ -46,7 +46,7 @@
           <li><a href="#getting-started">Getting started</a></li>
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#menu-bar">Menu bar</a></li>
-          <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li></ol></li>
+          <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li><li><a href="#duplicate-clicks">Duplicate clicks</a></li></ol></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li></ol></li>
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
@@ -140,6 +140,17 @@ make app</code></pre>
           <div class="callout-note">
             <p>Not yet verified on hardware: reported buttons and wheels. In one test on macOS 26.6 with Input Monitoring off, macOS gave Whisker no controls for any of twelve built-in, USB and Bluetooth interfaces, so every mouse showed <span class="ui">Unavailable</span>. Other versions of macOS, other connections and what you see once Input Monitoring is allowed haven't been tried, and neither has how closely <span class="ui">Recent matching input</span> follows real use.</p>
           </div>
+
+          <h3 id="duplicate-clicks">Duplicate clicks</h3>
+          <p>An advanced filter, off by default, for a mouse that sometimes sends a second click straight after an intended one. Open <span class="ui">Duplicate clicks (advanced)</span> under a mouse, tick the buttons to filter and choose how short a repeat counts, from 20 to 100 ms (50 ms to start).</p>
+          <ul>
+            <li>A press that comes within that time of the previous click's release, and is let go within that time itself, is dropped together with its release. Nothing is ever dropped without its pair, and a press that has gone through always gets its release.</li>
+            <li>The first click is never delayed. A press that might be a repeat is held for at most the interval, and a drag, a longer hold or any other input lets it through first, in order. Clicks that go through after a dropped repeat carry the count the app would have seen without it.</li>
+            <li><strong>It can ignore clicks you meant.</strong> Timing alone can't tell chatter from a deliberate fast double-click, so one quicker than your interval is ignored too. This is not the double-click speed in System Settings, which only changes how close together two clicks must be to count as a double-click.</li>
+            <li>It only works for a mouse Whisker can identify exactly (see <a href="#permissions">Input Monitoring</a> with several mice), only for the buttons you tick, and never for the wheel or other mice. A left click with no modifier key is only filtered while <span class="ui">Allow remapping the primary button</span> is on in General.</li>
+            <li>Turning it on starts a 60-second trial: it switches itself off unless you press <span class="ui">Keep</span>. <span class="ui">Turn Off Filter</span> is an ordinary button, reachable with the keyboard and VoiceOver. Turning Whisker off, an app on the bypass list coming forward, changing settings, unplugging the mouse or macOS pausing Whisker clears anything being held.</li>
+          </ul>
+          <p>This has not yet been verified on real faulty hardware, nor for Finder double-clicks, text selection or other apps. Whisker does not diagnose or repair a mouse.</p>
         </section>
 
         <section aria-labelledby="buttons">
@@ -358,6 +369,8 @@ make app</code></pre>
           <p>Your mouse may send smooth scrolling rather than notches. Also check that the keys aren't the same ones that scroll sideways and that no wheel action is set on them.</p>
           <h3>Triple Click doesn't select anything</h3>
           <p>Whisker only sends the three clicks. Whether they select a line or paragraph, or do something else, is up to the app, and some apps don't treat them as a triple click. See <a href="#triple-click">Triple Click</a>.</p>
+          <h3>Some of my clicks are ignored</h3>
+          <p>If you turned on <a href="#duplicate-clicks">Duplicate clicks</a>, a quick deliberate double-click can be ignored. Press <span class="ui">Turn Off Filter</span> under the mouse in Settings › Devices, or lower the time.</p>
           <h3>Pointer speed won't change</h3>
           <p>Some mice don't accept pointer changes from macOS. Whisker tells you when that happens.</p>
           <h3>Whisker still changes my mouse in an app I've bypassed</h3>

@@ -20,6 +20,10 @@ final class EventEngine: @unchecked Sendable {
         var actionSource: String?
         /// Whether the app in front was on the bypass list at the last check, so standing aside happens once.
         var bypassed = false
+        /// Duplicate-click filter for the devices that opted in; empty state when none did.
+        var debouncer = ClickDebouncer()
+        /// Calls off the timer set for the oldest press the filter is holding back.
+        var cancelExpiry: (@Sendable () -> Void)?
         /// The hold-to-scroll status last reported to `onHoldStatus`.
         var reportedHold: HoldScrollStatus = .idle
     }
@@ -38,6 +42,7 @@ final class EventEngine: @unchecked Sendable {
     private let synthesizer: any ActionPerforming
     private let attribute: @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution?
     private let frontmostApp: @Sendable () -> String?
+    private let clock: any ClickClock
     private let attributeMotion: @Sendable (TimeInterval) -> DeviceAttribution?
     /// Called on the main queue when a hold-to-scroll starts, falls back or can't start.
     var onHoldStatus: (@Sendable (HoldScrollStatus) -> Void)?
@@ -51,8 +56,10 @@ final class EventEngine: @unchecked Sendable {
         synthesizer: any ActionPerforming,
         attribute: @escaping @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution?,
         frontmostApp: @escaping @Sendable () -> String?,
+        clock: any ClickClock = SystemClickClock(),
         attributeMotion: @escaping @Sendable (TimeInterval) -> DeviceAttribution? = { _ in nil }
     ) {
+        self.clock = clock
         self.synthesizer = synthesizer
         self.attribute = attribute
         self.frontmostApp = frontmostApp
@@ -71,6 +78,9 @@ final class EventEngine: @unchecked Sendable {
         state.withLock { state in
             state.compiled = CompiledSettings(settings, nativeWheelActive: state.compiled.nativeWheelActive)
             state.processor.resetScrollRecognition()
+            // Settings that decide what to filter may have changed under a press that is being held back.
+            state.debouncer.reset()
+            armExpiry(&state)
             if settings.general.enabled {
                 // A click gesture under way began under the settings that are going away.
                 synthesizer.cancelPendingClicks()
@@ -135,6 +145,8 @@ final class EventEngine: @unchecked Sendable {
             if ClickInterruption.isCalledOffByDeviceChange(startedBy: state.actionSource, connected: connected) {
                 synthesizer.cancelPendingClicks()
             }
+            state.debouncer.devicesChanged(connected: connected)
+            armExpiry(&state)
             // A hold started by a device that has gone ends now.
             state.processor.cancelHold(unlessConnected: connected)
             reportHold(&state)
@@ -208,6 +220,8 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
         synthesizer.releaseAll()
+        state.debouncer.reset()
+        armExpiry(&state)
         reportHold(&state)
     }
 
@@ -233,6 +247,47 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
         synthesizer.releaseAll()
+        state.debouncer.reset()
+        armExpiry(&state)
+    }
+
+    /// Call with the state lock held. Sets a timer for the oldest press the filter is holding back, if any.
+    /// The timer runs on the clock's own queue and only ever asks the filter what has expired.
+    private func armExpiry(_ state: inout State) {
+        state.cancelExpiry?()
+        state.cancelExpiry = nil
+        guard let due = state.debouncer.nextDeadline else { return }
+        state.cancelExpiry = clock.schedule(after: max(0, due - clock.now)) { [weak self] in self?.expireHeldClicks() }
+    }
+
+    private func expireHeldClicks() {
+        state.withLock { state in
+            let flushed = state.debouncer.expire(now: clock.now)
+            if !state.stopped, !state.capturing { replay(flushed, &state) }
+            armExpiry(&state)
+        }
+    }
+
+    /// Lets presses the filter held back through, in order, as if they had just arrived: mapped buttons run
+    /// their action and unmapped ones are posted as synthetic clicks (which the tap ignores).
+    /// Call with the state lock held.
+    private func replay(_ flushed: [FlushedPress], _ state: inout State) {
+        for press in flushed {
+            let plan = state.processor.process(press.event, settings: state.compiled)
+            if ClickInterruption.isCalledOffBy(press.event.kind, plan: plan) { synthesizer.cancelPendingClicks() }
+            let location = CGPoint(x: press.event.location?.x ?? 0, y: press.event.location?.y ?? 0)
+            let flags = CGEventFlags(rawValue: press.event.modifiers.eventFlags & ModifierSet([.shift, .control, .option, .command]).eventFlags)
+            guard case .buttonDown(let button) = press.event.kind else { continue }
+            switch plan {
+            case .passThrough:
+                synthesizer.perform(.click(button: button, modifiers: []), phase: .down, at: location, flags: flags, clickState: press.clickCount)
+            case let .perform(action, phase), let .performWithScroll(action, phase, _):
+                state.actionSource = press.event.device?.id
+                synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: press.clickCount)
+            default:
+                break
+            }
+        }
     }
 
     private static func cursorLocation() -> CGPoint {
@@ -261,6 +316,7 @@ final class EventEngine: @unchecked Sendable {
         guard let kind = Self.inputKind(type, event) else { return Unmanaged.passUnretained(event) }
 
         let now = ProcessInfo.processInfo.systemUptime
+        let originalClickState = event.getIntegerValueField(.mouseEventClickState)
         let reportKind: DeviceAttributor.ReportKind
         switch kind {
         case .buttonDown(let button), .buttonUp(let button), .buttonDragged(let button): reportKind = .button(button)
@@ -273,7 +329,8 @@ final class EventEngine: @unchecked Sendable {
             timestamp: now,
             device: attribute(reportKind, now),
             app: frontmostApp(),
-            location: PointerPoint(x: location.x, y: location.y)
+            location: PointerPoint(x: location.x, y: location.y),
+            clickCount: originalClickState
         )
         // Movement is only decoded and attributed while a hold wants it; every other drag skips this.
         if case .buttonDragged = kind, state.withLock({ $0.processor.isHolding }) {
@@ -285,9 +342,17 @@ final class EventEngine: @unchecked Sendable {
         }
         let input = pending
         let flags = CGEventFlags(rawValue: event.flags.rawValue & ModifierSet([.shift, .control, .option, .command]).eventFlags)
-        let clickState = event.getIntegerValueField(.mouseEventClickState)
-        let plan = state.withLock { state -> EventPlan in
-            guard !state.capturing, !state.stopped else { return .passThrough }
+        let (plan, clickState) = state.withLock { state -> (EventPlan, Int64) in
+            guard !state.capturing, !state.stopped else { return (.passThrough, originalClickState) }
+            var clickState = originalClickState
+            let outcome = state.debouncer.process(input, settings: state.compiled)
+            defer { armExpiry(&state) }
+            replay(outcome.flushed, &state)
+            switch outcome.decision {
+            case .drop: return (.swallow, originalClickState)
+            case .moveOnly: return (.dragAsMove, originalClickState)
+            case .proceed(let count): clickState = count
+            }
             let plan = state.processor.process(input, settings: state.compiled)
             if ClickInterruption.isCalledOffBy(kind, plan: plan) { synthesizer.cancelPendingClicks() }
             switch plan {
@@ -301,8 +366,10 @@ final class EventEngine: @unchecked Sendable {
                 synthesizer.holdScroll(pixels, anchor: CGPoint(x: anchor.x, y: anchor.y))
             }
             reportHold(&state)
-            return plan
+            return (plan, clickState)
         }
+        // The filter dropped presses the system counted, so the count of a press that goes through is put right.
+        if clickState != originalClickState { event.setIntegerValueField(.mouseEventClickState, value: clickState) }
         return apply(plan, to: event)
     }
 

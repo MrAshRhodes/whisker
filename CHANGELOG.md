@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in duplicate-click filter for one mouse and chosen buttons (Settings › Devices › Duplicate clicks): a press within 20 to 100 ms of the previous click's release that is let go just as quickly is dropped together with its release, while the first click is never delayed and a drag, long hold or other input lets a held press through in order. The wheel and other mice are never filtered, a bare left click stays exempt unless primary-button remapping is allowed, turning it on starts a 60-second trial that reverts unless kept, and a fast deliberate double-click can be ignored too. It has not yet been verified on faulty hardware or across apps ([#9]).
 - Documented decision: Magic Mouse and other touch mice stay left alone, with no opt-in for their buttons, because clicks cannot yet be told apart from gestures or other mice and no model has been verified on hardware. Native gestures and scrolling are untouched, and a tested eligibility policy records what any future opt-in would need ([#29]).
 - Smooth sideways scrolling for Scroll Left and Scroll Right mappings: an opt-in mode that runs the action once per swipe from an exactly identified mouse, after an activation distance in pixels, while vertical scrolling carries on. Momentum, trackpads and unidentified input pass through, and it has not yet been verified on hardware, including thumb wheels ([#17]).
 - Scroll faster or slower while holding modifier keys: choose the keys, a speed from ×0.25 to ×8 and the directions for each profile. It applies to wheel notches only, not trackpads or smooth scrolling, and has not yet been verified on hardware ([#16]).
@@ -36,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/MrAshRhodes/whisker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/MrAshRhodes/whisker/releases/tag/v0.1.0
+[#9]: https://github.com/MrAshRhodes/whisker/issues/9
 [#10]: https://github.com/MrAshRhodes/whisker/issues/10
 [#12]: https://github.com/MrAshRhodes/whisker/issues/12
 [#16]: https://github.com/MrAshRhodes/whisker/issues/16

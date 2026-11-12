@@ -84,10 +84,13 @@ public struct InputEvent: Equatable, Sendable {
     /// The device the movement came from. Unlike `device` it is never inferred from there being one mouse: it is
     /// nil unless the movement was attributed to exactly one non-excluded device.
     public var motionDevice: DeviceAttribution?
+    /// The click count the system gave a button event (`mouseEventClickState`).
+    public var clickCount: Int64
 
     public init(
         _ kind: InputKind, modifiers: ModifierSet = [], timestamp: TimeInterval = 0, device: DeviceAttribution? = nil, app: String? = nil,
-        location: PointerPoint? = nil, motion: PointerMotion? = nil, motionDevice: DeviceAttribution? = nil
+        location: PointerPoint? = nil, motion: PointerMotion? = nil, motionDevice: DeviceAttribution? = nil,
+        clickCount: Int64 = 1
     ) {
         self.kind = kind
         self.modifiers = modifiers
@@ -97,6 +100,7 @@ public struct InputEvent: Equatable, Sendable {
         self.location = location
         self.motion = motion
         self.motionDevice = motionDevice
+        self.clickCount = clickCount
     }
 }
 

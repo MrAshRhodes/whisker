@@ -62,6 +62,11 @@ final class AppModel: ObservableObject {
         didSet { if capturing != oldValue { engine.setCapturing(capturing) } }
     }
 
+    /// Mice whose duplicate-click filter is on trial, with when it switches itself off unless kept. Never saved.
+    @Published private(set) var clickFilterTrials: [String: Date] = [:]
+    private var clickFilterTimers: [String: Task<Void, Never>] = [:]
+    static let clickFilterTrialDuration: TimeInterval = 60
+
     var onStatusChange: (() -> Void)?
     private var runState: RunState
     private var cancellables: Set<AnyCancellable> = []
@@ -247,7 +252,48 @@ final class AppModel: ObservableObject {
         return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
     }
 
+    /// Switches the duplicate-click filter on for the buttons given (none switches it off). Any change that leaves
+    /// it on starts a trial: unless it is kept, it switches itself off after `clickFilterTrialDuration`, so a
+    /// setting that eats wanted clicks can't stay on by accident.
+    func setClickFilter(device id: String, name: String, buttons: [Int], interval: Double) {
+        var device = store.settings.devices[id] ?? DeviceSettings(name: name)
+        if device.name.isEmpty { device.name = name }
+        if buttons.isEmpty {
+            device.clickDebounce = nil
+            store.settings.devices[id] = device
+            endClickFilterTrial(id)
+            return
+        }
+        device.clickDebounce = ClickDebounceSettings(buttons: buttons, interval: interval).normalised
+        store.settings.devices[id] = device
+        clickFilterTrials[id] = Date().addingTimeInterval(Self.clickFilterTrialDuration)
+        clickFilterTimers[id]?.cancel()
+        clickFilterTimers[id] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.clickFilterTrialDuration))
+            guard !Task.isCancelled else { return }
+            self?.revertClickFilter(device: id)
+        }
+    }
+
+    /// Keeps the filter after a trial.
+    func confirmClickFilter(device id: String) {
+        endClickFilterTrial(id)
+    }
+
+    /// Switches the filter off and ends its trial.
+    func revertClickFilter(device id: String) {
+        store.settings.devices[id]?.clickDebounce = nil
+        endClickFilterTrial(id)
+    }
+
+    private func endClickFilterTrial(_ id: String) {
+        clickFilterTimers[id]?.cancel()
+        clickFilterTimers[id] = nil
+        clickFilterTrials[id] = nil
+    }
+
     func shutdown() {
+        for id in Array(clickFilterTrials.keys) { revertClickFilter(device: id) }
         permission.stopPolling()
         engine.stop()
         pointer.restoreAll()

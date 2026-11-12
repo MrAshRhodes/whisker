@@ -85,6 +85,20 @@ extension WhiskerSettings {
             }
         }
 
+        for (id, device) in result.devices.sorted(by: { $0.key < $1.key }) {
+            guard let debounce = device.clickDebounce else { continue }
+            let path = "devices[\(id)].clickDebounce"
+            let fixed = debounce.normalised
+            let range = ClickDebounceSettings.intervalRange
+            if !debounce.interval.isFinite || !range.contains(debounce.interval) {
+                issues.append(ValidationIssue("\(path).interval", "Must be between \(range.lowerBound) and \(range.upperBound) seconds."))
+            }
+            if fixed.buttons != debounce.buttons {
+                issues.append(ValidationIssue("\(path).buttons", "Must list each button once, numbered \(ClickDebounceSettings.buttonRange.lowerBound) to \(ClickDebounceSettings.buttonRange.upperBound)."))
+            }
+            result.devices[id]?.clickDebounce = fixed
+        }
+
         // Profiles.
         var seenIDs = Set<String>()
         var profiles: [Profile] = []

@@ -82,6 +82,19 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   as Magic Mouse are listed but left alone. Open **Details** under any of them to see how Whisker
   identifies it, the buttons and wheels it reports and how sure Whisker is which clicks are its.
   See [Device details](#device-details).
+- **Duplicate clicks (advanced, off by default).** For one mouse and the buttons you choose,
+  Whisker can ignore a press that follows the previous click within a very short time (20 to
+  100 ms, 50 ms to start) and is let go just as quickly, dropping the press and its release
+  together. The first click is never delayed; a press that might be a repeat is held for at most
+  that interval, and a drag, a longer hold or other input lets it through in order. It needs a
+  mouse Whisker can identify exactly, leaves the wheel and other mice alone, and a bare left
+  click is only filtered while remapping the primary button is allowed. **Timing can't tell
+  chatter from a deliberate fast double-click**, so one quicker than the interval is ignored
+  too. This is different from the double-click speed in System Settings, which only changes how
+  fast two clicks must be to count as a double-click. Turning it on starts a 60-second trial that
+  switches it off unless you press **Keep**. It has not yet been verified on real faulty
+  hardware or across apps (for example Finder double-clicks and text selection), and it does not
+  diagnose or repair a mouse.
 - **Menu bar item** to turn Whisker on or off, see the active profile (or the app it is bypassed
   for) and open its settings. The icon can be hidden, and Whisker can open at login.
 - **Settings file.** Everything is kept in one readable JSON file that you can export, import or

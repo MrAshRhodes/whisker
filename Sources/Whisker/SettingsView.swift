@@ -697,9 +697,66 @@ struct DevicesPane: View {
             if binding.wrappedValue.enabled {
                 Toggle("Reverse vertical scrolling", isOn: binding.wheel.invertVertical)
                 Toggle("Reverse horizontal scrolling", isOn: binding.wheel.invertHorizontal)
+                ClickFilterControls(id: id, name: name, settings: binding.wrappedValue.clickDebounce)
             }
             DeviceDetailsDisclosure(details: details, onOpen: onOpen)
         }
+    }
+}
+
+/// Advanced, off by default: drops a very short repeat click on the chosen buttons of one mouse.
+struct ClickFilterControls: View {
+    @EnvironmentObject var model: AppModel
+    let id: String
+    let name: String
+    let settings: ClickDebounceSettings?
+
+    private static let buttons: [(number: Int, title: String)] = [(0, "Left"), (1, "Right"), (2, "Middle")]
+
+    private var buttons: [Int] { settings?.buttons ?? [] }
+    private var interval: Double { settings?.interval ?? ClickDebounceSettings.defaultInterval }
+
+    var body: some View {
+        DisclosureGroup("Duplicate clicks (advanced)") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Ignores a click that follows another within a very short time. A fast, deliberate double-click can be ignored too, because timing alone can't tell them apart. This is separate from the double-click speed in System Settings, and it hasn't been verified on real faulty hardware.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                ForEach(Self.buttons, id: \.number) { button in
+                    Toggle("Filter the \(button.title.lowercased()) button", isOn: Binding(
+                        get: { buttons.contains(button.number) },
+                        set: { on in update(on ? (buttons + [button.number]) : buttons.filter { $0 != button.number }, interval) }
+                    ))
+                }
+                if !buttons.isEmpty {
+                    LabeledContent("Ignore repeats within") {
+                        Stepper(
+                            "\(Int((interval * 1000).rounded())) ms",
+                            value: Binding(get: { interval }, set: { update(buttons, $0) }),
+                            in: ClickDebounceSettings.intervalRange, step: 0.01
+                        )
+                    }
+                    if buttons.contains(0) {
+                        Text("The left button without a modifier key is only filtered while “Allow remapping the primary button” is on in General.")
+                            .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let deadline = model.clickFilterTrials[id] {
+                        HStack {
+                            Text("On trial: switches itself off \(deadline, style: .relative) from now unless you keep it.")
+                                .font(.footnote).fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Keep") { model.confirmClickFilter(device: id) }
+                        }
+                    }
+                    Button("Turn Off Filter") { model.revertClickFilter(device: id) }
+                        .accessibilityHint("Stops ignoring repeated clicks from \(name)")
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func update(_ buttons: [Int], _ interval: Double) {
+        model.setClickFilter(device: id, name: name, buttons: buttons, interval: interval)
     }
 }
 
