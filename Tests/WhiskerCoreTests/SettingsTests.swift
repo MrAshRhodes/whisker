@@ -71,6 +71,33 @@ struct SettingsTests {
         #expect(decoded.profile(id: "safari")?.inherits == nil)
     }
 
+    @Test func scrollSpeedModifierRoundTripsAndOlderFilesDecodeWithoutIt() throws {
+        var settings = WhiskerSettings()
+        settings.profiles[0].scroll = ScrollSettings(
+            linesPerNotch: 3, acceleration: 0.5, horizontalModifier: .shift,
+            modifierScaling: ModifierScaling(modifiers: [.option, .control], multiplier: 0.5, axes: .horizontal)
+        )
+        settings.unknownKeys["future"] = .string("kept")
+        let decoded = try SettingsCodec.decode(SettingsCodec.encode(settings))
+        #expect(decoded == settings)
+        #expect(decoded.validate().isEmpty)
+
+        let shape = Data(#"{"modifierScaling":{"modifiers":["option"],"multiplier":0.5,"axes":"horizontal"}}"#.utf8)
+        #expect(try JSONDecoder().decode(ScrollSettings.self, from: shape).modifierScaling == ModifierScaling(modifiers: .option, multiplier: 0.5, axes: .horizontal))
+        let sparse = Data(#"{"modifierScaling":{"modifiers":["option"]}}"#.utf8)
+        #expect(try JSONDecoder().decode(ScrollSettings.self, from: sparse).modifierScaling == ModifierScaling(modifiers: .option, multiplier: 2, axes: .both))
+        let unknownAxes = #"{"profiles":[{"id":"default","scroll":{"modifierScaling":{"modifiers":["option"],"axes":"diagonal"}}}]}"#
+        #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decode(Data(unknownAxes.utf8)) }
+
+        // A file from before the setting existed reads as it always did and doesn't gain the key.
+        let old = #"{"schemaVersion":1,"profiles":[{"id":"default","scroll":{"linesPerNotch":3,"acceleration":0.5,"horizontalModifier":["shift"]}}],"future":{"x":1}}"#
+        let upgraded = try SettingsCodec.decode(Data(old.utf8))
+        #expect(upgraded.defaultProfile.scroll == ScrollSettings(linesPerNotch: 3, acceleration: 0.5, horizontalModifier: .shift))
+        let rewritten = String(decoding: try SettingsCodec.encode(upgraded), as: UTF8.self)
+        #expect(!rewritten.contains("modifierScaling"))
+        #expect(rewritten.contains("future"))
+    }
+
     @Test func missingInheritsMeansDefaultAndExplicitNullMeansNone() throws {
         let json = #"{"schemaVersion":1,"profiles":[{"id":"default"},{"id":"a"},{"id":"b","inherits":null}]}"#
         let settings = try SettingsCodec.decode(Data(json.utf8))
@@ -142,6 +169,42 @@ struct SettingsTests {
         }
     }
 
+    @Test func scrollSpeedModifierIsClampedOrDroppedWhenItCantBeUsed() {
+        func repair(_ scaling: ModifierScaling, sideways: ModifierSet = []) -> (settings: WhiskerSettings, issues: [ValidationIssue]) {
+            var settings = WhiskerSettings()
+            settings.profiles[0].scroll = ScrollSettings(horizontalModifier: sideways, modifierScaling: scaling)
+            return settings.repairedWithIssues()
+        }
+
+        let usable = ModifierScaling(modifiers: .option, multiplier: 0.5, axes: .vertical)
+        let untouched = repair(usable, sideways: .shift)
+        #expect(untouched.issues.isEmpty)
+        #expect(untouched.settings.defaultProfile.scroll?.modifierScaling == usable)
+
+        let unusable: [(ModifierScaling, ModifierSet)] = [
+            (ModifierScaling(modifiers: []), []),
+            (ModifierScaling(modifiers: .function), []),
+            (ModifierScaling(modifiers: .shift), .shift),
+            (ModifierScaling(modifiers: [.shift, .function]), .shift),
+            (ModifierScaling(modifiers: .option, multiplier: 0), []),
+            (ModifierScaling(modifiers: .option, multiplier: -1), []),
+            (ModifierScaling(modifiers: .option, multiplier: .nan), []),
+            (ModifierScaling(modifiers: .option, multiplier: .infinity), []),
+        ]
+        for (scaling, sideways) in unusable {
+            let result = repair(scaling, sideways: sideways)
+            #expect(result.issues.map(\.path) == ["profiles[0].scroll.modifierScaling"])
+            #expect(result.settings.defaultProfile.scroll?.modifierScaling == nil)
+            #expect(result.settings.validate().isEmpty)
+        }
+
+        for (multiplier, clamped) in [(0.01, 0.25), (100, 8)] {
+            let result = repair(ModifierScaling(modifiers: .option, multiplier: multiplier))
+            #expect(result.issues.map(\.path) == ["profiles[0].scroll.modifierScaling.multiplier"])
+            #expect(result.settings.defaultProfile.scroll?.modifierScaling?.multiplier == clamped)
+        }
+    }
+
     @Test func primaryButtonNeedsModifierUnlessAllowed() {
         let bare = Mapping(trigger: .button(0), action: .navigate(.back))
         #expect(WhiskerSettings.problem(with: bare, allowPrimary: false) != nil)
@@ -185,6 +248,19 @@ struct SettingsTests {
         #expect(resolved.mappings[MappingKey(.button(3))]?.sourceProfileID == "default")
         #expect(resolved.scroll.linesPerNotch == 6)
         #expect(resolved.sortedMappings.map(\.mapping.trigger) == [.button(2), .button(3), .button(4)])
+    }
+
+    @Test func scrollSpeedModifierIsInheritedWithTheScrollSettings() {
+        var settings = WhiskerSettings()
+        let scaling = ModifierScaling(modifiers: .option, multiplier: 0.5)
+        settings.profiles[0].scroll = ScrollSettings(modifierScaling: scaling)
+        settings.profiles += [
+            Profile(id: "child", name: "Child", match: ProfileMatch(apps: ["com.example.child"])),
+            Profile(id: "own", name: "Own", match: ProfileMatch(apps: ["com.example.own"]), scroll: ScrollSettings(linesPerNotch: 5)),
+        ]
+        #expect(settings.resolvedProfile(device: nil, app: "com.example.child").scroll.modifierScaling == scaling)
+        // A profile's own scroll settings replace the parent's as a whole, scaling included.
+        #expect(settings.resolvedProfile(device: nil, app: "com.example.own").scroll.modifierScaling == nil)
     }
 
     @Test func profileWithoutParentStartsEmpty() {

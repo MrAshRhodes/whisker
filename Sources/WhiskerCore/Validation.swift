@@ -123,6 +123,20 @@ extension WhiskerSettings {
                 issues.append(ValidationIssue("\(path).scroll.acceleration", "Must be between 0 and 1."))
                 scroll.acceleration = acceleration
             }
+            if let scaling = scroll.modifierScaling {
+                let scalingPath = "\(path).scroll.modifierScaling"
+                if let problem = scaling.problem(horizontalModifier: scroll.horizontalModifier) {
+                    issues.append(ValidationIssue(scalingPath, problem))
+                    scroll.modifierScaling = nil
+                } else {
+                    let multiplier = ScrollMath.multiplierRange.clamp(scaling.multiplier)
+                    if multiplier != scaling.multiplier {
+                        let range = ScrollMath.multiplierRange
+                        issues.append(ValidationIssue("\(scalingPath).multiplier", "Must be between \(String(format: "%g", range.lowerBound)) and \(String(format: "%g", range.upperBound))."))
+                        scroll.modifierScaling?.multiplier = multiplier
+                    }
+                }
+            }
             profile.scroll = scroll
         }
 

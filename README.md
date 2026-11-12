@@ -23,7 +23,10 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   every notch if you choose **Repeat for every notch**.
 - **Scrolling.** Reverse the vertical or horizontal wheel for each mouse without changing the
   trackpad or the system's natural-scrolling setting. Each profile can set how many lines a
-  wheel notch scrolls, add scroll acceleration and choose a modifier key that scrolls sideways.
+  wheel notch scrolls, add scroll acceleration, choose a modifier key that scrolls sideways and
+  scroll faster or slower, from ×0.25 to ×8, while modifier keys you choose are held. The speed
+  change applies to wheel notches, not trackpads or smooth scrolling, and is not yet verified on
+  hardware.
 - **Profiles.** Give an app, a mouse, or an app on one mouse its own buttons and scrolling.
   Anything a profile does not set comes from the profile it inherits from, ending at the
   default profile, and Whisker switches profiles as you change apps.

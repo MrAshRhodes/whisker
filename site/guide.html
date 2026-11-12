@@ -48,7 +48,7 @@
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li></ol></li>
-          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#wheel-actions">Wheel actions</a></li></ol></li>
+          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#wheel-actions">Wheel actions</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
           <li><a href="#settings-file">Settings file</a></li>
@@ -166,6 +166,17 @@ make app</code></pre>
           <p>Turn on <span class="ui">Set how far each notch scrolls</span> and choose 1 to 20 lines. With it off, each notch scrolls the distance macOS normally uses.</p>
           <p><span class="ui">Speed up quick spins</span> makes fast spins travel further. Up to four notches a second, each notch scrolls the number of lines you chose. Faster than that, each notch scrolls more, in proportion to how fast you're spinning, measured over the last fifth of a second. Try it in the <a href="./#tuning">scroll playground</a> on the home page.</p>
           <p><span class="ui">Scroll sideways while holding</span> a modifier key turns the wheel into a horizontal scroll while that key is down.</p>
+          <h3 id="speed-while-holding-keys">Speed while holding keys</h3>
+          <p>Turn on <span class="ui">Scroll faster or slower while holding keys</span> to change how far the wheel scrolls while keys you choose are down. Pick the keys, a <span class="ui">Speed</span> and what it <span class="ui">Applies to</span>: both directions, up and down only, or left and right only. Speeds run from ×0.25 to ×8, so ×0.5 scrolls half as far and ×2 twice as far. Let go of the keys and scrolling goes back to normal. Each profile has its own setting, which replaces Default's along with the rest of its scrolling settings.</p>
+          <ul>
+            <li>The speed is applied last, on top of lines per notch, speeding up quick spins and sideways scrolling. <span class="ui">Applies to</span> means the directions the app receives, so a wheel turned sideways with the sideways key counts as left and right.</li>
+            <li>A <a href="#wheel-actions">wheel action</a> on the same keys wins: that turn runs the action and isn't scaled.</li>
+            <li>Don't choose exactly the keys that scroll sideways. Whisker warns you and leaves the speed off until one of them changes.</li>
+            <li>The keys held for speed aren't passed on to the app with the scroll, so they don't also trigger its own shortcuts for them, such as zooming. Any other keys you hold still are.</li>
+            <li>At slow speeds a notch can come to less than a line. Whisker keeps the part that doesn't fit and adds it to the next notch in the same direction, so at ×0.25 every fourth notch moves one line. It forgets what is left over when you reverse the wheel, let go of the keys or stop for a second.</li>
+            <li>Like the distance settings, it works on wheels that click from notch to notch. Trackpads and smooth scrolling are left alone.</li>
+          </ul>
+          <p>This has not yet been verified on hardware, including the wheel modes and connection types of mice such as the Logitech Lift and MX Master 3S. The ×0.25 and ×8 limits may change once it has been tried on real mice.</p>
           <h3 id="wheel-actions">Wheel actions</h3>
           <p>The wheel can trigger actions too. In <span class="ui">Settings › Buttons</span>, choose <span class="ui">Record Button…</span> and turn the wheel: each direction (up, down, left and right) is its own trigger, with any modifier keys. <kbd>⌥</kbd> + wheel up for Volume Up is a common one. Most people keep a modifier on wheel mappings so that plain scrolling still works.</p>
           <p><span class="ui">Repeat for every notch</span> runs the action once per notch. With it off, the action runs once for each burst of turning.</p>
@@ -262,6 +273,8 @@ make app</code></pre>
           <p>That's deliberate: Whisker leaves trackpads and touch mice alone.</p>
           <h3>Lines per notch makes no difference</h3>
           <p>Your mouse probably sends smooth scrolling rather than notches. Direction settings still apply.</p>
+          <h3>Speed while holding keys makes no difference</h3>
+          <p>Your mouse may send smooth scrolling rather than notches. Also check that the keys aren't the same ones that scroll sideways and that no wheel action is set on them.</p>
           <h3>Pointer speed won't change</h3>
           <p>Some mice don't accept pointer changes from macOS. Whisker tells you when that happens.</p>
           <h3>Settings say changes won't be saved</h3>

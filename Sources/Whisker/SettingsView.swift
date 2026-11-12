@@ -237,6 +237,7 @@ struct ScrollingPane: View {
                         ForEach(Self.modifierChoices, id: \.1.rawValue) { Text($0.0).tag($0.1) }
                     }
                 }
+                speedSection(scroll)
                 if !profile.wrappedValue.isDefault {
                     Section {
                         Button("Use Inherited Settings") { profile.wrappedValue.scroll = nil }
@@ -249,6 +250,66 @@ struct ScrollingPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: Speed while holding keys
+
+    private static let speedPresets: [Double] = [0.25, 0.5, 2, 3, 4, 5, 8]
+
+    /// The presets, plus the saved speed when it isn't one of them, so the picker always has a selection.
+    private static func speedChoices(including current: Double) -> [Double] {
+        speedPresets.contains(current) ? speedPresets : (speedPresets + [current]).sorted()
+    }
+
+    private static func speedTitle(_ speed: Double) -> String {
+        "×" + speed.formatted()
+    }
+
+    private static func axesTitle(_ axes: ScalingAxes) -> String {
+        switch axes {
+        case .both: "Both directions"
+        case .vertical: "Up and down only"
+        case .horizontal: "Left and right only"
+        }
+    }
+
+    /// Half speed on a key the sideways setting isn't using.
+    private static func startingScaling(avoiding sideways: ModifierSet) -> ModifierScaling {
+        let key = [ModifierSet.option, .control, .shift, .command].first { $0 != sideways.withoutFunction } ?? .option
+        return ModifierScaling(modifiers: key, multiplier: 0.5)
+    }
+
+    @ViewBuilder private func speedSection(_ scroll: Binding<ScrollSettings>) -> some View {
+        let scaling = scroll.wrappedValue.modifierScaling
+        Section("Speed while holding keys") {
+            Toggle("Scroll faster or slower while holding keys", isOn: Binding(
+                get: { scroll.wrappedValue.modifierScaling != nil },
+                set: { scroll.wrappedValue.modifierScaling = $0 ? Self.startingScaling(avoiding: scroll.wrappedValue.horizontalModifier) : nil }
+            ))
+            if let scaling {
+                ModifierToggles(modifiers: Binding(
+                    get: { scaling.modifiers },
+                    set: { scroll.wrappedValue.modifierScaling?.modifiers = $0 }
+                ))
+                Picker("Speed", selection: Binding(
+                    get: { scaling.multiplier },
+                    set: { scroll.wrappedValue.modifierScaling?.multiplier = $0 }
+                )) {
+                    ForEach(Self.speedChoices(including: scaling.multiplier), id: \.self) { Text(Self.speedTitle($0)).tag($0) }
+                }
+                Picker("Applies to", selection: Binding(
+                    get: { scaling.axes },
+                    set: { scroll.wrappedValue.modifierScaling?.axes = $0 }
+                )) {
+                    ForEach(ScalingAxes.allCases, id: \.self) { Text(Self.axesTitle($0)).tag($0) }
+                }
+                if let problem = scaling.problem(horizontalModifier: scroll.wrappedValue.horizontalModifier) {
+                    Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                }
+            }
+            Text("Hold the keys while turning the wheel. ×0.5 scrolls half as far and ×2 twice as far. Wheel mappings on the same keys take priority, and trackpads and smooth scrolling are left alone.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
     }
 }
 

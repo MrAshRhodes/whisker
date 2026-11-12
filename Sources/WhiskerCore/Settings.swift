@@ -132,14 +132,67 @@ public struct ScrollSettings: Equatable, Sendable {
     public var acceleration: Double
     /// Holding these turns vertical wheel movement into horizontal scrolling. Empty = off.
     public var horizontalModifier: ModifierSet
+    /// Scales the distance while modifiers are held. Nil = off.
+    public var modifierScaling: ModifierScaling?
 
-    public init(linesPerNotch: Int? = nil, acceleration: Double = 0, horizontalModifier: ModifierSet = []) {
+    public init(
+        linesPerNotch: Int? = nil,
+        acceleration: Double = 0,
+        horizontalModifier: ModifierSet = [],
+        modifierScaling: ModifierScaling? = nil
+    ) {
         self.linesPerNotch = linesPerNotch
         self.acceleration = acceleration
         self.horizontalModifier = horizontalModifier
+        self.modifierScaling = modifierScaling
     }
 
     public static let system = ScrollSettings()
+
+    /// `modifierScaling` when it can be used, otherwise nil: the wheel then behaves as if scaling were off.
+    var usableModifierScaling: ModifierScaling? {
+        guard let scaling = modifierScaling, scaling.problem(horizontalModifier: horizontalModifier) == nil else { return nil }
+        return scaling
+    }
+}
+
+/// Which wheel directions a `ModifierScaling` changes. Directions are those the app receives, after the
+/// sideways modifier has turned up and down into left and right.
+public enum ScalingAxes: String, Equatable, Sendable, Codable, CaseIterable {
+    case both
+    case vertical
+    case horizontal
+
+    public var includesVertical: Bool { self != .horizontal }
+    public var includesHorizontal: Bool { self != .vertical }
+}
+
+/// Makes the wheel scroll further or less far while modifiers are held, e.g. half the distance for fine control.
+/// Pointer speed and clicking are not affected.
+public struct ModifierScaling: Equatable, Sendable {
+    /// Holding these scales the wheel. Must not be empty, nor the same as the sideways modifier.
+    public var modifiers: ModifierSet
+    /// Multiplier of the distance, `ScrollMath.multiplierRange`: below 1 slows the wheel, above 1 speeds it up.
+    public var multiplier: Double
+    public var axes: ScalingAxes
+
+    public init(modifiers: ModifierSet = [], multiplier: Double = 2, axes: ScalingAxes = .both) {
+        self.modifiers = modifiers
+        self.multiplier = multiplier
+        self.axes = axes
+    }
+
+    /// Why this can't be used next to the sideways modifier, or nil when it is fine. Shared by validation, the
+    /// settings window and the event processor, which leaves scaling with a problem switched off.
+    public func problem(horizontalModifier: ModifierSet) -> String? {
+        let held = modifiers.withoutFunction
+        if held.isEmpty { return "Choose at least one modifier key to hold." }
+        if held == horizontalModifier.withoutFunction {
+            return "\(held.symbols) already scrolls sideways. Choose a different modifier for the speed."
+        }
+        if !multiplier.isFinite || multiplier <= 0 { return "The speed must be more than zero." }
+        return nil
+    }
 }
 
 public struct ProfileMatch: Equatable, Sendable, Codable {
@@ -300,13 +353,14 @@ extension WheelSettings: Codable {
 }
 
 extension ScrollSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case linesPerNotch, acceleration, horizontalModifier }
+    private enum CodingKeys: String, CodingKey { case linesPerNotch, acceleration, horizontalModifier, modifierScaling }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         linesPerNotch = try c.decodeIfPresent(Int.self, forKey: .linesPerNotch)
         acceleration = try c.decodeIfPresent(Double.self, forKey: .acceleration) ?? 0
         horizontalModifier = try c.decodeIfPresent(ModifierSet.self, forKey: .horizontalModifier) ?? []
+        modifierScaling = try c.decodeIfPresent(ModifierScaling.self, forKey: .modifierScaling)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -314,6 +368,26 @@ extension ScrollSettings: Codable {
         try c.encodeIfPresent(linesPerNotch, forKey: .linesPerNotch)
         try c.encode(acceleration, forKey: .acceleration)
         try c.encode(horizontalModifier, forKey: .horizontalModifier)
+        try c.encodeIfPresent(modifierScaling, forKey: .modifierScaling)
+    }
+}
+
+extension ModifierScaling: Codable {
+    private enum CodingKeys: String, CodingKey { case modifiers, multiplier, axes }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = ModifierScaling()
+        modifiers = try c.decodeIfPresent(ModifierSet.self, forKey: .modifiers) ?? defaults.modifiers
+        multiplier = try c.decodeIfPresent(Double.self, forKey: .multiplier) ?? defaults.multiplier
+        axes = try c.decodeIfPresent(ScalingAxes.self, forKey: .axes) ?? defaults.axes
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(modifiers, forKey: .modifiers)
+        try c.encode(multiplier, forKey: .multiplier)
+        try c.encode(axes, forKey: .axes)
     }
 }
 

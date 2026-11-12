@@ -54,6 +54,8 @@ public struct ScrollSample: Equatable, Sendable {
         if h != 0 { return h > 0 ? .left : .right }
         return nil
     }
+
+    public var isZero: Bool { vertical.isZero && horizontal.isZero }
 }
 
 public enum InputKind: Equatable, Sendable {
@@ -110,7 +112,8 @@ public enum EventPlan: Equatable, Sendable {
 /// Decides, for each mouse event, whether to pass it, drop it or turn it into an action.
 ///
 /// Holds the little state needed across events: which buttons are held as what, when the wheel last fired
-/// a mapping (so a spin of the wheel counts as one press), and recent notch times for acceleration.
+/// a mapping (so a spin of the wheel counts as one press), recent notch times for acceleration, and the
+/// distance left over from scaling the wheel.
 public struct EventProcessor: Sendable {
     /// Notches closer together than this belong to the same burst and fire a wheel mapping once.
     public static let wheelBurstGap: TimeInterval = 0.13
@@ -118,6 +121,7 @@ public struct EventProcessor: Sendable {
     private var held: [Int: Action] = [:]
     private var lastWheelEvent: [MappingKey: TimeInterval] = [:]
     private var notchTimes: [TimeInterval] = []
+    private var scaler = ScrollScaler()
 
     public init() {}
 
@@ -140,6 +144,7 @@ public struct EventProcessor: Sendable {
         held.removeAll()
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
+        scaler.reset()
         return released
     }
 
@@ -215,7 +220,8 @@ public struct EventProcessor: Sendable {
 
         guard isNotch else { return changed ? .scroll(rewritten, removing: []) : .passThrough }
 
-        let scroll = settings.profile(device: event.device?.id, app: event.app).scroll
+        let resolved = settings.profile(device: event.device?.id, app: event.app)
+        let scroll = resolved.scroll
         let horizontalModifier = scroll.horizontalModifier.withoutFunction
         if !horizontalModifier.isEmpty, event.modifiers.isSuperset(of: horizontalModifier), !rewritten.vertical.isZero {
             rewritten.horizontal = rewritten.vertical
@@ -231,6 +237,18 @@ public struct EventProcessor: Sendable {
             let lines = ScrollMath.effectiveLines(base: base, acceleration: scroll.acceleration, rate: rate)
             if rewritten.vertical.sign != 0 { rewritten.vertical = .lines(rewritten.vertical.sign * lines) }
             if rewritten.horizontal.sign != 0 { rewritten.horizontal = .lines(rewritten.horizontal.sign * lines) }
+            changed = true
+        }
+
+        // Scaling comes last, on the distance and direction the app would otherwise receive. Only the modifiers
+        // it used up are removed, so a held key that did nothing here still reaches the app.
+        let device = event.device?.id
+        let scaling = scroll.usableModifierScaling
+        if let scaled = scaler.scale(rewritten, by: scaling, held: event.modifiers, device: device, profile: resolved.profileID, at: event.timestamp),
+           let scaling {
+            if scaled.isZero { return .swallow }
+            rewritten = scaled
+            removing.formUnion(scaling.modifiers.withoutFunction)
             changed = true
         }
 

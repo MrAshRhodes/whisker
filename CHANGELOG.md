@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Scroll faster or slower while holding modifier keys: choose the keys, a speed from ×0.25 to ×8 and the directions for each profile. It applies to wheel notches only, not trackpads or smooth scrolling, and has not yet been verified on hardware ([#16]).
+
 ## [0.1.0] - 2026-11-12
 
 ### Added
@@ -22,3 +26,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/MrAshRhodes/whisker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/MrAshRhodes/whisker/releases/tag/v0.1.0
+[#16]: https://github.com/MrAshRhodes/whisker/issues/16
