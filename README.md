@@ -117,6 +117,19 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   switches it off unless you press **Keep**. It has not yet been verified on real faulty
   hardware or across apps (for example Finder double-clicks and text selection), and it does not
   diagnose or repair a mouse.
+- **Swap primary and secondary buttons (per mouse, off by default).** For one mouse, under
+  **Devices** or in that mouse's own profile in **Buttons**, the primary and secondary buttons
+  trade places, always as a pair, for example for a left-handed set-up. Only plain presses swap:
+  a click with ⌘, ⌥, ⌃ or ⇧ held, the other buttons, the wheel and other mice and trackpads are
+  left alone, and a press keeps the button it began as until you let go. It needs **Allow
+  remapping the primary button**, which Whisker never turns on for you, and Input Monitoring, so
+  Whisker knows which mouse you pressed. A profile that maps the plain Primary Button or
+  Secondary Button itself wins over the swap, and Whisker says when that happens. Turning it on
+  starts a 60-second trial that switches it off unless you press **Keep** (or Return; Escape
+  switches it off at once). The duplicate-click filter still looks at the button you pressed.
+  How it combines with the secondary-click setting in System Settings has not yet been verified,
+  apps that read the mouse directly may ignore the swap, and none of it, including the trial's
+  keyboard and VoiceOver use, has been verified on hardware.
 - **Menu bar item** to turn Whisker on or off, see the active profile (or the app it is bypassed
   for) and open its settings. The icon can be hidden, and Whisker can open at login.
 - **Settings file.** Everything is kept in one readable JSON file that you can export, import or
@@ -358,6 +371,10 @@ brew update && brew upgrade --cask whisker
   or Apps on newer macOS).
 - **Back and forward do nothing in an app.** These send ⌘[ and ⌘]. Map the button to a different
   shortcut in a profile for that app.
+- **Swapping the buttons does nothing.** The note under the switch says why. It is usually
+  **Allow remapping the primary button** being off in General, Input Monitoring not being allowed,
+  or a profile that maps the plain Primary Button or Secondary Button itself, which wins over the
+  swap. Clicks with a modifier key held are never swapped.
 - **A mouse's own settings are not used when another mouse is connected.** Click
   **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart, then open the
   mouse's **Details** to see how sure Whisker is which clicks are its.

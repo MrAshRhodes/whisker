@@ -170,6 +170,8 @@ public struct EventProcessor: Sendable {
     /// Buttons still physically down whose press Whisker swallowed before it stood aside for an app. The
     /// app never saw them go down, so it mustn't see them go up or drag either.
     private var orphaned: Set<Int> = []
+    /// Presses delivered as the other button (primary and secondary swapped), until their release.
+    private var swaps = SwappedPresses()
     private var lastWheelEvent: [MappingKey: TimeInterval] = [:]
     private var notchTimes: [TimeInterval] = []
     private var scaler = ScrollScaler()
@@ -194,7 +196,7 @@ public struct EventProcessor: Sendable {
     public mutating func process(_ event: InputEvent, settings: CompiledSettings) -> EventPlan {
         switch event.kind {
         case .buttonDown(let button): return buttonDown(button, event, settings)
-        case .buttonUp(let button): return buttonUp(button)
+        case .buttonUp(let button): return buttonUp(button, event)
         case .buttonDragged(let button): return dragged(button, event, settings)
         case .scroll(let sample): return scroll(sample, event, settings)
         }
@@ -203,9 +205,13 @@ public struct EventProcessor: Sendable {
     /// Lets go of everything held, returning the actions to finish (e.g. release a synthetic click).
     /// Called when Whisker is turned off, the Mac sleeps or the app quits.
     public mutating func releaseAll() -> [(button: Int, action: Action)] {
-        let released = held.sorted { $0.key < $1.key }.filter { $0.value.followsTrigger }.map { (button: $0.key, action: $0.value) }
+        var released = held.sorted { $0.key < $1.key }.filter { $0.value.followsTrigger }.map { (button: $0.key, action: $0.value) }
         held.removeAll()
         orphaned.removeAll()
+        // A swapped button that is still down has had its release delivered, so the real one is swallowed.
+        let swapped = swaps.removeAll()
+        released += swapped.map { (button: $0.button, action: Action.click(button: $0.target, modifiers: [])) }
+        orphaned.formUnion(swapped.map(\.button))
         endHold(cancelled: true)
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
@@ -223,10 +229,16 @@ public struct EventProcessor: Sendable {
     /// swallowed (and their drags become plain movement) until they come up, so the app only ever sees
     /// button events whose press it saw.
     public mutating func releaseAllForBypass() -> [(button: Int, action: Action)] {
-        let buttons = orphaned.union(held.keys)
+        let buttons = orphaned.union(held.keys).union(swaps.buttons)
         let released = releaseAll()
         orphaned = buttons
         return released
+    }
+
+    /// Releases the swapped presses of mice that are no longer among `connected`: a mouse that has gone can't send
+    /// the release itself. It sends nothing more either, so nothing is left swallowed.
+    public mutating func releaseSwaps(unlessConnected connected: Set<String>) -> [(button: Int, action: Action)] {
+        swaps.remove(unlessConnected: connected).map { (button: $0.button, action: Action.click(button: $0.target, modifiers: [])) }
     }
 
     /// Ends an in-progress hold-to-scroll without waiting for its button (the app in front changed, the mouse
@@ -270,8 +282,13 @@ public struct EventProcessor: Sendable {
         // A down without an up (missed event): finish the old one first by treating it as released.
         held[button] = nil
         orphaned.remove(button)
+        swaps.forget(button, from: event.device)
         if hold?.button == button { endHold(cancelled: false) }
         guard isActive(event, settings) else { return .passThrough }
+        if let device = event.device, let target = ButtonSwap.target(of: button, in: event, settings: settings) {
+            swaps.began(button, as: target, from: device.id)
+            return .perform(.click(button: target, modifiers: []), .down)
+        }
         guard let mapping = lookup(.button(button), event, settings, exactOnly: false) else { return .passThrough }
         // The primary button with no modifiers is the way back if a mapping goes wrong.
         if button == 0, mapping.modifiers.isEmpty, !settings.general.allowPrimaryButtonRemap { return .passThrough }
@@ -298,16 +315,20 @@ public struct EventProcessor: Sendable {
         return .swallow
     }
 
-    private mutating func buttonUp(_ button: Int) -> EventPlan {
+    private mutating func buttonUp(_ button: Int, _ event: InputEvent) -> EventPlan {
         if hold?.button == button { endHold(cancelled: false) }
         guard let action = held.removeValue(forKey: button) else {
+            if let target = swaps.end(button, from: event.device) { return .perform(.click(button: target, modifiers: []), .up) }
             return orphaned.remove(button) != nil ? .swallow : .passThrough
         }
         return action.followsTrigger ? .perform(action, .up) : .swallow
     }
 
     private mutating func dragged(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
-        guard let action = held[button] else { return orphaned.contains(button) ? .dragAsMove : .passThrough }
+        guard let action = held[button] else {
+            if let target = swaps.target(of: button, from: event.device) { return .dragAs(button: target, modifiers: []) }
+            return orphaned.contains(button) ? .dragAsMove : .passThrough
+        }
         if hold?.button == button {
             guard isActive(event, settings), hold?.app == event.app else {
                 endHold(cancelled: false)

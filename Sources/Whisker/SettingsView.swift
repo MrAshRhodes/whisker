@@ -892,6 +892,7 @@ struct DevicesPane: View {
             if binding.wrappedValue.enabled {
                 Toggle("Reverse vertical scrolling", isOn: binding.wheel.invertVertical)
                 Toggle("Reverse horizontal scrolling", isOn: binding.wheel.invertHorizontal)
+                ButtonSwapControls(store: store, devices: devices, id: id, name: name)
                 ClickFilterControls(id: id, name: name, settings: binding.wrappedValue.clickDebounce)
             }
             DeviceDetailsDisclosure(details: details, onOpen: onOpen)

@@ -113,6 +113,8 @@ public final class CompiledSettings: @unchecked Sendable {
     private let resolvedByID: [String: ResolvedProfile]
     private let bypassApps: Set<String>
     public let nativeWheelActive: Set<String>
+    /// Mice whose primary and secondary buttons are swapped, so a press can tell at once whether it is any concern.
+    public let swappedDevices: Set<String>
     /// Whether any mapping needs pointer movement. When false, nothing in the app reads movement at all.
     public let needsMotion: Bool
     private var cache: [CacheKey: String] = [:]
@@ -135,6 +137,7 @@ public final class CompiledSettings: @unchecked Sendable {
         }
         resolvedByID = resolved
         bypassApps = Set(settings.general.bypassApps)
+        swappedDevices = Set(settings.devices.filter { $0.value.swapPrimarySecondary }.keys)
         needsMotion = settings.usesMotionActions
     }
 

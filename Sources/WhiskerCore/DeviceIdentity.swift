@@ -81,10 +81,13 @@ public enum ExcludedDeviceKind: String, Hashable, Sendable {
 public struct DeviceAttribution: Equatable, Sendable {
     public var id: String
     public var exact: Bool
+    /// The device is one that is left alone (a trackpad or touch mouse). Only an exact attribution can name one.
+    public var isExcluded: Bool
 
-    public init(id: String, exact: Bool) {
+    public init(id: String, exact: Bool, isExcluded: Bool = false) {
         self.id = id
         self.exact = exact
+        self.isExcluded = isExcluded
     }
 }
 
@@ -152,7 +155,7 @@ public struct DeviceAttributor: Sendable {
     /// connected mouse, if there is just one.
     public func attribute(kind: ReportKind, at time: TimeInterval) -> DeviceAttribution? {
         if let report = reports.last(where: { $0.kind == kind && time - $0.time <= Self.window && $0.time <= time + Self.window }) {
-            return DeviceAttribution(id: report.deviceID, exact: true)
+            return DeviceAttribution(id: report.deviceID, exact: true, isExcluded: excluded.contains(report.deviceID))
         }
         if connected.count == 1, let only = connected.first {
             return DeviceAttribution(id: only, exact: false)

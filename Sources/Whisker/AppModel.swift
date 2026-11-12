@@ -67,6 +67,12 @@ final class AppModel: ObservableObject {
     private var clickFilterTimers: [String: Task<Void, Never>] = [:]
     static let clickFilterTrialDuration: TimeInterval = 60
 
+    /// Mice whose swapped primary and secondary buttons are on trial, with when the swap switches itself off unless
+    /// kept. Never saved. The length is only changed by tests.
+    @Published private(set) var swapTrials: [String: Date] = [:]
+    private var swapTimers: [String: Task<Void, Never>] = [:]
+    var swapTrialDuration: TimeInterval = 60
+
     var onStatusChange: (() -> Void)?
     private var runState: RunState
     private var cancellables: Set<AnyCancellable> = []
@@ -302,8 +308,50 @@ final class AppModel: ObservableObject {
         clickFilterTrials[id] = nil
     }
 
+    /// Swaps a mouse's primary and secondary buttons, or puts them back. Switching it on starts a trial: unless it
+    /// is kept, the swap switches itself off after `swapTrialDuration`, so a swap that gets in the way can't stay
+    /// on by accident. It never switches on "Allow remapping the primary button" and does nothing while that is off.
+    func setSwapPrimarySecondary(device id: String, name: String, on: Bool) {
+        guard on else {
+            store.settings.devices[id]?.swapPrimarySecondary = false
+            endSwapTrial(id)
+            return
+        }
+        guard store.settings.general.allowPrimaryButtonRemap else { return }
+        var device = store.settings.devices[id] ?? DeviceSettings(name: name)
+        if device.name.isEmpty { device.name = name }
+        device.swapPrimarySecondary = true
+        store.settings.devices[id] = device
+        swapTrials[id] = Date().addingTimeInterval(swapTrialDuration)
+        swapTimers[id]?.cancel()
+        let duration = swapTrialDuration
+        swapTimers[id] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(duration))
+            guard !Task.isCancelled else { return }
+            self?.revertSwap(device: id)
+        }
+    }
+
+    /// Keeps the swap after a trial.
+    func confirmSwap(device id: String) {
+        endSwapTrial(id)
+    }
+
+    /// Puts the buttons back and ends the trial.
+    func revertSwap(device id: String) {
+        store.settings.devices[id]?.swapPrimarySecondary = false
+        endSwapTrial(id)
+    }
+
+    private func endSwapTrial(_ id: String) {
+        swapTimers[id]?.cancel()
+        swapTimers[id] = nil
+        swapTrials[id] = nil
+    }
+
     func shutdown() {
         for id in Array(clickFilterTrials.keys) { revertClickFilter(device: id) }
+        for id in Array(swapTrials.keys) { revertSwap(device: id) }
         permission.stopPolling()
         engine.stop()
         // A speed still waiting to be kept goes back first, so it isn't saved as if it had been.

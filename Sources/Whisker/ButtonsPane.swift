@@ -120,6 +120,14 @@ struct ButtonsPane: View {
                 Text("Hold modifier keys while recording to map a combination, like ⌥ + Button 4.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
+            if let deviceID = Self.mouseID(of: profile.wrappedValue) {
+                Section("Primary and Secondary Buttons") {
+                    ButtonSwapControls(
+                        store: store, devices: model.devices, id: deviceID,
+                        name: store.settings.devices[deviceID]?.name ?? profile.wrappedValue.name
+                    )
+                }
+            }
             if !inherited.isEmpty {
                 Section("Inherited") {
                     ForEach(inherited, id: \.mapping.key) { item in
@@ -145,6 +153,13 @@ struct ButtonsPane: View {
             .environmentObject(model)
         }
         .onDisappear { recorder.stop() }
+    }
+
+    /// The mouse a profile is for, when it is for one particular mouse in every app: the swap belongs to a mouse, not to a profile.
+    private static func mouseID(of profile: Profile) -> String? {
+        guard !profile.isDefault, profile.match.apps == [ProfileMatch.any],
+              profile.match.devices.count == 1, let id = profile.match.devices.first, id != ProfileMatch.any else { return nil }
+        return id
     }
 
     private func mappingBinding(_ profile: Binding<Profile>, _ index: Int) -> Binding<Mapping> {

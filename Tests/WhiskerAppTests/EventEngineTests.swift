@@ -516,3 +516,117 @@ struct EventEngineBypassTests {
         #expect(recorder.calls.map(\.phase) == [.down, .up])
     }
 }
+
+@Suite("Event engine button swap")
+struct EventEngineSwapTests {
+    typealias Recorder = EventEngineTests.Recorder
+
+    static let mouse = DeviceAttribution(id: "046d:c52b", exact: true)
+    static let left = Action.click(button: 0, modifiers: [])
+    static let right = Action.click(button: 1, modifiers: [])
+
+    static func settings() -> WhiskerSettings {
+        var settings = WhiskerSettings()
+        settings.profiles[0].mappings = []
+        settings.general.allowPrimaryButtonRemap = true
+        settings.devices[mouse.id] = DeviceSettings(swapPrimarySecondary: true)
+        return settings
+    }
+
+    static func makeEngine(_ recorder: Recorder) -> EventEngine {
+        let engine = EventEngine(synthesizer: recorder, attribute: { _, _ in mouse }, frontmostApp: { nil })
+        engine.update(settings())
+        return engine
+    }
+
+    static func event(_ type: CGEventType, button: Int, clickState: Int64 = 1) -> CGEvent {
+        let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: 4, y: 5), mouseButton: button == 0 ? .left : .right)!
+        event.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
+        event.setIntegerValueField(.mouseEventClickState, value: clickState)
+        return event
+    }
+
+    @Test func aSwappedPressIsPostedAsTheOtherButtonAndItsDragBecomesThatButtonsDrag() throws {
+        let presses: [(down: CGEventType, drag: CGEventType, up: CGEventType, button: Int, delivered: Action, draggedAs: CGEventType)] = [
+            (.leftMouseDown, .leftMouseDragged, .leftMouseUp, 0, Self.right, .rightMouseDragged),
+            (.rightMouseDown, .rightMouseDragged, .rightMouseUp, 1, Self.left, .leftMouseDragged),
+        ]
+        for press in presses {
+            let recorder = Recorder()
+            let engine = Self.makeEngine(recorder)
+            #expect(engine.handle(press.down, Self.event(press.down, button: press.button, clickState: 2)) == nil)
+            // The tap hands the same event back, so it has to stay alive while the result is read.
+            let drag = Self.event(press.drag, button: press.button)
+            let dragged = try #require(engine.handle(press.drag, drag)).takeUnretainedValue()
+            #expect(dragged.type == press.draggedAs)
+            #expect(dragged.getIntegerValueField(.mouseEventButtonNumber) == Int64(1 - press.button))
+            #expect(engine.handle(press.up, Self.event(press.up, button: press.button, clickState: 2)) == nil)
+            #expect(recorder.calls == [
+                .init(action: press.delivered, phase: .down, clickState: 2),
+                .init(action: press.delivered, phase: .up, clickState: 2),
+            ])
+        }
+    }
+
+    @Test func aMouseThatIsNotSwappedAndOtherButtonsPassThrough() {
+        let recorder = Recorder()
+        let engine = EventEngine(synthesizer: recorder, attribute: { _, _ in DeviceAttribution(id: "1234:abcd", exact: true) }, frontmostApp: { nil })
+        engine.update(Self.settings())
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0)) != nil)
+        #expect(engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0)) != nil)
+
+        let swapping = Self.makeEngine(recorder)
+        #expect(swapping.handle(.otherMouseDown, EventEngineTests.button3(down: true)) != nil)
+        #expect(swapping.handle(.otherMouseUp, EventEngineTests.button3(down: false)) != nil)
+        #expect(recorder.calls.isEmpty)
+    }
+
+    @Test func aMouseLostMidPressReleasesTheButtonOnceAndItsOwnReleaseIsNotRepeated() {
+        let recorder = Recorder()
+        let engine = Self.makeEngine(recorder)
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0)) == nil)
+
+        engine.devicesChanged(connected: [])
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+        #expect(recorder.calls.map(\.action) == [Self.right, Self.right])
+        _ = engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0))
+        #expect(recorder.calls.count == 2)
+    }
+
+    @Test func aMouseStillConnectedKeepsItsPressAcrossAChangeOfDevices() {
+        let recorder = Recorder()
+        let engine = Self.makeEngine(recorder)
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0)) == nil)
+
+        engine.devicesChanged(connected: [Self.mouse.id, "1234:abcd"])
+        #expect(recorder.calls.map(\.phase) == [.down])
+        #expect(engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0)) == nil)
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+    }
+
+    @Test func cleaningUpMidPressReleasesTheButtonAndSwallowsTheRealRelease() {
+        let recorder = Recorder()
+        let engine = Self.makeEngine(recorder)
+        #expect(engine.handle(.rightMouseDown, Self.event(.rightMouseDown, button: 1)) == nil)
+
+        engine.releaseAll()
+        #expect(recorder.calls == [
+            .init(action: Self.left, phase: .down, clickState: 1),
+            .init(action: Self.left, phase: .up, clickState: 1),
+        ])
+        #expect(engine.handle(.rightMouseDragged, Self.event(.rightMouseDragged, button: 1)) != nil)
+        #expect(engine.handle(.rightMouseUp, Self.event(.rightMouseUp, button: 1)) == nil)
+        #expect(recorder.calls.count == 2)
+    }
+
+    @Test func turningTheSwapOffMidPressStillFinishesThatPressAsItStarted() {
+        let recorder = Recorder()
+        let engine = Self.makeEngine(recorder)
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0)) == nil)
+
+        engine.update(WhiskerSettings())
+        #expect(engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0)) == nil)
+        #expect(recorder.calls.map(\.action) == [Self.right, Self.right])
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0)) != nil)
+    }
+}

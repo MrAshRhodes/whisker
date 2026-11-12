@@ -105,11 +105,15 @@ public struct DeviceSettings: Equatable, Sendable {
     public var activePointerPresetID: String?
     /// Reserved orientation correction, independent of custom speed. Dormant: global rotation is not supported.
     public var rotationDegrees: Double
+    /// Opt-in: this mouse's primary and secondary buttons trade places, as one pair (see `ButtonSwap`). It only acts
+    /// while "Allow remapping the primary button" is on.
+    public var swapPrimarySecondary: Bool
 
     public init(
         name: String = "", enabled: Bool = true, pointer: PointerSettings? = nil, wheel: WheelSettings = WheelSettings(),
         clickDebounce: ClickDebounceSettings? = nil, controlLabels: [ControlLabel] = [],
-        pointerPresets: [PointerPreset] = [], activePointerPresetID: String? = nil, rotationDegrees: Double = 0
+        pointerPresets: [PointerPreset] = [], activePointerPresetID: String? = nil, rotationDegrees: Double = 0,
+        swapPrimarySecondary: Bool = false
     ) {
         self.name = name
         self.enabled = enabled
@@ -120,6 +124,7 @@ public struct DeviceSettings: Equatable, Sendable {
         self.pointerPresets = pointerPresets
         self.activePointerPresetID = activePointerPresetID
         self.rotationDegrees = PointerOrientationMath.normalisedDegrees(rotationDegrees) ?? rotationDegrees
+        self.swapPrimarySecondary = swapPrimarySecondary
     }
 }
 
@@ -351,7 +356,10 @@ extension GeneralSettings: Codable {
 }
 
 extension DeviceSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel, clickDebounce, controlLabels, pointerPresets, activePointerPresetID, rotationDegrees }
+    private enum CodingKeys: String, CodingKey {
+        case name, enabled, pointer, wheel, clickDebounce, controlLabels, pointerPresets, activePointerPresetID, rotationDegrees
+        case swapPrimarySecondary
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -368,6 +376,7 @@ extension DeviceSettings: Codable {
             throw DecodingError.dataCorruptedError(forKey: .rotationDegrees, in: c, debugDescription: "Rotation must be a finite angle.")
         }
         rotationDegrees = normalised
+        swapPrimarySecondary = try c.decodeIfPresent(Bool.self, forKey: .swapPrimarySecondary) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -384,6 +393,7 @@ extension DeviceSettings: Codable {
             throw EncodingError.invalidValue(rotationDegrees, .init(codingPath: c.codingPath + [CodingKeys.rotationDegrees], debugDescription: "Rotation must be a finite angle."))
         }
         if angle != 0 { try c.encode(angle, forKey: .rotationDegrees) }
+        if swapPrimarySecondary { try c.encode(true, forKey: .swapPrimarySecondary) }
     }
 }
 

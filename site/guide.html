@@ -47,7 +47,7 @@
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li><li><a href="#duplicate-clicks">Duplicate clicks</a></li></ol></li>
-          <li><a href="#buttons">Buttons</a><ol><li><a href="#tilt-wheel">Tilt-wheel controls</a></li><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li></ol></li>
+          <li><a href="#buttons">Buttons</a><ol><li><a href="#tilt-wheel">Tilt-wheel controls</a></li><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li><li><a href="#swap-buttons">Swap primary and secondary buttons</a></li></ol></li>
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#smooth-notched-scrolling">Smooth notched scrolling</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a><ol><li><a href="#pointer-presets">Speed presets</a></li></ol></li>
           <li><a href="#pointer-orientation">Orientation — foundation only</a></li>
@@ -238,6 +238,22 @@ make app</code></pre>
             <li>Settings are now saved with schema 2, so Whisker 0.1.0 refuses a file saved by this version.</li>
           </ul>
           <p>This has not yet been verified in any real app.</p>
+
+          <h3 id="swap-buttons">Swap primary and secondary buttons</h3>
+          <p>For a mouse set up the other way round, such as for your left hand. Turn on <span class="ui">Swap primary and secondary buttons</span> under a mouse in <span class="ui">Settings › Devices</span>, or in <span class="ui">Settings › Buttons</span> while that mouse's own profile is open, and its primary and secondary buttons trade places: the primary button does what the secondary button does, and the other way round. It is off by default and belongs to that one mouse.</p>
+          <ul>
+            <li>The two buttons always swap together. Only plain presses are swapped: a click with <kbd>⌘</kbd>, <kbd>⌥</kbd>, <kbd>⌃</kbd> or <kbd>⇧</kbd> held, the middle and other buttons, the wheel, other mice and trackpads are left as they are.</li>
+            <li>A press keeps the button it began as until you let go, even if you change the setting, switch app or turn Whisker off meanwhile, so a click is never left half-finished. If the mouse is unplugged in the middle of a click, Whisker lets the button go.</li>
+            <li>It needs <span class="ui">Allow remapping the primary button</span> to be on in <span class="ui">Settings › General › Safety</span>, because it changes what the primary button does. Whisker never turns that on for you. While it is off the swap can't be switched on, and one that was already on pauses until you turn it back on.</li>
+            <li>It needs <a href="#permissions">Input Monitoring</a>, even with one mouse, so Whisker knows which mouse you pressed and never swaps a trackpad or another mouse by mistake. It also does nothing while Whisker or that mouse is switched off, or an app on the <a href="#application-bypass">bypass list</a> is in front.</li>
+            <li>A mapping you made for the plain Primary Button or Secondary Button wins. Where the profile that applies maps either of them, even to <span class="ui">Pass through</span> or by inheriting the mapping, the swap leaves both buttons to that profile, and Settings names the profile in the way. If every profile that applies to the mouse does this, Settings says nothing is being swapped.</li>
+            <li>Turning it on starts a 60-second trial, like the <a href="#duplicate-clicks">duplicate-click filter</a>: unless you keep it, it switches itself off. The buttons have just traded places, so press <span class="ui">Keep</span> with the button that now acts as primary, or press <kbd>Return</kbd>. <kbd>Esc</kbd> or <span class="ui">Switch Off</span> turns the swap off at once. Both are ordinary buttons, reachable with the keyboard and VoiceOver, and Whisker asks VoiceOver to announce the trial when it starts.</li>
+            <li>The duplicate-click filter, if you use it, looks at the button you physically pressed, before the swap.</li>
+            <li>Whisker doesn't work out which hand you use, doesn't change any setting in System Settings, and doesn't add two-button chords or middle-click emulation.</li>
+          </ul>
+          <div class="callout-note">
+            <p>Not yet verified on hardware, with VoiceOver or with Full Keyboard Access: how the swap combines with the secondary-click setting in System Settings, so if you use both, check that the buttons end up the way you want; whether every app follows it, since an app that reads the mouse directly may ignore it; and how the trial behaves with VoiceOver and the keyboard.</p>
+          </div>
         </section>
 
         <section aria-labelledby="scrolling">
@@ -436,6 +452,10 @@ make app</code></pre>
           <p>Whisker only sends the three clicks. Whether they select a line or paragraph, or do something else, is up to the app, and some apps don't treat them as a triple click. See <a href="#triple-click">Triple Click</a>.</p>
           <h3>Some of my clicks are ignored</h3>
           <p>If you turned on <a href="#duplicate-clicks">Duplicate clicks</a>, a quick deliberate double-click can be ignored. Press <span class="ui">Turn Off Filter</span> under the mouse in Settings › Devices, or lower the time.</p>
+          <h3>Swapping the buttons does nothing</h3>
+          <p>The note under <span class="ui">Swap primary and secondary buttons</span> says why. It is usually that <span class="ui">Allow remapping the primary button</span> is off in General, that Input Monitoring isn't allowed (so Whisker can't tell which mouse you pressed), that Whisker or the mouse is switched off, or that a profile maps the plain Primary Button or Secondary Button itself, which wins over the swap. Clicks with a modifier key held are never swapped. See <a href="#swap-buttons">Swap primary and secondary buttons</a>.</p>
+          <h3>I can't click Keep after swapping the buttons</h3>
+          <p>Click it with the button that now acts as primary, or press <kbd>Return</kbd>. <kbd>Esc</kbd> turns the swap off at once, and if you do nothing it switches itself off after 60 seconds.</p>
           <h3>Pointer speed won't change</h3>
           <p>Some mice don't accept pointer changes from macOS. Whisker tells you when that happens.</p>
           <h3>A pointer speed preset won't switch</h3>

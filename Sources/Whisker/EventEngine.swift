@@ -157,6 +157,7 @@ final class EventEngine: @unchecked Sendable {
 
     /// The set of connected mice changed. A click gesture under way is called off if the mouse that started it is gone.
     func devicesChanged(connected: Set<String>) {
+        let location = Self.cursorLocation()
         state.withLock { state in
             if ClickInterruption.isCalledOffByDeviceChange(startedBy: state.actionSource, connected: connected) {
                 synthesizer.cancelPendingClicks()
@@ -166,6 +167,10 @@ final class EventEngine: @unchecked Sendable {
             armExpiry(&state)
             // A hold started by a device that has gone ends now.
             state.processor.cancelHold(unlessConnected: connected)
+            // A swapped button of a mouse that has gone can't be released by the mouse itself.
+            for (_, action) in state.processor.releaseSwaps(unlessConnected: connected) {
+                synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
+            }
             reportHold(&state)
         }
     }

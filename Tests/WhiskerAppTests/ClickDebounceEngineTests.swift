@@ -162,4 +162,45 @@ struct ClickDebounceEngineTests {
         #expect(engine.handle(.otherMouseUp, Self.event(.otherMouseUp, count: 2)) == nil)
         #expect(recorder.calls.map(\.phase) == [.down, .up, .down, .up])
     }
+
+    /// The primary button swapped with the secondary one, and the primary button filtered.
+    private static func swappingEngine(_ recorder: EventEngineTests.Recorder, _ clock: FakeClock) -> EventEngine {
+        var settings = Self.settings(buttons: [0])
+        settings.general.allowPrimaryButtonRemap = true
+        settings.devices[mouse.id]?.swapPrimarySecondary = true
+        let engine = EventEngine(synthesizer: recorder, attribute: { _, _ in mouse }, frontmostApp: { nil }, clock: clock)
+        engine.update(settings)
+        return engine
+    }
+
+    @Test func theFilterJudgesThePhysicalButtonBeforeAnySwap() {
+        let recorder = EventEngineTests.Recorder()
+        let engine = Self.swappingEngine(recorder, FakeClock())
+        let right = Action.click(button: 1, modifiers: [])
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0)) == nil)
+        #expect(engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0)) == nil)
+        #expect(recorder.calls == [
+            .init(action: right, phase: .down, clickState: 1),
+            .init(action: right, phase: .up, clickState: 1),
+        ])
+
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0, count: 2)) == nil)
+        #expect(engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0, count: 2)) == nil)
+        #expect(recorder.calls.count == 2)
+    }
+
+    @Test func aSwappedPressHeldBackByTheFilterIsDeliveredAsTheOtherButtonOnceItIsKept() {
+        let recorder = EventEngineTests.Recorder()
+        let clock = FakeClock()
+        let engine = Self.swappingEngine(recorder, clock)
+        let right = Action.click(button: 1, modifiers: [])
+        _ = engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0))
+        _ = engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0))
+        #expect(engine.handle(.leftMouseDown, Self.event(.leftMouseDown, button: 0, count: 2)) == nil)
+        clock.advance(by: 1)
+        #expect(recorder.calls.suffix(1) == [.init(action: right, phase: .down, clickState: 2)])
+        #expect(engine.handle(.leftMouseUp, Self.event(.leftMouseUp, button: 0, count: 2)) == nil)
+        #expect(recorder.calls.map(\.phase) == [.down, .up, .down, .up])
+        #expect(recorder.calls.allSatisfy { $0.action == right })
+    }
 }
