@@ -708,10 +708,10 @@ builds cannot update themselves. See [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 
 Planned after 0.1, in no particular order:
 
-- Tilt-wheel buttons.
 - Taking Auto-scroll and Click Lock out of experimental once they have been verified on
   hardware.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
+- Correcting pointer orientation for a trackball used sideways.
 
 ## Contributing
 
