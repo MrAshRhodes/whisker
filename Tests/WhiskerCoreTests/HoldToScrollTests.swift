@@ -419,6 +419,19 @@ struct HoldToScrollTests {
         #expect(result.settings.profiles[0].mappings.isEmpty)
     }
 
+    @Test func wheelTriggersCannotStartHoldToScroll() {
+        var settings = WhiskerSettings()
+        let button = Mapping(trigger: .button(3), action: .holdToScroll(HoldScroll()))
+        settings.profiles[0].mappings = WheelDirection.allCases.map {
+            Mapping(trigger: .wheel($0), action: .holdToScroll(HoldScroll()))
+        } + [button]
+
+        let result = settings.repairedWithIssues()
+        #expect(result.settings.profiles[0].mappings == [button])
+        #expect(result.issues.count == WheelDirection.allCases.count)
+        #expect(result.issues.allSatisfy { $0.message.contains("button to hold") })
+    }
+
     @Test func profilesInheritAndOverrideTheHold() {
         var settings = WhiskerSettings()
         settings.profiles[0].mappings = [Mapping(trigger: .button(3), action: .holdToScroll(HoldScroll(axes: .free)))]

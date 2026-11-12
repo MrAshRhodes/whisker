@@ -78,12 +78,45 @@ struct SlowPointerTests {
         #expect(WhiskerSettings.problem(with: Mapping(trigger: .wheel(.up), action: .slowPointer(factor: 0.5)), allowPrimary: false) != nil)
     }
 
-    @Test func ambiguousReleaseCancelsInsteadOfLeavingPointerSlow() {
+    @Test func delayedReleaseDrainsThePressAndAllowsTheNextHold() {
+        for connected in [[Self.mouse.id], [Self.mouse.id, Self.other.id]] {
+            var attribution = DeviceAttributor(connected: connected)
+            attribution.record(deviceID: Self.mouse.id, kind: .button(3), at: 1)
+            var processor = EventProcessor()
+            let compiled = settings()
+            let press = attribution.attribute(kind: .button(3), at: 1.01)
+            #expect(press == Self.mouse)
+            _ = processor.process(InputEvent(.buttonDown(3), device: press), settings: compiled, slowPointerDevices: Self.available)
+            let release = attribution.attribute(kind: .button(3), at: 2)
+            #expect(release?.exact != true)
+            #expect(processor.process(InputEvent(.buttonUp(3), device: release), settings: compiled) == .swallow)
+            #expect(processor.slowPointerCommand.factors.isEmpty)
+            #expect(processor.process(InputEvent(.buttonDown(3), device: Self.mouse), settings: compiled, slowPointerDevices: Self.available) == .swallow)
+            #expect(processor.slowPointerCommand.factors == [Self.mouse.id: 0.5])
+            #expect(processor.process(InputEvent(.buttonUp(3), device: release), settings: compiled) == .swallow)
+            #expect(processor.process(InputEvent(.buttonUp(3), device: Self.mouse), settings: compiled) == .passThrough)
+        }
+    }
+
+    @Test func ambiguousOverlappingReleasesRetireOwnersWithoutGuessingAndDrainTheirTails() {
         var processor = EventProcessor()
-        _ = processor.process(InputEvent(.buttonDown(3), device: Self.mouse), settings: settings(), slowPointerDevices: Self.available)
-        _ = processor.process(InputEvent(.buttonUp(3)), settings: settings())
-        #expect(processor.slowPointerCommand.factors.isEmpty)
-        #expect(processor.process(InputEvent(.buttonUp(3), device: Self.mouse), settings: settings()) == .swallow)
+        let compiled = settings()
+        for mouse in [Self.mouse, Self.other] {
+            _ = processor.process(InputEvent(.buttonDown(3), device: mouse), settings: compiled, slowPointerDevices: Self.available)
+        }
+        _ = processor.process(InputEvent(.buttonDown(4), device: Self.mouse), settings: compiled, slowPointerDevices: Self.available)
+        #expect(processor.process(InputEvent(.buttonUp(3)), settings: compiled) == .swallow)
+        #expect(processor.slowPointerCommand.factors == [Self.mouse.id: 0.3])
+        let unrelated = DeviceAttribution(id: "unrelated", exact: true)
+        #expect(processor.process(InputEvent(.buttonUp(3), device: unrelated), settings: compiled) == .passThrough)
+        // Either owner may have released first. A new press must not be mistaken for a duplicate.
+        _ = processor.process(InputEvent(.buttonDown(3), device: Self.other), settings: compiled, slowPointerDevices: Self.available)
+        #expect(processor.slowPointerCommand.factors == [Self.mouse.id: 0.3, Self.other.id: 0.5])
+        #expect(processor.process(InputEvent(.buttonUp(3), device: Self.mouse), settings: compiled) == .swallow)
+        #expect(processor.slowPointerCommand.factors == [Self.mouse.id: 0.3, Self.other.id: 0.5])
+        #expect(processor.process(InputEvent(.buttonUp(3), device: Self.other), settings: compiled) == .swallow)
+        #expect(processor.slowPointerCommand.factors == [Self.mouse.id: 0.3])
+        #expect(processor.process(InputEvent(.buttonUp(3)), settings: compiled) == .passThrough)
     }
 
     @Test func bypassAndDeviceLossCancelButKeepOriginalRelease() {

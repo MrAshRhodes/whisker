@@ -234,7 +234,7 @@ final class EventEngine: @unchecked Sendable {
             // A hold started by a device that has gone ends now, and so does a gesture.
             state.processor.cancelHold(unlessConnected: connected)
             state.processor.cancelGesture(unlessConnected: connected)
-            state.processor.cancelSlowPointer(unlessAvailable: connected)
+            state.processor.slowPointerDevicesChanged(connected: connected)
             // A swapped button of a mouse that has gone can't be released by the mouse itself.
             for (_, action) in state.processor.releaseSwaps(unlessConnected: connected) {
                 synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
@@ -569,7 +569,8 @@ final class EventEngine: @unchecked Sendable {
             if state.processor.releaseStaleClickLock(app: input.app, settings: state.compiled) {
                 finishClickLock(&state, ended: true, at: location, flags: flags)
             }
-            let outcome = state.debouncer.process(input, settings: state.compiled)
+            let primaryEscape = input.kind == .buttonDown(0) && state.processor.isClickLockActive
+            let outcome = state.debouncer.process(input, settings: state.compiled, preservingPress: primaryEscape)
             defer { armExpiry(&state) }
             replay(outcome.flushed, &state)
             switch outcome.decision {
@@ -578,7 +579,8 @@ final class EventEngine: @unchecked Sendable {
             case .proceed(let count): clickState = count
             }
             var plan = state.processor.process(
-                input, settings: state.compiled, slowPointerDevices: state.slowPointerDevices, startsClickLock: state.movement?.isReady == true
+                input, settings: state.compiled, slowPointerDevices: state.slowPointerDevices, startsClickLock: state.movement?.isReady == true,
+                primaryEscape: primaryEscape
             )
             // A press or scroll that ended an auto-scroll stops its timer before the event goes on, and a press
             // that started one starts it. Both only touch a lock and a timer request, never the UI.

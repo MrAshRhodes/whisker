@@ -276,7 +276,7 @@ struct MappingRow: View {
                     set: { mapping.gestures = $0 }
                 ), settings: settings)
             } else {
-                ActionEditor(action: $mapping.action, settings: settings)
+                ActionEditor(action: $mapping.action, settings: settings, trigger: mapping.trigger)
             }
             if case .wheel = mapping.trigger {
                 Toggle("Repeat for every notch", isOn: $mapping.repeatPerNotch)
@@ -320,6 +320,7 @@ struct ActionEditor: View {
     @EnvironmentObject private var model: AppModel
     @Binding var action: Action
     let settings: WhiskerSettings
+    var trigger: Trigger? = nil
     /// Gesture actions: only actions a gesture can run are offered, and none of them repeats while held.
     var inGesture = false
     /// A gesture slot picks its kind itself (it can also be left empty), so it asks for the details alone.
@@ -330,6 +331,7 @@ struct ActionEditor: View {
     private var kinds: [ActionKind] {
         ActionKind.allCases.filter { kind in
             guard !inGesture || kind.defaultAction.allowedInGestures else { return false }
+            if let trigger, case .wheel = trigger, kind == .holdToScroll { return false }
             switch kind {
             case .pointerPreset: return action.kind == .pointerPreset || settings.firstPointerPreset() != nil
             case .clickLock: return action.kind == .clickLock || settings.general.experimentalClickLock

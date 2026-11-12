@@ -217,4 +217,32 @@ struct BatteryProviderTests {
         guard case .stale(let percent, _, _) = h.state(device[0]) else { Issue.record("expected stale"); return }
         #expect(percent == 80)
     }
+
+    @Test(arguments: [false, true])
+    func foregroundReadsReplaceTheOutstandingRefreshTimer(notification: Bool) throws {
+        let h = Harness()
+        let device = mouse()
+        h.access.layouts[1] = [battery]
+        h.access.values[1] = [80]
+        h.provider.update(devices: device, interfaces: [device[0].id: [1]], allowed: true)
+        h.access.finishOne()
+        let previousRefresh = try #require(h.timers.keys.min())
+
+        h.now += BatteryProvider.refreshInterval - 10
+        if notification {
+            h.provider.notified(runtimeID: 1)
+        } else {
+            h.provider.refresh(deviceID: device[0].id)
+        }
+        #expect(h.access.pending.count == 1)
+        #expect(h.timers[previousRefresh] == nil)
+        h.access.finishOne()
+        #expect(h.timers.count == 2) // One refresh and one staleness notification.
+
+        h.now += 10
+        h.provider.refresh(deviceID: device[0].id)
+        #expect(h.access.pending.isEmpty)
+        h.provider.stop()
+        #expect(h.timers.isEmpty)
+    }
 }

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 import Testing
 import WhiskerCore
 @testable import Whisker
@@ -13,11 +14,13 @@ struct SlowPointerEngineTests {
         var onMain = true
         var settings = WhiskerSettings()
 
-        init() {
+        init(attribute: @escaping @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution? = { _, _ in
+            DeviceAttribution(id: "046d:c52b", exact: true)
+        }) {
             settings.profiles[0].mappings = [Mapping(trigger: .button(3), action: .slowPointer(factor: 0.5))]
             engine = EventEngine(
                 synthesizer: EventEngineTests.Recorder(),
-                attribute: { _, _ in DeviceAttribution(id: "046d:c52b", exact: true) },
+                attribute: attribute,
                 frontmostApp: { "com.example.front" }
             )
             engine.update(settings)
@@ -98,5 +101,38 @@ struct SlowPointerEngineTests {
         await drainMainQueue()
         #expect(rig.commands.allSatisfy { $0.factors.isEmpty })
         #expect(rig.engine.handle(.otherMouseUp, EventEngineTests.button3(down: false)) != nil)
+    }
+
+    @Test func reconnectAfterALostReleaseAllowsANewHold() async {
+        let rig = Rig()
+        rig.press()
+        rig.engine.devicesChanged(connected: [])
+        rig.engine.setSlowPointerDevices([])
+        rig.engine.devicesChanged(connected: ["046d:c52b"])
+        rig.engine.setSlowPointerDevices(["046d:c52b"])
+        rig.press()
+        await drainMainQueue()
+        #expect(rig.commands.last?.factors == ["046d:c52b": 0.5])
+        rig.release()
+        await drainMainQueue()
+        #expect(rig.commands.last?.factors == [:])
+    }
+
+    @Test func delayedReleaseAttributionDoesNotPoisonTheNextEngineHold() async {
+        let mouse = DeviceAttribution(id: "046d:c52b", exact: true)
+        for delayed in [nil, DeviceAttribution(id: mouse.id, exact: false)] {
+            let attribution = OSAllocatedUnfairLock(initialState: Optional(mouse))
+            let rig = Rig(attribute: { _, _ in attribution.withLock { $0 } })
+            for _ in 0..<2 {
+                attribution.withLock { $0 = mouse }
+                rig.press()
+                await drainMainQueue()
+                #expect(rig.commands.last?.factors == [mouse.id: 0.5])
+                attribution.withLock { $0 = delayed }
+                rig.release()
+                await drainMainQueue()
+                #expect(rig.commands.last?.factors == [:])
+            }
+        }
     }
 }

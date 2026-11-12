@@ -187,6 +187,63 @@ struct ButtonSwapTests {
         #expect(processor.process(event(.buttonUp(0), device: nil), settings: settings) == .passThrough)
     }
 
+    @Test(arguments: [false, true])
+    func mappedAndSwappedPressesOfTheSameButtonKeepTheirOwnDragsAndReleases(delayedRelease: Bool) {
+        for action in [Action.none, .click(button: 2, modifiers: .command)] {
+            for swappedFirst in [false, true] {
+                for swappedReleasedFirst in [false, true] {
+                    var processor = EventProcessor()
+                    let settings = swapping {
+                        $0.profiles.append(Profile(
+                            name: "Other", match: ProfileMatch(devices: [Self.other.id]),
+                            mappings: [Mapping(trigger: .button(0), action: action)]
+                        ))
+                    }
+                    for device in swappedFirst ? [Self.mouse, Self.other] : [Self.other, Self.mouse] {
+                        let expected: EventPlan = device == Self.mouse ? .perform(rightClick, .down)
+                            : action == .none ? .swallow : .perform(action, .down)
+                        #expect(processor.process(event(.buttonDown(0), device: device), settings: settings) == expected)
+                    }
+                    #expect(processor.process(event(.buttonDragged(0), device: Self.mouse), settings: settings) == .dragAs(button: 1, modifiers: []))
+                    let mappedDrag: EventPlan = action == .none ? .dragAsMove : .dragAs(button: 2, modifiers: .command)
+                    #expect(processor.process(event(.buttonDragged(0), device: Self.other), settings: settings) == mappedDrag)
+                    let first = swappedReleasedFirst ? Self.mouse : Self.other
+                    let firstPlan: EventPlan = swappedReleasedFirst ? .perform(rightClick, .up)
+                        : action == .none ? .swallow : .perform(action, .up)
+                    #expect(processor.process(event(.buttonUp(0), device: first), settings: settings) == firstPlan)
+                    // A delayed tail falls back only once the other mouse has released.
+                    let lastPlan: EventPlan = swappedReleasedFirst
+                        ? (action == .none ? .swallow : .perform(action, .up)) : .perform(rightClick, .up)
+                    let lastDevice = delayedRelease ? nil : (swappedReleasedFirst ? Self.other : Self.mouse)
+                    let lastDrag: EventPlan = swappedReleasedFirst ? mappedDrag : .dragAs(button: 1, modifiers: [])
+                    #expect(processor.process(event(.buttonDragged(0), device: lastDevice), settings: settings) == lastDrag)
+                    #expect(processor.process(event(.buttonUp(0), device: lastDevice), settings: settings) == lastPlan)
+                    #expect(processor.heldButtons.isEmpty)
+                    #expect(processor.releaseAll().isEmpty)
+                }
+            }
+        }
+    }
+
+    @Test func anUnrelatedExactOrAmbiguousTailCannotConsumeAnOverlappingMappedOrSwappedPress() {
+        var processor = EventProcessor()
+        let settings = swapping {
+            $0.profiles.append(Profile(
+                name: "Other", match: ProfileMatch(devices: [Self.other.id]),
+                mappings: [Mapping(trigger: .button(0), action: .none)]
+            ))
+        }
+        _ = processor.process(event(.buttonDown(0), device: Self.mouse), settings: settings)
+        _ = processor.process(event(.buttonDown(0), device: Self.other), settings: settings)
+        for device in [nil, DeviceAttribution(id: Self.mouse.id, exact: false), DeviceAttribution(id: "unrelated", exact: true)] {
+            #expect(processor.process(event(.buttonDragged(0), device: device), settings: settings) == .passThrough)
+            #expect(processor.process(event(.buttonUp(0), device: device), settings: settings) == .passThrough)
+        }
+        #expect(processor.process(event(.buttonUp(0), device: Self.mouse), settings: settings) == .perform(rightClick, .up))
+        #expect(processor.process(event(.buttonUp(0), device: Self.other), settings: settings) == .swallow)
+        #expect(processor.releaseAll().isEmpty)
+    }
+
     // MARK: Cleanup
 
     @Test func standingDownFinishesASwappedPressAndSwallowsItsRealRelease() {

@@ -350,6 +350,9 @@ extension WhiskerSettings {
         if case .slowPointer = mapping.action, case .wheel = mapping.trigger {
             return "Slow pointer needs a button to hold, not a wheel direction."
         }
+        if case .holdToScroll = mapping.action, case .wheel = mapping.trigger {
+            return "Hold to Scroll needs a button to hold, not a wheel direction."
+        }
         if case .autoScroll = mapping.action, case .wheel = mapping.trigger {
             return "Auto-scroll needs a mouse button as its trigger."
         }

@@ -298,6 +298,8 @@ struct ButtonGestureTests {
         _ = processor.process(move(150, 0), settings: settings)
         #expect(processor.process(release(device: Self.other), settings: settings) == .swallow)
         #expect(!processor.isRecognisingGesture)
+        #expect(processor.process(release(), settings: settings) == .swallow)
+        #expect(processor.heldButtons.isEmpty)
     }
 
     @Test func movementThatKeepsLosingItsDeviceCallsOffTheGesture() {

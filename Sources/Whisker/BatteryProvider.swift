@@ -108,6 +108,7 @@ final class BatteryProvider {
         entry.inFlight = true
         entry.lastRead = clock()
         if scheduled { entry.timedRefreshes += 1 }
+        entry.cancelTimer?()
         entry.cancelTimer = nil
         active[id] = entry
         let handle = entry.handle

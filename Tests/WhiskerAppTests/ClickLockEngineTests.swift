@@ -394,6 +394,51 @@ struct ClickLockEngineTests {
 
     // MARK: Presses the filter held back
 
+    @Test func primaryEscapeIsNeverDebouncedAndItsReleaseHasNoDelayedTail() {
+        let clock = ClickDebounceEngineTests.FakeClock()
+        var settings = Self.settings()
+        settings.general.allowPrimaryButtonRemap = true
+        settings.devices[Self.mouse.id] = DeviceSettings(clickDebounce: ClickDebounceSettings(buttons: [0], interval: 0.1))
+        let rig = Rig(settings, clock: clock)
+        #expect(rig.engine.handle(.leftMouseDown, AutoScrollEngineTests.click(.leftMouseDown)) != nil)
+        #expect(rig.engine.handle(.leftMouseUp, AutoScrollEngineTests.click(.leftMouseUp)) != nil)
+        rig.begin()
+        #expect(rig.engine.handle(.leftMouseDown, AutoScrollEngineTests.click(.leftMouseDown)) != nil)
+        #expect(rig.recorder.calls == [.press, .release])
+        #expect(rig.movement?.enabled == false)
+        #expect(clock.pending == 0)
+        #expect(rig.engine.handle(.leftMouseUp, AutoScrollEngineTests.click(.leftMouseUp)) != nil)
+        // Only the escape is exempt: an ordinary short repeat is still filtered as a complete pair.
+        #expect(rig.engine.handle(.leftMouseDown, AutoScrollEngineTests.click(.leftMouseDown)) == nil)
+        #expect(rig.engine.handle(.leftMouseUp, AutoScrollEngineTests.click(.leftMouseUp)) == nil)
+        #expect(clock.pending == 0)
+        clock.advance(by: 1)
+        #expect(rig.recorder.calls == [.press, .release])
+    }
+
+    @Test func primaryEscapeKeepsPendingClicksOrderedEvenIfAReplayEndsTheLock() {
+        let clock = ClickDebounceEngineTests.FakeClock()
+        var settings = Self.filteredSettings()
+        settings.general.allowPrimaryButtonRemap = true
+        settings.devices[Self.mouse.id]?.clickDebounce = ClickDebounceSettings(buttons: [0, 5], interval: 0.1)
+        settings.profiles[0].mappings.append(Mapping(trigger: .button(0), action: .none))
+        let rig = Rig(settings, clock: clock)
+        #expect(rig.engine.handle(.leftMouseDown, AutoScrollEngineTests.click(.leftMouseDown)) == nil)
+        #expect(rig.engine.handle(.leftMouseUp, AutoScrollEngineTests.click(.leftMouseUp)) == nil)
+        rig.begin()
+        #expect(rig.engine.handle(.otherMouseDown, Self.press()) == nil)
+        #expect(clock.pending == 1)
+        // Replaying the waiting trigger lets go first; the physical escape still passes unchanged.
+        #expect(rig.engine.handle(.leftMouseDown, AutoScrollEngineTests.click(.leftMouseDown)) != nil)
+        #expect(rig.recorder.calls == [.press, .release])
+        #expect(rig.engine.handle(.leftMouseUp, AutoScrollEngineTests.click(.leftMouseUp)) != nil)
+        #expect(rig.engine.handle(.otherMouseUp, Self.release()) == nil)
+        #expect(clock.pending == 0)
+        clock.advance(by: 1)
+        #expect(rig.recorder.calls == [.press, .release])
+        #expect(rig.movement?.enabled == false)
+    }
+
     @Test func aPressTheFilterHeldBackCannotBeginALock() async {
         let clock = ClickDebounceEngineTests.FakeClock()
         let rig = Rig(Self.filteredSettings(), clock: clock)

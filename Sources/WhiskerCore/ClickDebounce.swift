@@ -103,9 +103,10 @@ public struct ClickDebouncer: Sendable {
         }.min()
     }
 
-    public mutating func process(_ event: InputEvent, settings: CompiledSettings) -> ClickDebounceOutcome {
+    /// A safety escape is delivered immediately, but still tracks its matching release and flushes older input.
+    public mutating func process(_ event: InputEvent, settings: CompiledSettings, preservingPress: Bool = false) -> ClickDebounceOutcome {
         switch event.kind {
-        case .buttonDown(let button): return down(button, event, settings)
+        case .buttonDown(let button): return down(button, event, settings, preservingPress: preservingPress)
         case .buttonUp(let button): return up(button, event)
         case .buttonDragged(let button): return dragged(button, event)
         case .scroll: return ClickDebounceOutcome(flushed: flushPending(except: nil), decision: .proceed(clickCount: event.clickCount))
@@ -142,7 +143,7 @@ public struct ClickDebouncer: Sendable {
 
     // MARK: Events
 
-    private mutating func down(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> ClickDebounceOutcome {
+    private mutating func down(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings, preservingPress: Bool) -> ClickDebounceOutcome {
         let flushed = flushPending(except: nil)
         // A press with no release in between: whatever was waiting for one is over.
         for key in Array(phases.keys) where key.button == button && (event.device.map { $0.id == key.device } ?? true) { phases[key] = nil }
@@ -150,7 +151,7 @@ public struct ClickDebouncer: Sendable {
         guard let (key, interval) = candidate(button, event, settings) else {
             return ClickDebounceOutcome(flushed: flushed, decision: .proceed(clickCount: event.clickCount))
         }
-        if let last = lastRelease[key] {
+        if !preservingPress, let last = lastRelease[key] {
             let gap = event.timestamp - last
             if gap.isFinite, gap >= 0, gap < interval {
                 phases[key] = .pending(Pending(event: event, interval: interval, clickCount: event.clickCount))

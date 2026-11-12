@@ -36,8 +36,15 @@ public struct SlowPointerHolds: Sendable {
         var button: Int
     }
 
+    private struct ReleaseTails: Sendable {
+        var candidates: Set<String> = []
+        var remaining = 0
+    }
+
     private var pressed: Set<Owner> = []
     private var active: [Owner: Double] = [:]
+    /// Ambiguity retires live ownership, but not the releases of presses already swallowed.
+    private var retired: [Int: ReleaseTails] = [:]
     private var sessions: [String: UInt64] = [:]
     public private(set) var command = SlowPointerCommand(generation: 0, factors: [:])
 
@@ -48,8 +55,16 @@ public struct SlowPointerHolds: Sendable {
         return pressed.contains(Owner(device: device.id, button: button))
     }
 
+    public mutating func preparePress(button: Int, device: DeviceAttribution?) {
+        guard let device, device.exact, var tails = retired[button] else { return }
+        tails.candidates.remove(device.id)
+        tails.remaining = min(tails.remaining, tails.candidates.count)
+        retired[button] = tails.remaining > 0 ? tails : nil
+    }
+
     public mutating func begin(button: Int, device: DeviceAttribution?, factor: Double, available: Set<String>) -> Bool {
         guard let device, device.exact, available.contains(device.id), SlowPointer.isValid(factor) else { return false }
+        preparePress(button: button, device: device)
         let owner = Owner(device: device.id, button: button)
         guard pressed.insert(owner).inserted else { return true }
         if !active.keys.contains(where: { $0.device == device.id }) {
@@ -62,20 +77,46 @@ public struct SlowPointerHolds: Sendable {
 
     public mutating func end(button: Int, device: DeviceAttribution?) -> Bool {
         guard let device, device.exact else {
-            // A missed attribution must not leave the pointer slow indefinitely. Do not guess its owner.
-            if pressed.contains(where: { $0.button == button }) { cancel() }
-            return false
+            // End every candidate's slowdown without guessing which mouse released. Keep only the number
+            // of swallowed tails still owed, not ownership that would block the next real press.
+            retire(pressed.filter { $0.button == button })
+            guard var tails = retired[button], tails.remaining > 0 else { return false }
+            tails.remaining -= 1
+            retired[button] = tails.remaining > 0 ? tails : nil
+            publish()
+            return true
         }
         let owner = Owner(device: device.id, button: button)
-        guard pressed.remove(owner) != nil else { return false }
+        guard pressed.remove(owner) != nil else {
+            guard var tails = retired[button], tails.candidates.remove(device.id) != nil else { return false }
+            tails.remaining -= 1
+            retired[button] = tails.remaining > 0 ? tails : nil
+            return true
+        }
         active[owner] = nil
         publish()
         return true
     }
 
+    public mutating func devicesChanged(connected: Set<String>) {
+        retire(pressed.filter { !connected.contains($0.device) })
+        publish()
+    }
+
     public mutating func cancel(unlessAvailable available: Set<String> = []) {
         active = active.filter { available.contains($0.key.device) }
         publish()
+    }
+
+    private mutating func retire(_ owners: Set<Owner>) {
+        for owner in owners {
+            var tails = retired[owner.button] ?? ReleaseTails()
+            tails.candidates.insert(owner.device)
+            tails.remaining += 1
+            retired[owner.button] = tails
+            pressed.remove(owner)
+            active[owner] = nil
+        }
     }
 
     private mutating func publish() {
