@@ -138,7 +138,7 @@ public enum ClickInterruption {
     public static func isCalledOffBy(_ kind: InputKind, plan: EventPlan) -> Bool {
         if case .buttonDragged = kind { return false }
         switch plan {
-        case .passThrough, .perform, .scroll: return true
+        case .passThrough, .perform, .performWithScroll, .scroll: return true
         case .swallow, .dragAs, .dragAsMove: return false
         }
     }

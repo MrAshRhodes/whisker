@@ -129,6 +129,34 @@ struct SettingsTests {
         #expect(rewritten.contains("future"))
     }
 
+    @Test func smoothWheelInputRoundTripsAndOlderMappingsDecodeWithoutIt() throws {
+        var settings = WhiskerSettings()
+        settings.profiles[0].mappings.append(Mapping(trigger: .wheel(.right), action: .space(.right), continuousInput: ContinuousWheelInput(distance: 80)))
+        #expect(try SettingsCodec.decode(SettingsCodec.encode(settings)) == settings)
+        let old = Data(#"{"trigger":{"type":"wheel","direction":"left"},"action":{"kind":"none"}}"#.utf8)
+        #expect(try JSONDecoder().decode(Mapping.self, from: old).continuousInput == nil)
+        let rewritten = String(decoding: try JSONEncoder().encode(Mapping(trigger: .wheel(.left), action: .none)), as: UTF8.self)
+        #expect(!rewritten.contains("continuousInput"))
+        let sparse = Data(#"{"trigger":{"type":"wheel","direction":"left"},"action":{"kind":"none"},"continuousInput":{}}"#.utf8)
+        #expect(try JSONDecoder().decode(Mapping.self, from: sparse).continuousInput == ContinuousWheelInput())
+    }
+
+    @Test func smoothWheelInputIsClampedOrDroppedWhereItCantApply() {
+        var settings = WhiskerSettings()
+        settings.profiles[0].mappings += [
+            Mapping(trigger: .wheel(.left), action: .none, continuousInput: ContinuousWheelInput(distance: 1)),
+            Mapping(trigger: .wheel(.up), action: .none, continuousInput: ContinuousWheelInput()),
+            Mapping(trigger: .wheel(.right), action: .none, continuousInput: ContinuousWheelInput(distance: .nan)),
+        ]
+        let (repaired, issues) = settings.repairedWithIssues()
+        #expect(issues.count == 3)
+        let mappings = repaired.defaultProfile.mappings.suffix(3)
+        #expect(mappings.map(\.continuousInput) == [
+            ContinuousWheelInput(distance: ContinuousWheelInput.distanceRange.lowerBound), nil,
+            ContinuousWheelInput(distance: ContinuousWheelInput.distanceRange.lowerBound),
+        ])
+    }
+
     @Test func missingInheritsMeansDefaultAndExplicitNullMeansNone() throws {
         let json = #"{"schemaVersion":1,"profiles":[{"id":"default"},{"id":"a"},{"id":"b","inherits":null}]}"#
         let settings = try SettingsCodec.decode(Data(json.utf8))

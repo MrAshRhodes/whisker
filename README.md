@@ -27,7 +27,12 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   sent cannot be taken back, so an app may see fewer than three. Not yet verified in TextEdit,
   Safari or any other app.
 - **Wheel actions.** Turning the wheel runs its action once per burst of notches, or once for
-  every notch if you choose **Repeat for every notch**.
+  every notch if you choose **Repeat for every notch**. For Scroll Left and Scroll Right,
+  **Also act on smooth scrolling from this mouse** adds an opt-in mode for sideways movement that
+  arrives as smooth scrolling (for example a thumb wheel): the action runs once per sideways
+  swipe, after a distance in pixels you choose, and any vertical scrolling at the same time
+  carries on. It needs a mouse Whisker can identify exactly, ignores coasting and trackpads, and
+  is not yet verified on hardware.
 - **Scrolling.** Reverse the vertical or horizontal wheel for each mouse without changing the
   trackpad or the system's natural-scrolling setting. Each profile can set how many lines a
   wheel notch scrolls, add scroll acceleration, choose a modifier key that scrolls sideways and

@@ -160,7 +160,8 @@ extension WhiskerSettings {
 
         var seenKeys = Set<MappingKey>()
         var kept: [Mapping] = []
-        for (index, mapping) in profile.mappings.enumerated() {
+        for (index, original) in profile.mappings.enumerated() {
+            var mapping = original
             let mappingPath = "\(path).mappings[\(index)]"
             if let problem = problem(with: mapping, allowPrimary: allowPrimary) {
                 issues.append(ValidationIssue(mappingPath, problem))
@@ -169,6 +170,16 @@ extension WhiskerSettings {
             guard seenKeys.insert(mapping.key).inserted else {
                 issues.append(ValidationIssue(mappingPath, "\(mapping.key.title) is already mapped in this profile."))
                 continue
+            }
+            if let continuous = mapping.continuousInput {
+                if mapping.trigger != .wheel(.left), mapping.trigger != .wheel(.right) {
+                    issues.append(ValidationIssue("\(mappingPath).continuousInput", "Smooth scrolling only applies to Scroll Left and Scroll Right."))
+                    mapping.continuousInput = nil
+                } else if !ContinuousWheelInput.distanceRange.contains(continuous.distance) {
+                    let range = ContinuousWheelInput.distanceRange
+                    issues.append(ValidationIssue("\(mappingPath).continuousInput.distance", "Must be between \(String(format: "%g", range.lowerBound)) and \(String(format: "%g", range.upperBound))."))
+                    mapping.continuousInput?.distance = continuous.effectiveDistance
+                }
             }
             kept.append(mapping)
         }

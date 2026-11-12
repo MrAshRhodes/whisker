@@ -578,4 +578,112 @@ struct EventProcessorTests {
         let plans = ticks(4).map { processor.process(event(linesOnly, .option, at: $0), settings: settings) }
         #expect(plans == [.swallow, .swallow, .swallow, .scroll(ScrollSample(vertical: ScrollAxis(lines: 1)), removing: .option)])
     }
+
+    // MARK: Smooth horizontal stream
+
+    private static let other = DeviceAttribution(id: "1bcf:0005", exact: true)
+
+    private func smooth(h: Double = 0, v: Double = 0, momentum: Bool = false) -> InputKind {
+        .scroll(ScrollSample(vertical: ScrollAxis(points: v), horizontal: ScrollAxis(points: h), isContinuous: true, isMomentum: momentum))
+    }
+
+    private func streamSettings(_ distance: Double = 50, action: Action = .space(.left), left: Bool = true, modifiers: ModifierSet = []) -> CompiledSettings {
+        compiled([Mapping(trigger: .wheel(left ? .left : .right), modifiers: modifiers, action: action, continuousInput: ContinuousWheelInput(distance: distance))])
+    }
+
+    @Test func smoothHorizontalMovementFiresOncePerBurstWhateverTheSubdivision() {
+        for step in [50.0, 10, 3.5] {
+            var processor = EventProcessor()
+            let settings = streamSettings()
+            var plans: [EventPlan] = []
+            var time = 0.0
+            for _ in 0..<Int(100 / step) + 1 {
+                plans.append(processor.process(event(smooth(h: step), at: time), settings: settings))
+                time += 0.01
+            }
+            let fired = plans.filter { if case .performWithScroll = $0 { return true } else { return false } }
+            #expect(fired.count == 1)
+            #expect(plans.allSatisfy { $0 != .passThrough })
+        }
+    }
+
+    @Test func theMappedAxisIsTakenAndVerticalMovementCarriesOn() {
+        var processor = EventProcessor()
+        let settings = streamSettings(20)
+        let vertical = ScrollSample(vertical: ScrollAxis(points: 7), isContinuous: true)
+        #expect(processor.process(event(smooth(h: 10, v: 7), at: 0), settings: settings) == .scroll(vertical, removing: []))
+        #expect(processor.process(event(smooth(h: 10, v: 7), at: 0.01), settings: settings) == .performWithScroll(.space(.left), .once, remaining: vertical))
+        #expect(processor.process(event(smooth(h: 10), at: 0.02), settings: settings) == .swallow)
+    }
+
+    @Test func aPauseOrReversalStartsRecognitionAfresh() {
+        var processor = EventProcessor()
+        let settings = compiled([
+            Mapping(trigger: .wheel(.left), action: .space(.left), continuousInput: ContinuousWheelInput(distance: 30)),
+            Mapping(trigger: .wheel(.right), action: .space(.right), continuousInput: ContinuousWheelInput(distance: 30)),
+        ])
+        func fires(_ plan: EventPlan) -> Action? {
+            if case let .performWithScroll(action, _, _) = plan { return action }
+            return nil
+        }
+        #expect(fires(processor.process(event(smooth(h: 30), at: 0), settings: settings)) == .space(.left))
+        #expect(fires(processor.process(event(smooth(h: 30), at: 0.05), settings: settings)) == nil)
+        // The gap ends the burst.
+        #expect(fires(processor.process(event(smooth(h: 30), at: 0.5), settings: settings)) == .space(.left))
+        // Reversal: sub-threshold travel the other way fires nothing until it alone reaches the distance.
+        #expect(fires(processor.process(event(smooth(h: -20), at: 0.55), settings: settings)) == nil)
+        #expect(fires(processor.process(event(smooth(h: -20), at: 0.56), settings: settings)) == .space(.right))
+        #expect(fires(processor.process(event(smooth(h: 20), at: 0.57), settings: settings)) == nil)
+    }
+
+    @Test func devicesAndProfilesKeepSeparateRecognition() {
+        var processor = EventProcessor()
+        let settings = streamSettings(40)
+        #expect(processor.process(event(smooth(h: 25), at: 0, device: Self.mouse), settings: settings) == .swallow)
+        #expect(processor.process(event(smooth(h: 25), at: 0.01, device: Self.other), settings: settings) == .swallow)
+        #expect(processor.process(event(smooth(h: 25), at: 0.02, device: Self.mouse), settings: settings) == .performWithScroll(.space(.left), .once, remaining: ScrollSample(isContinuous: true)))
+        #expect(processor.process(event(smooth(h: 25), at: 0.03, device: Self.other), settings: settings) == .performWithScroll(.space(.left), .once, remaining: ScrollSample(isContinuous: true)))
+    }
+
+    @Test func onlyOptedInExactMouseInputQualifies() {
+        var processor = EventProcessor()
+        let settings = streamSettings(10)
+        let guessed = DeviceAttribution(id: Self.mouse.id, exact: false)
+        #expect(processor.process(event(smooth(h: 50), device: guessed), settings: settings) == .passThrough)
+        #expect(processor.process(event(smooth(h: 50), device: nil), settings: settings) == .passThrough)
+        #expect(processor.process(event(smooth(h: 50, momentum: true)), settings: settings) == .passThrough)
+        // Movement the other way, with no mapping, or with other modifiers, is untouched.
+        #expect(processor.process(event(smooth(h: -50)), settings: settings) == .passThrough)
+        #expect(processor.process(event(smooth(h: 50), .shift), settings: settings) == .passThrough)
+        // A sample without pixels can't be measured.
+        #expect(processor.process(event(.scroll(ScrollSample(horizontal: ScrollAxis(lines: 0, fixed: 0.4, points: 0), isContinuous: true))), settings: settings) == .passThrough)
+        // Without the opt-in the mapping only reacts to notches.
+        let plain = compiled([Mapping(trigger: .wheel(.left), action: .space(.left))])
+        #expect(processor.process(event(smooth(h: 50)), settings: plain) == .passThrough)
+    }
+
+    @Test func momentumDoesNotAddActionsOrDisturbARecognisedBurst() {
+        var processor = EventProcessor()
+        let settings = streamSettings(20)
+        #expect(processor.process(event(smooth(h: 20), at: 0), settings: settings) != .passThrough)
+        #expect(processor.process(event(smooth(h: 20, momentum: true), at: 0.02), settings: settings) == .passThrough)
+        #expect(processor.process(event(smooth(h: 20), at: 0.04), settings: settings) == .swallow)
+    }
+
+    @Test func releasingAndSettingsChangesCancelRecognition() {
+        var processor = EventProcessor()
+        let settings = streamSettings(30)
+        #expect(processor.process(event(smooth(h: 20), at: 0), settings: settings) == .swallow)
+        processor.resetScrollRecognition()
+        #expect(processor.process(event(smooth(h: 20), at: 0.01), settings: settings) == .swallow)
+        _ = processor.releaseAll()
+        #expect(processor.process(event(smooth(h: 20), at: 0.02), settings: settings) == .swallow)
+    }
+
+    @Test func discreteNotchesKeepTheirBehaviourWhenOptedIn() {
+        var processor = EventProcessor()
+        let settings = streamSettings()
+        #expect(processor.process(event(notch(1, horizontal: true), at: 0), settings: settings) == .perform(.space(.left), .once))
+        #expect(processor.process(event(notch(1, horizontal: true), at: 0.05), settings: settings) == .swallow)
+    }
 }

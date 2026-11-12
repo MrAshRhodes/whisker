@@ -64,6 +64,7 @@ final class EventEngine: @unchecked Sendable {
         let location = Self.cursorLocation()
         state.withLock { state in
             state.compiled = compiled
+            state.processor.resetScrollRecognition()
             if settings.general.enabled {
                 // A click gesture under way began under the settings that are going away.
                 synthesizer.cancelPendingClicks()
@@ -237,9 +238,12 @@ final class EventEngine: @unchecked Sendable {
             guard !state.capturing, !state.stopped else { return .passThrough }
             let plan = state.processor.process(input, settings: state.compiled)
             if ClickInterruption.isCalledOffBy(kind, plan: plan) { synthesizer.cancelPendingClicks() }
-            if case let .perform(action, phase) = plan {
+            switch plan {
+            case let .perform(action, phase), let .performWithScroll(action, phase, _):
                 state.actionSource = input.device?.id
                 synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: clickState)
+            default:
+                break
             }
             return plan
         }
@@ -266,6 +270,11 @@ final class EventEngine: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         case .dragAsMove:
             event.type = .mouseMoved
+            return Unmanaged.passUnretained(event)
+        case let .performWithScroll(_, _, remaining):
+            // The action was posted under the state lock in `handle`; only the unmapped axis carries on.
+            guard !remaining.isZero else { return nil }
+            Self.write(remaining, to: event)
             return Unmanaged.passUnretained(event)
         case let .scroll(sample, removing):
             Self.write(sample, to: event)
@@ -306,7 +315,8 @@ final class EventEngine: @unchecked Sendable {
                 fixed: event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2),
                 points: Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
             ),
-            isContinuous: momentum || event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+            isContinuous: event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0,
+            isMomentum: momentum
         )
     }
 

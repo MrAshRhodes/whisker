@@ -214,6 +214,20 @@ struct MappingRow: View {
             if case .wheel = mapping.trigger {
                 Toggle("Repeat for every notch", isOn: $mapping.repeatPerNotch)
             }
+            if mapping.trigger == .wheel(.left) || mapping.trigger == .wheel(.right) {
+                Toggle("Also act on smooth scrolling from this mouse", isOn: Binding(
+                    get: { mapping.continuousInput != nil },
+                    set: { mapping.continuousInput = $0 ? ContinuousWheelInput() : nil }
+                ))
+                .help("Runs the action once per sideways swipe of a mouse that scrolls smoothly. Vertical scrolling at the same time carries on. Needs a mouse Whisker can identify; not yet verified on hardware.")
+                if let continuous = mapping.continuousInput {
+                    Stepper("Activate after \(Int(continuous.effectiveDistance)) pixels", value: Binding(
+                        get: { continuous.effectiveDistance },
+                        set: { mapping.continuousInput = ContinuousWheelInput(distance: $0) }
+                    ), in: ContinuousWheelInput.distanceRange, step: 10)
+                    .padding(.leading, 20)
+                }
+            }
             if let problem = WhiskerSettings.problem(with: mapping, allowPrimary: allowPrimary) {
                 Label(problem, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
             }

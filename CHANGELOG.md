@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Smooth sideways scrolling for Scroll Left and Scroll Right mappings: an opt-in mode that runs the action once per swipe from an exactly identified mouse, after an activation distance in pixels, while vertical scrolling carries on. Momentum, trackpads and unidentified input pass through, and it has not yet been verified on hardware, including thumb wheels ([#17]).
 - Scroll faster or slower while holding modifier keys: choose the keys, a speed from ×0.25 to ×8 and the directions for each profile. It applies to wheel notches only, not trackpads or smooth scrolling, and has not yet been verified on hardware ([#16]).
 - Application bypass: while an app on your list is in front (a game, say), Whisker stands aside, with no button remapping, wheel actions, scroll changes or per-mouse pointer speed and acceleration. Anything held is released as the app comes forward, your latest settings return when you switch away, and profiles and the Enabled switch are left as they are. The menu shows "Bypassed for …", and a mouse that won't take its pointer settings back is reported and retried, including at the next launch. ([#12])
 - Triple Click action: one press of a mouse button, or one burst of wheel turning, sends three left clicks at the pointer, with optional modifier keys like Double Click. It is a mouse gesture rather than a "select paragraph" command, because what three clicks do is up to the app, and a gesture that is cut short can reach an app as fewer than three clicks. It has not yet been verified in TextEdit, Safari or any other app ([#20]).
@@ -30,4 +31,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.0]: https://github.com/MrAshRhodes/whisker/releases/tag/v0.1.0
 [#12]: https://github.com/MrAshRhodes/whisker/issues/12
 [#16]: https://github.com/MrAshRhodes/whisker/issues/16
+[#17]: https://github.com/MrAshRhodes/whisker/issues/17
 [#20]: https://github.com/MrAshRhodes/whisker/issues/20

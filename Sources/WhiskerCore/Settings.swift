@@ -290,12 +290,16 @@ public struct Mapping: Equatable, Sendable {
     public var action: Action
     /// Wheel triggers only: fire on every notch instead of once per burst of notches.
     public var repeatPerNotch: Bool
+    /// Scroll Left/Right only: nil acts on discrete notches alone; otherwise a mouse's smooth horizontal
+    /// scrolling also fires the action once per burst, leaving any vertical movement alone.
+    public var continuousInput: ContinuousWheelInput?
 
-    public init(trigger: Trigger, modifiers: ModifierSet = [], action: Action, repeatPerNotch: Bool = false) {
+    public init(trigger: Trigger, modifiers: ModifierSet = [], action: Action, repeatPerNotch: Bool = false, continuousInput: ContinuousWheelInput? = nil) {
         self.trigger = trigger
         self.modifiers = modifiers
         self.action = action
         self.repeatPerNotch = repeatPerNotch
+        self.continuousInput = continuousInput
     }
 
     public var key: MappingKey { MappingKey(trigger, modifiers) }
@@ -431,7 +435,7 @@ extension Profile: Codable {
 }
 
 extension Mapping: Codable {
-    private enum CodingKeys: String, CodingKey { case trigger, modifiers, action, repeatPerNotch }
+    private enum CodingKeys: String, CodingKey { case trigger, modifiers, action, repeatPerNotch, continuousInput }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -439,6 +443,7 @@ extension Mapping: Codable {
         modifiers = try c.decodeIfPresent(ModifierSet.self, forKey: .modifiers) ?? []
         action = try c.decode(Action.self, forKey: .action)
         repeatPerNotch = try c.decodeIfPresent(Bool.self, forKey: .repeatPerNotch) ?? false
+        continuousInput = try c.decodeIfPresent(ContinuousWheelInput.self, forKey: .continuousInput)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -447,6 +452,21 @@ extension Mapping: Codable {
         try c.encode(modifiers, forKey: .modifiers)
         try c.encode(action, forKey: .action)
         if repeatPerNotch { try c.encode(true, forKey: .repeatPerNotch) }
+        if let continuousInput { try c.encode(continuousInput, forKey: .continuousInput) }
+    }
+}
+
+extension ContinuousWheelInput: Codable {
+    private enum CodingKeys: String, CodingKey { case distance }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        distance = try c.decodeIfPresent(Double.self, forKey: .distance) ?? Self.defaultDistance
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(distance, forKey: .distance)
     }
 }
 

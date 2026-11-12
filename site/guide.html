@@ -48,7 +48,7 @@
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li></ol></li>
-          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#wheel-actions">Wheel actions</a></li></ol></li>
+          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
           <li><a href="#application-bypass">Application bypass</a></li>
@@ -193,6 +193,15 @@ make app</code></pre>
           <h3 id="wheel-actions">Wheel actions</h3>
           <p>The wheel can trigger actions too. In <span class="ui">Settings › Buttons</span>, choose <span class="ui">Record Button…</span> and turn the wheel: each direction (up, down, left and right) is its own trigger, with any modifier keys. <kbd>⌥</kbd> + wheel up for Volume Up is a common one. Most people keep a modifier on wheel mappings so that plain scrolling still works.</p>
           <p><span class="ui">Repeat for every notch</span> runs the action once per notch. With it off, the action runs once for each burst of turning.</p>
+          <h4 id="smooth-horizontal-scrolling">Smooth sideways scrolling</h4>
+          <p>Some mice, such as those with a thumb wheel, send sideways movement as smooth scrolling rather than notches. Ordinary Scroll Left and Scroll Right mappings only react to notches. On a mapping for one of them, turn on <span class="ui">Also act on smooth scrolling from this mouse</span> and choose <span class="ui">Activate after</span>, from 10 to 500 pixels (60 to begin with). Whisker then adds up the sideways movement in one direction and runs the action once when it reaches that distance, however finely the movement is reported. The rest of that swipe is absorbed without running it again, and the action can run again after a short pause or when you reverse.</p>
+          <ul>
+            <li>Only the sideways movement is taken. Vertical scrolling at the same moment carries on as normal, including your <a href="#scrolling">scrolling settings</a>.</li>
+            <li>It needs a mouse Whisker can identify exactly. If Whisker can't tell which mouse a movement came from, or it comes from a trackpad or touch mouse, it passes through unchanged.</li>
+            <li>Coasting after you let go never runs the action, and smooth input is measured in pixels only, so line counts are never mixed in.</li>
+            <li>It is separate from the notch behaviour above and doesn't change it. Whisker can't tell a thumb wheel from another control that reports the same sideways movement, so it doesn't promise to.</li>
+          </ul>
+          <p>This has not yet been verified on hardware, including how the Logitech MX Master 3S thumb wheel reports movement over Bluetooth and a receiver, or what distance feels comfortable.</p>
         </section>
 
         <section aria-labelledby="pointer">

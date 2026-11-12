@@ -40,11 +40,14 @@ public struct ScrollSample: Equatable, Sendable {
     public var horizontal: ScrollAxis
     /// Smooth scrolling from a trackpad or free-spinning wheel rather than wheel notches.
     public var isContinuous: Bool
+    /// Coasting after the fingers or wheel let go. Also counts as continuous, but never starts anything.
+    public var isMomentum: Bool
 
-    public init(vertical: ScrollAxis = .zero, horizontal: ScrollAxis = .zero, isContinuous: Bool = false) {
+    public init(vertical: ScrollAxis = .zero, horizontal: ScrollAxis = .zero, isContinuous: Bool = false, isMomentum: Bool = false) {
         self.vertical = vertical
         self.horizontal = horizontal
-        self.isContinuous = isContinuous
+        self.isContinuous = isContinuous || isMomentum
+        self.isMomentum = isMomentum
     }
 
     /// The single wheel direction of a notch, or nil when there's no movement.
@@ -107,6 +110,9 @@ public enum EventPlan: Equatable, Sendable {
     case dragAsMove
     /// Rewrite the scroll distances, removing modifier flags that only served to change the axis.
     case scroll(ScrollSample, removing: ModifierSet)
+    /// Perform the action and let the rest of the scroll event through: the mapped axis is already taken out
+    /// of the sample. A zero sample means nothing is left to deliver.
+    case performWithScroll(Action, ActionPhase, remaining: ScrollSample)
 }
 
 /// Decides, for each mouse event, whether to pass it, drop it or turn it into an action.
@@ -125,6 +131,7 @@ public struct EventProcessor: Sendable {
     private var lastWheelEvent: [MappingKey: TimeInterval] = [:]
     private var notchTimes: [TimeInterval] = []
     private var scaler = ScrollScaler()
+    private var horizontalStream = HorizontalStream()
 
     public init() {}
 
@@ -149,7 +156,13 @@ public struct EventProcessor: Sendable {
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
         scaler.reset()
+        horizontalStream.reset()
         return released
+    }
+
+    /// Forgets partly recognised wheel movement, e.g. when settings change.
+    public mutating func resetScrollRecognition() {
+        horizontalStream.reset()
     }
 
     /// Like `releaseAll()`, for the moment Whisker stands aside for an app. Buttons still down keep being
@@ -211,6 +224,20 @@ public struct EventProcessor: Sendable {
     private mutating func scroll(_ sample: ScrollSample, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
         guard isActive(event, settings) else { return .passThrough }
         let isNotch = !sample.isContinuous
+        var sample = sample
+        var fired: Action?
+        var consumed = false
+
+        // The mapped horizontal part of smooth scrolling goes first; what's left carries on below.
+        if sample.isContinuous, !sample.isMomentum, !sample.horizontal.isZero {
+            switch continuousHorizontal(sample.horizontal, event, settings) {
+            case .passThrough: break
+            case .consume(let action):
+                fired = action
+                consumed = true
+                sample.horizontal = .zero
+            }
+        }
 
         if isNotch, let direction = sample.direction,
            let mapping = lookup(.wheel(direction), event, settings, exactOnly: true),
@@ -220,7 +247,7 @@ public struct EventProcessor: Sendable {
 
         var rewritten = sample
         var removing: ModifierSet = []
-        var changed = false
+        var changed = consumed
 
         // Inverting needs to know the device, so it only applies when the event is clearly from a mouse.
         if let attribution = event.device, attribution.exact || isNotch {
@@ -235,7 +262,7 @@ public struct EventProcessor: Sendable {
             }
         }
 
-        guard isNotch else { return changed ? .scroll(rewritten, removing: []) : .passThrough }
+        guard isNotch else { return finish(rewritten, changed: changed, fired: fired, removing: []) }
 
         let resolved = settings.profile(device: event.device?.id, app: event.app)
         let scroll = resolved.scroll
@@ -269,7 +296,43 @@ public struct EventProcessor: Sendable {
             changed = true
         }
 
-        return changed ? .scroll(rewritten, removing: removing) : .passThrough
+        return finish(rewritten, changed: changed, fired: fired, removing: removing)
+    }
+
+    private func finish(_ sample: ScrollSample, changed: Bool, fired: Action?, removing: ModifierSet) -> EventPlan {
+        if let fired { return .performWithScroll(fired, .once, remaining: sample) }
+        guard changed else { return .passThrough }
+        return sample.isZero ? .swallow : .scroll(sample, removing: removing)
+    }
+
+    private enum ContinuousOutcome {
+        case passThrough
+        /// The horizontal movement is taken; `Action` is set when it fires now.
+        case consume(Action?)
+    }
+
+    /// Smooth horizontal scrolling for a Scroll Left/Right mapping that opted in. Only an exactly attributed
+    /// device qualifies, so ambiguous input and anything that might not be a mouse is left alone.
+    private mutating func continuousHorizontal(_ axis: ScrollAxis, _ event: InputEvent, _ settings: CompiledSettings) -> ContinuousOutcome {
+        guard let device = event.device, device.exact else {
+            horizontalStream.reset()
+            return .passThrough
+        }
+        let profile = settings.profile(device: device.id, app: event.app).profileID
+        // Pixels are the only unit used, so a sample without them can't be measured and is left alone.
+        guard axis.points != 0 else { return .passThrough }
+        let direction: WheelDirection = axis.points > 0 ? .left : .right
+        guard let mapping = lookup(.wheel(direction), event, settings, exactOnly: true),
+              mapping.action != .passthrough, let continuous = mapping.continuousInput else {
+            horizontalStream.cancel(device: device.id, profile: profile)
+            return .passThrough
+        }
+        let outcome = horizontalStream.feed(
+            points: axis.points, direction: direction, modifiers: event.modifiers.withoutFunction,
+            distance: continuous.effectiveDistance, device: device.id, profile: profile, at: event.timestamp
+        )
+        guard outcome == .fire, mapping.action != .none else { return .consume(nil) }
+        return .consume(mapping.action)
     }
 
     private mutating func wheelMapping(_ mapping: Mapping, at time: TimeInterval) -> EventPlan {
