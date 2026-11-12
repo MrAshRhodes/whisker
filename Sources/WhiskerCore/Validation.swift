@@ -34,6 +34,24 @@ extension WhiskerSettings {
             result.schemaVersion = Self.currentSchemaVersion
         }
 
+        // Bypass list: bundle identifiers only, each once. "*" isn't an app; the master switch covers everywhere.
+        var bypassApps: [String] = []
+        for (index, entry) in general.bypassApps.enumerated() {
+            let path = "general.bypassApps[\(index)]"
+            let id = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+            if id.isEmpty {
+                issues.append(ValidationIssue(path, "Not an application identifier (expected a bundle identifier such as com.example.app)."))
+            } else if id == ProfileMatch.any {
+                issues.append(ValidationIssue(path, "“*” isn't an application. Turn Whisker off to stop it everywhere."))
+            } else if bypassApps.contains(id) {
+                issues.append(ValidationIssue(path, "“\(id)” is already on the list."))
+            } else {
+                if id != entry { issues.append(ValidationIssue(path, "Has spaces around the identifier.")) }
+                bypassApps.append(id)
+            }
+        }
+        result.general.bypassApps = bypassApps
+
         // Devices.
         for (id, device) in devices.sorted(by: { $0.key < $1.key }) {
             let path = "devices[\(id)]"

@@ -14,8 +14,8 @@ struct EventProcessorTests {
         return CompiledSettings(settings)
     }
 
-    private func event(_ kind: InputKind, _ modifiers: ModifierSet = [], at time: TimeInterval = 0, device: DeviceAttribution? = mouse) -> InputEvent {
-        InputEvent(kind, modifiers: modifiers, timestamp: time, device: device, app: "com.example.app")
+    private func event(_ kind: InputKind, _ modifiers: ModifierSet = [], at time: TimeInterval = 0, device: DeviceAttribution? = mouse, app: String? = "com.example.app") -> InputEvent {
+        InputEvent(kind, modifiers: modifiers, timestamp: time, device: device, app: app)
     }
 
     private func notch(_ lines: Int, horizontal: Bool = false) -> InputKind {
@@ -149,6 +149,148 @@ struct EventProcessorTests {
         let settings = compiled([Mapping(trigger: .wheel(.up), action: .none)], scroll: ScrollSettings(linesPerNotch: 5, horizontalModifier: .shift))
         let smooth = InputKind.scroll(ScrollSample(vertical: ScrollAxis(lines: 1, fixed: 1, points: 10), isContinuous: true))
         #expect(processor.process(event(smooth, .shift), settings: settings) == .passThrough)
+    }
+
+    // MARK: Application bypass
+
+    private static let game = "com.example.game"
+    private static let otherMouse = DeviceAttribution(id: "1234:abcd", exact: true)
+
+    private func bypassing(_ apps: [String] = [game], configure: (inout WhiskerSettings) -> Void = { _ in }) -> CompiledSettings {
+        compiled { settings in
+            configure(&settings)
+            settings.general.bypassApps = apps
+        }
+    }
+
+    @Test func bypassBeatsInheritedAppAndPerDeviceMappings() {
+        let gameProfile = Profile(name: "Game", match: ProfileMatch(apps: [Self.game]), mappings: [Mapping(trigger: .button(5), action: .none)])
+        let mouseInGame = Profile(name: "Mouse in game", match: ProfileMatch(devices: [Self.mouse.id], apps: [Self.game]), mappings: [Mapping(trigger: .button(6), action: .space(.left))])
+        let profiles = { (settings: inout WhiskerSettings) in settings.profiles += [gameProfile, mouseInGame] }
+        let scenarios: [(device: DeviceAttribution, button: Int, whenActive: EventPlan)] = [
+            (Self.otherMouse, 3, .perform(.navigate(.back), .once)),
+            (Self.otherMouse, 5, .swallow),
+            (Self.mouse, 6, .perform(.space(.left), .once)),
+        ]
+        for scenario in scenarios {
+            let down = event(.buttonDown(scenario.button), device: scenario.device, app: Self.game)
+            var active = EventProcessor()
+            #expect(active.process(down, settings: compiled(configure: profiles)) == scenario.whenActive)
+            var bypassed = EventProcessor()
+            #expect(bypassed.process(down, settings: bypassing(configure: profiles)) == .passThrough)
+            #expect(bypassed.process(event(.buttonUp(scenario.button), device: scenario.device, app: Self.game), settings: bypassing(configure: profiles)) == .passThrough)
+            #expect(bypassed.heldButtons.isEmpty)
+        }
+    }
+
+    @Test func bypassLeavesTheWheelToTheSystem() {
+        let setup = { (settings: inout WhiskerSettings) in
+            settings.devices[Self.mouse.id] = DeviceSettings(wheel: WheelSettings(invertVertical: true))
+            settings.profiles[0].scroll = ScrollSettings(
+                linesPerNotch: 3, acceleration: 0.5, horizontalModifier: .shift,
+                modifierScaling: ModifierScaling(modifiers: .option, multiplier: 3)
+            )
+            settings.profiles[0].mappings.append(Mapping(trigger: .wheel(.up), modifiers: .control, action: .space(.left)))
+        }
+        let inputs: [(kind: InputKind, modifiers: ModifierSet)] = [
+            (notch(1), []),
+            (notch(-1), .shift),
+            (notch(1), .control),
+            (notch(1), .option),
+            (notch(1, horizontal: true), []),
+        ]
+        for input in inputs {
+            let scroll = event(input.kind, input.modifiers, app: Self.game)
+            var active = EventProcessor()
+            #expect(active.process(scroll, settings: compiled(configure: setup)) != .passThrough)
+            var bypassed = EventProcessor()
+            #expect(bypassed.process(scroll, settings: bypassing(configure: setup)) == .passThrough)
+        }
+    }
+
+    @Test func bypassOnlyCoversTheListedApps() {
+        var processor = EventProcessor()
+        let settings = bypassing()
+        #expect(processor.process(event(.buttonDown(3), app: Self.game), settings: settings) == .passThrough)
+        _ = processor.process(event(.buttonUp(3), app: Self.game), settings: settings)
+        #expect(processor.process(event(.buttonDown(3), app: "com.example.app"), settings: settings) == .perform(.navigate(.back), .once))
+        _ = processor.process(event(.buttonUp(3), app: "com.example.app"), settings: settings)
+        // Without an app identity nothing matches the list.
+        #expect(processor.process(event(.buttonDown(3), app: nil), settings: settings) == .perform(.navigate(.back), .once))
+        // A listed app that isn't in front changes nothing.
+        let unlisted = compiled()
+        #expect(processor.process(event(.buttonDown(3), app: Self.game), settings: unlisted) == .perform(.navigate(.back), .once))
+    }
+
+    @Test func bypassNeverTurnsWhiskerOn() {
+        let settings = bypassing {
+            $0.general.enabled = false
+            $0.devices[Self.mouse.id] = DeviceSettings(wheel: WheelSettings(invertVertical: true))
+        }
+        var processor = EventProcessor()
+        for app in [Self.game, "com.example.app"] {
+            #expect(processor.process(event(.buttonDown(3), app: app), settings: settings) == .passThrough)
+            #expect(processor.process(event(notch(1), app: app), settings: settings) == .passThrough)
+        }
+    }
+
+    @Test func bypassKeepsThePrimaryButtonSafeguard() {
+        var processor = EventProcessor()
+        let mapping = Mapping(trigger: .button(0), action: .none)
+        let guarded = compiled([mapping]) { $0.general.bypassApps = [Self.game] }
+        #expect(processor.process(event(.buttonDown(0)), settings: guarded) == .passThrough)
+        #expect(processor.process(event(.buttonDown(0), app: Self.game), settings: guarded) == .passThrough)
+        let allowed = compiled([mapping]) { $0.general.allowPrimaryButtonRemap = true; $0.general.bypassApps = [Self.game] }
+        #expect(processor.process(event(.buttonDown(0)), settings: allowed) == .swallow)
+        _ = processor.process(event(.buttonUp(0)), settings: allowed)
+        #expect(processor.process(event(.buttonDown(0), app: Self.game), settings: allowed) == .passThrough)
+    }
+
+    @Test func aButtonHeldBeforeBypassStillEndsWithItsOwnRelease() {
+        var processor = EventProcessor()
+        let click = Action.click(button: 0, modifiers: [])
+        let mapping = Mapping(trigger: .button(2), action: click)
+        #expect(processor.process(event(.buttonDown(2)), settings: compiled([mapping])) == .perform(click, .down))
+        let bypassed = bypassing { $0.profiles[0].mappings.append(mapping) }
+        #expect(processor.process(event(.buttonDragged(2), app: Self.game), settings: bypassed) == .dragAs(button: 0, modifiers: []))
+        #expect(processor.process(event(.buttonUp(2), app: Self.game), settings: bypassed) == .perform(click, .up))
+        #expect(processor.process(event(.buttonUp(2), app: Self.game), settings: bypassed) == .passThrough)
+    }
+
+    @Test func standingAsideReleasesHeldActionsOnceAndKeepsTheAppFromSeeingTheRest() {
+        var processor = EventProcessor()
+        let click = Action.click(button: 1, modifiers: [])
+        let settings = compiled([Mapping(trigger: .button(2), action: click)])
+        let bypassed = bypassing { $0.profiles[0].mappings.append(Mapping(trigger: .button(2), action: click)) }
+        _ = processor.process(event(.buttonDown(2)), settings: settings)
+        _ = processor.process(event(.buttonDown(3)), settings: settings)
+
+        let released = processor.releaseAllForBypass()
+        #expect(released.map(\.button) == [2])
+        #expect(released.map(\.action) == [click])
+        #expect(processor.releaseAllForBypass().isEmpty)
+        #expect(processor.heldButtons.isEmpty)
+
+        // Still physically down: movement continues, but the app sees no drag, and no release without a press.
+        #expect(processor.process(event(.buttonDragged(2), app: Self.game), settings: bypassed) == .dragAsMove)
+        #expect(processor.process(event(.buttonDragged(3), app: Self.game), settings: bypassed) == .dragAsMove)
+        #expect(processor.process(event(.buttonUp(2), app: Self.game), settings: bypassed) == .swallow)
+        #expect(processor.process(event(.buttonUp(3), app: Self.game), settings: bypassed) == .swallow)
+        // Each is swallowed once; the next press and release belong to the app.
+        #expect(processor.process(event(.buttonDragged(2), app: Self.game), settings: bypassed) == .passThrough)
+        #expect(processor.process(event(.buttonUp(2), app: Self.game), settings: bypassed) == .passThrough)
+        #expect(processor.process(event(.buttonDown(3), app: Self.game), settings: bypassed) == .passThrough)
+        #expect(processor.process(event(.buttonUp(3), app: Self.game), settings: bypassed) == .passThrough)
+    }
+
+    @Test func aNewPressEndsTheWaitForAnOrphanedRelease() {
+        var processor = EventProcessor()
+        _ = processor.process(event(.buttonDown(3)), settings: compiled())
+        _ = processor.releaseAllForBypass()
+        // The release never arrived (say the tap was off); the next press starts afresh.
+        let bypassed = bypassing()
+        #expect(processor.process(event(.buttonDown(3), app: Self.game), settings: bypassed) == .passThrough)
+        #expect(processor.process(event(.buttonUp(3), app: Self.game), settings: bypassed) == .passThrough)
     }
 
     // MARK: Scroll speed while holding

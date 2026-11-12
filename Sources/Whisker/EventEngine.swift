@@ -16,6 +16,8 @@ final class EventEngine: @unchecked Sendable {
         var capturing = false
         /// Set by `stop()` so presses that arrive while the tap is being torn down pass through untouched.
         var stopped = false
+        /// Whether the app in front was on the bypass list at the last check, so standing aside happens once.
+        var bypassed = false
     }
 
     static let eventMask: CGEventMask = {
@@ -56,11 +58,21 @@ final class EventEngine: @unchecked Sendable {
 
     func update(_ settings: WhiskerSettings) {
         let compiled = CompiledSettings(settings)
+        let app = frontmostApp()
         let location = Self.cursorLocation()
         state.withLock { state in
             state.compiled = compiled
             if !settings.general.enabled { release(&state, at: location) }
+            syncBypass(&state, app: app, at: location)
         }
+    }
+
+    /// The app in front changed. Whisker lets go of what it holds when that app is on the bypass list; the
+    /// event tap itself already passes events through for it, this only ends what was started before.
+    func frontmostAppChanged() {
+        let app = frontmostApp()
+        let location = Self.cursorLocation()
+        state.withLock { syncBypass(&$0, app: app, at: location) }
     }
 
     func setCapturing(_ capturing: Bool) {
@@ -141,6 +153,20 @@ final class EventEngine: @unchecked Sendable {
     /// Call with the state lock held.
     private func release(_ state: inout State, at location: CGPoint) {
         for (_, action) in state.processor.releaseAll() {
+            synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
+        }
+        synthesizer.releaseAll()
+    }
+
+    /// Call with the state lock held. Standing aside for an app lets go of everything held, once; the real
+    /// releases that follow are swallowed because the app never saw the presses. Coming back needs nothing:
+    /// the next press starts afresh. Sleep, switching users and quitting apps don't pass through here, so
+    /// they leave the state alone.
+    private func syncBypass(_ state: inout State, app: String?, at location: CGPoint) {
+        let bypassed = state.compiled.isBypassed(app: app)
+        defer { state.bypassed = bypassed }
+        guard bypassed, !state.bypassed else { return }
+        for (_, action) in state.processor.releaseAllForBypass() {
             synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
         synthesizer.releaseAll()

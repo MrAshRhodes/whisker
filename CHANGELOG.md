@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Scroll faster or slower while holding modifier keys: choose the keys, a speed from ×0.25 to ×8 and the directions for each profile. It applies to wheel notches only, not trackpads or smooth scrolling, and has not yet been verified on hardware ([#16]).
+- Application bypass: while an app on your list is in front (a game, say), Whisker stands aside, with no button remapping, wheel actions, scroll changes or per-mouse pointer speed and acceleration. Anything held is released as the app comes forward, your latest settings return when you switch away, and profiles and the Enabled switch are left as they are. The menu shows "Bypassed for …", and a mouse that won't take its pointer settings back is reported and retried, including at the next launch. ([#12])
 
 ## [0.1.0] - 2026-11-12
 
@@ -26,4 +27,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/MrAshRhodes/whisker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/MrAshRhodes/whisker/releases/tag/v0.1.0
+[#12]: https://github.com/MrAshRhodes/whisker/issues/12
 [#16]: https://github.com/MrAshRhodes/whisker/issues/16

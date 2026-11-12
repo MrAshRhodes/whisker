@@ -98,7 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.image = image
         let active = model.isEnabled && model.engineRunning
         button.appearsDisabled = !active
-        button.toolTip = active ? "Whisker" : model.engineRunning ? "Whisker (off)" : "Whisker needs Accessibility access"
+        var tip = active ? "Whisker" : model.engineRunning ? "Whisker (off)" : "Whisker needs Accessibility access"
+        if active, let app = model.bypassedAppName { tip = "Whisker (bypassed for \(app))" }
+        if !model.pointer.restoreFailures.isEmpty { tip += "\nPointer settings couldn’t be restored" }
+        button.toolTip = tip
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -107,14 +110,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         enabled.target = self
         enabled.state = model.isEnabled ? .on : .off
         menu.addItem(enabled)
-        if model.permission.isTrusted {
+        if let app = model.bypassedAppName {
+            let bypassed = NSMenuItem(title: "Bypassed for \(app)", action: nil, keyEquivalent: "")
+            bypassed.isEnabled = false
+            menu.addItem(bypassed)
+        } else if model.permission.isTrusted {
             let profile = NSMenuItem(title: "Profile: \(model.activeProfileName)", action: nil, keyEquivalent: "")
             profile.isEnabled = false
             menu.addItem(profile)
-        } else {
+        }
+        if !model.permission.isTrusted {
             let grant = NSMenuItem(title: "Grant Accessibility Access…", action: #selector(showOnboarding), keyEquivalent: "")
             grant.target = self
             menu.addItem(grant)
+        }
+        if !model.pointer.restoreFailures.isEmpty {
+            let warning = NSMenuItem(title: "Pointer settings couldn’t be restored…", action: #selector(showPointerSettings), keyEquivalent: "")
+            warning.target = self
+            menu.addItem(warning)
         }
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
@@ -140,6 +153,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showAbout() {
         model.selectedPane = .about
+        settingsWindow.show()
+    }
+
+    @objc private func showPointerSettings() {
+        model.selectedPane = .pointer
         settingsWindow.show()
     }
 

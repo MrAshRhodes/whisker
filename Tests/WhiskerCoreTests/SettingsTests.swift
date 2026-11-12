@@ -62,6 +62,7 @@ struct SettingsTests {
 
     @Test func settingsRoundTripKeepingUnknownKeys() throws {
         var settings = WhiskerSettings()
+        settings.general.bypassApps = ["com.example.game"]
         settings.devices["046d:c52b"] = DeviceSettings(name: "Mouse", pointer: PointerSettings(speed: 1.5), wheel: WheelSettings(invertVertical: true))
         settings.profiles.append(Profile(id: "safari", name: "Safari", match: ProfileMatch(apps: ["com.apple.Safari"]), inherits: nil, scroll: ScrollSettings(linesPerNotch: 5)))
         settings.unknownKeys["future"] = .object(["x": .array([.number(1), .bool(true), .null])])
@@ -110,6 +111,15 @@ struct SettingsTests {
         #expect(settings.schemaVersion == 1)
         #expect(settings.general.enabled == false)
         #expect(settings.profiles == [.makeDefault()])
+    }
+
+    @Test func filesWithoutABypassListDecodeAsBefore() throws {
+        let json = #"{"schemaVersion":1,"general":{"enabled":false,"showMenuBarIcon":false,"allowPrimaryButtonRemap":true},"future":1}"#
+        let settings = try SettingsCodec.decode(Data(json.utf8))
+        #expect(settings.general == GeneralSettings(enabled: false, showMenuBarIcon: false, allowPrimaryButtonRemap: true))
+        #expect(settings.general.bypassApps.isEmpty)
+        #expect(settings.schemaVersion == 1)
+        #expect(settings.unknownKeys["future"] == .number(1))
     }
 
     @Test func newerAndUnreadableFilesAreRefused() {
@@ -216,6 +226,21 @@ struct SettingsTests {
         let json = #"{"schemaVersion":1,"profiles":[{"id":"default","mappings":[{"trigger":{"type":"button","button":0},"action":{"kind":"none"}}]}]}"#
         #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decodeValidated(Data(json.utf8)) }
         #expect(try SettingsCodec.decodeRepairing(Data(json.utf8)).settings.defaultProfile.mappings.isEmpty)
+    }
+
+    @Test func repairTidiesTheBypassList() throws {
+        var settings = WhiskerSettings()
+        settings.general.bypassApps = [" com.example.game ", "", "*", "com.example.game", "com.example.launcher"]
+        let (repaired, issues) = settings.repairedWithIssues()
+        #expect(repaired.general.bypassApps == ["com.example.game", "com.example.launcher"])
+        #expect(issues.map(\.path) == (0...3).map { "general.bypassApps[\($0)]" })
+        #expect(repaired.validate().isEmpty)
+
+        settings.general.bypassApps = ["com.example.game"]
+        #expect(settings.validate().isEmpty)
+        let json = #"{"schemaVersion":1,"general":{"bypassApps":["*"]}}"#
+        #expect(throws: SettingsCodec.Failure.self) { try SettingsCodec.decodeValidated(Data(json.utf8)) }
+        #expect(try SettingsCodec.decodeRepairing(Data(json.utf8)).settings.general.bypassApps.isEmpty)
     }
 
     // MARK: Profile resolution
@@ -340,6 +365,49 @@ struct SettingsTests {
         #expect(history.target(.next, running: ["a", "b"]) == "a")
         history.terminated("c")
         #expect(history.bundleIDs == ["b", "a"])
+    }
+
+    // MARK: Application bypass
+
+    @Test func bypassListEditsStayTidy() {
+        var general = GeneralSettings()
+        general.setBypassed(" com.example.game ", true)
+        general.setBypassed("com.example.game", true)
+        for ignored in ["", "   ", ProfileMatch.any] { general.setBypassed(ignored, true) }
+        general.setBypassed("com.example.launcher", true)
+        #expect(general.bypassApps == ["com.example.game", "com.example.launcher"])
+        general.setBypassed("com.example.game", false)
+        general.setBypassed("com.not.listed", false)
+        #expect(general.bypassApps == ["com.example.launcher"])
+        #expect(general.enabled)
+    }
+
+    @Test func bypassOnlyNamesListedApps() {
+        let settings = WhiskerSettings(general: GeneralSettings(bypassApps: ["com.example.game"]))
+        let compiled = CompiledSettings(settings)
+        for (app, bypassed) in [("com.example.game", true), ("com.example.app", false), ("com.example.GAME", false), (nil, false)] as [(String?, Bool)] {
+            #expect(settings.isBypassed(app: app) == bypassed)
+            #expect(compiled.isBypassed(app: app) == bypassed)
+        }
+    }
+
+    @Test func anUnidentifiableFrontAppKeepsTheCurrentBypassState() {
+        let settings = WhiskerSettings(general: GeneralSettings(bypassApps: ["com.example.game"]))
+        var front = FrontmostApp()
+        front.activated(nil)
+        #expect(front.bundleID == nil)
+        #expect(!settings.isBypassed(app: front.bundleID))
+
+        front.activated("com.example.game")
+        front.activated(nil)
+        front.activated("")
+        #expect(front.bundleID == "com.example.game")
+        #expect(settings.isBypassed(app: front.bundleID))
+
+        front.activated("com.example.app")
+        front.activated(nil)
+        #expect(front.bundleID == "com.example.app")
+        #expect(!settings.isBypassed(app: front.bundleID))
     }
 
     @Test func symbolicHotKeysParse() {

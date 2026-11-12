@@ -74,11 +74,16 @@ public struct GeneralSettings: Equatable, Sendable {
     public var showMenuBarIcon: Bool
     /// The primary button without modifiers can't be remapped unless this is on, so a bad mapping can't lock you out.
     public var allowPrimaryButtonRemap: Bool
+    /// Bundle identifiers of apps Whisker stands aside for. While one is in front, button mappings, wheel
+    /// actions, scroll changes and pointer overrides all switch off as if Whisker were off. It never turns
+    /// Whisker on: the master switch still wins.
+    public var bypassApps: [String]
 
-    public init(enabled: Bool = true, showMenuBarIcon: Bool = true, allowPrimaryButtonRemap: Bool = false) {
+    public init(enabled: Bool = true, showMenuBarIcon: Bool = true, allowPrimaryButtonRemap: Bool = false, bypassApps: [String] = []) {
         self.enabled = enabled
         self.showMenuBarIcon = showMenuBarIcon
         self.allowPrimaryButtonRemap = allowPrimaryButtonRemap
+        self.bypassApps = bypassApps
     }
 }
 
@@ -299,7 +304,7 @@ public struct Mapping: Equatable, Sendable {
 // MARK: - Coding
 
 extension GeneralSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case enabled, showMenuBarIcon, allowPrimaryButtonRemap }
+    private enum CodingKeys: String, CodingKey { case enabled, showMenuBarIcon, allowPrimaryButtonRemap, bypassApps }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -307,6 +312,7 @@ extension GeneralSettings: Codable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? defaults.enabled
         showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? defaults.showMenuBarIcon
         allowPrimaryButtonRemap = try c.decodeIfPresent(Bool.self, forKey: .allowPrimaryButtonRemap) ?? defaults.allowPrimaryButtonRemap
+        bypassApps = try c.decodeIfPresent([String].self, forKey: .bypassApps) ?? defaults.bypassApps
     }
 }
 

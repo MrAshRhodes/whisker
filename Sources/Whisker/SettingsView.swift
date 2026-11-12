@@ -28,7 +28,7 @@ struct SettingsView: View {
         case .buttons: ButtonsPane(store: model.store)
         case .scrolling: ScrollingPane(store: model.store)
         case .pointer: PointerPane(store: model.store, devices: model.devices, pointer: model.pointer)
-        case .applications: ApplicationsPane(store: model.store)
+        case .applications: ApplicationsPane(store: model.store, pointer: model.pointer)
         case .devices: DevicesPane(store: model.store, devices: model.devices)
         case .updates: Form { Section { UpdatesSection() } }.formStyle(.grouped)
         case .about: AboutPane()
@@ -342,7 +342,7 @@ struct PointerPane: View {
                 Section(device.name) { deviceSettings(device) }
             }
             Section {
-                Text("Pointer settings apply while Whisker is running and go back to the system’s when it quits. Trackpads keep their own settings.")
+                Text("Pointer settings apply while Whisker is running and go back to the system’s when it quits, or while an app you’ve bypassed is in front. Trackpads keep their own settings.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
@@ -390,6 +390,10 @@ struct PointerPane: View {
                 Text("macOS didn’t accept a pointer change for this mouse.").font(.footnote).foregroundStyle(.orange)
             }
         }
+        if pointer.restoreFailures.contains(device.id) {
+            Text("Whisker couldn’t put this mouse’s own pointer settings back, so its speed and acceleration may still be in use. It keeps trying, and tries again when it next starts.")
+                .font(.footnote).foregroundStyle(.orange)
+        }
     }
 
     // Speeds at the start of a slider drag, to compare against when the drag ends.
@@ -416,6 +420,7 @@ final class SpeedMemo {
 struct ApplicationsPane: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var store: SettingsStore
+    @ObservedObject var pointer: PointerController
 
     private var appProfiles: [Profile] {
         store.settings.profiles.filter { !$0.isDefault && !$0.match.apps.contains(ProfileMatch.any) }
@@ -437,6 +442,8 @@ struct ApplicationsPane: View {
                         VStack(alignment: .leading) {
                             Text(profile.name)
                             Text(subtitle(profile)).font(.caption).foregroundStyle(.secondary)
+                            Toggle("Bypass Whisker in this application", isOn: bypassBinding(profile))
+                                .toggleStyle(.checkbox).font(.caption)
                         }
                         Spacer()
                         Button("Edit Buttons") {
@@ -466,15 +473,94 @@ struct ApplicationsPane: View {
                     Button("Choose App…") { chooseApp() }
                 }
             }
+            Section("Application Bypass") {
+                Text("While one of these apps is in front, Whisker leaves your buttons, wheel, scrolling and pointer speed alone, and puts them back when you switch to another app. Your profiles and the Enabled switch don’t change, and this works with or without Input Monitoring.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if bypassedApps.isEmpty {
+                    Text("No apps are bypassed.").foregroundStyle(.secondary)
+                }
+                ForEach(bypassedApps, id: \.self) { id in
+                    HStack {
+                        AppIcon(bundleID: id)
+                        VStack(alignment: .leading) {
+                            Text(model.appName(forBundleID: id))
+                            Text(id).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            model.setBypass(id, false)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Stop bypassing this app")
+                    }
+                }
+                HStack {
+                    Menu("Bypass Running App") {
+                        ForEach(bypassCandidates, id: \.bundleIdentifier) { app in
+                            Button(app.localizedName ?? app.bundleIdentifier ?? "App") {
+                                if let id = app.bundleIdentifier { model.setBypass(id, true) }
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    Button("Choose App to Bypass…") { chooseBypassedApp() }
+                }
+                if !pointer.restoreFailures.isEmpty {
+                    Label("Whisker couldn’t put the pointer settings back for some mice, so its speed and acceleration may still be in use. It keeps trying, and tries again when it next starts.", systemImage: "exclamationmark.triangle")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
+                Text("Whisker can see which app is in front, not what a game does with its input. This isn’t raw-input mode, it doesn’t change Game Mode, and it can’t promise anti-cheat compatibility. A launcher and the game it starts can be separate apps, and which one is in front hasn’t been verified for particular games. Opening a Whisker window brings Whisker to the front, which ends the bypass until you switch back.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private var bypassedApps: [String] {
+        store.settings.general.bypassApps
+            .sorted { model.appName(forBundleID: $0).localizedStandardCompare(model.appName(forBundleID: $1)) == .orderedAscending }
+    }
+
+    private var bypassCandidates: [NSRunningApplication] {
+        let listed = Set(store.settings.general.bypassApps)
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && !listed.contains($0.bundleIdentifier!) && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .sorted { ($0.localizedName ?? "").localizedStandardCompare($1.localizedName ?? "") == .orderedAscending }
+    }
+
+    /// True when every app the profile covers is on the bypass list.
+    private func isBypassed(_ profile: Profile) -> Bool {
+        let apps = profile.match.apps
+        return !apps.isEmpty && apps.allSatisfy { store.settings.general.bypassApps.contains($0) }
+    }
+
+    private func bypassBinding(_ profile: Profile) -> Binding<Bool> {
+        Binding(
+            get: { isBypassed(profile) },
+            set: { [model] on in
+                for app in profile.match.apps { model.setBypass(app, on) }
+            }
+        )
+    }
+
+    private func chooseBypassedApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK, let url = panel.url, let id = Bundle(url: url)?.bundleIdentifier,
+              id != Bundle.main.bundleIdentifier
+        else { return }
+        model.setBypass(id, true)
     }
 
     private func subtitle(_ profile: Profile) -> String {
         let count = profile.mappings.count
         let parent = profile.inherits.flatMap { store.settings.profile(id: $0)?.name } ?? "nothing"
         let devices = profile.match.devices.contains(ProfileMatch.any) ? "" : " · one mouse"
-        return "\(profile.match.apps.joined(separator: ", ")) · \(count) \(count == 1 ? "mapping" : "mappings") · inherits \(parent)\(devices)"
+        let bypassed = isBypassed(profile) ? " · bypassed" : ""
+        return "\(profile.match.apps.joined(separator: ", ")) · \(count) \(count == 1 ? "mapping" : "mappings") · inherits \(parent)\(devices)\(bypassed)"
     }
 
     private var runningApps: [NSRunningApplication] {

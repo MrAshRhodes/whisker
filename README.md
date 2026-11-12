@@ -30,17 +30,25 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 - **Profiles.** Give an app, a mouse, or an app on one mouse its own buttons and scrolling.
   Anything a profile does not set comes from the profile it inherits from, ending at the
   default profile, and Whisker switches profiles as you change apps.
+- **Application bypass.** List an app, such as a game, and Whisker stands aside while it is in
+  front: no button remapping, wheel actions or scroll changes, and every mouse gets its own
+  pointer speed and acceleration back from the system. Anything Whisker was holding is let go
+  as the app comes forward, and your latest settings apply again when you switch away. Your
+  profiles and the **Enabled** switch are not changed, bypass never turns Whisker on, and the
+  menu bar menu shows "Bypassed for …" separately from **Enabled**. It covers every mouse, so it
+  does not need Input Monitoring. See [Application bypass](#application-bypass).
 - **Pointer speed and acceleration**, per mouse, where supported. If a change makes the pointer
   more than twice as fast, Whisker asks you to keep it and changes it back after a few seconds
   if you do not. The system's values come back when you turn a mouse's custom speed off, when
-  you turn Whisker off, when Whisker quits, or at the next launch if it did not quit cleanly.
-  Turning Whisker back on reapplies your settings.
+  you turn Whisker off, while an app on the bypass list is in front, when Whisker quits, or at
+  the next launch if it did not quit cleanly. Turning Whisker back on reapplies your settings.
+  If macOS will not take a mouse's values back, Whisker says so and keeps trying.
 - **Devices.** Lists connected mice and trackballs, including ones you plug in or pair while
   Whisker is running. With several mice connected, allow Input Monitoring so Whisker can tell
   which one each click came from and apply that mouse's settings. Trackpads and touch mice such
   as Magic Mouse are left alone.
-- **Menu bar item** to turn Whisker on or off, see the active profile and open its settings. The
-  icon can be hidden, and Whisker can open at login.
+- **Menu bar item** to turn Whisker on or off, see the active profile (or the app it is bypassed
+  for) and open its settings. The icon can be hidden, and Whisker can open at login.
 - **Settings file.** Everything is kept in one readable JSON file that you can export, import or
   reset. Whisker checks it when it starts and tells you about anything it had to fix. If an
   existing file can't be read, Whisker leaves it untouched and doesn't save changes until it is
@@ -92,6 +100,36 @@ access returns.
 
 See the [user guide](https://mrashrhodes.github.io/whisker/guide.html) for each settings pane.
 
+## Application bypass
+
+Add an app under **Settings › Applications › Application Bypass**, or tick **Bypass Whisker in
+this application** on an app profile, and Whisker stands aside while that app is in front. It
+covers every mouse, and changes to the list apply straight away.
+
+- **What stops.** Button remapping, wheel actions and scroll changes, so the app gets the mouse
+  as macOS delivers it, and each mouse's own pointer speed and acceleration come back from the
+  system. When you switch to another app your latest settings apply again; anything you edit in
+  the meantime waits until then.
+- **What does not change.** Your profiles and the **Enabled** switch stay as they are, and bypass
+  never turns Whisker on: with Whisker off, it stays off. It works with or without Input
+  Monitoring and does not change which permissions Whisker needs.
+- **When the app comes forward.** Anything Whisker was holding, such as a button held down for a
+  drag or a shortcut that repeats, is let go once, and the real release that follows is not
+  passed on to an app that never saw the press.
+- **When Whisker cannot tell which app is in front.** An app without a readable identifier
+  changes nothing: Whisker stays out of the way if the app before it was bypassed, and keeps
+  working if it was not, until an app it can identify comes forward. Sleep, switching users and
+  quitting an app do not change this either.
+- **If a mouse will not take its values back.** Whisker says so in the menu and in Settings,
+  keeps the record of the original values and tries again, including the next time it starts.
+
+Application bypass is not a raw-input mode. It only stops Whisker's own changes: it does not
+configure Apple's Game Mode, make a game accept synthetic clicks or keys, or promise
+compatibility with anti-cheat software. Games often start from a launcher, and whether the
+launcher or the game's own program is in front while you play depends on the game. That has not
+been verified for particular games, so add whichever app is in front while you play. Opening a
+Whisker window brings Whisker to the front, which ends the bypass until you switch back.
+
 ## Privacy
 
 Whisker works entirely on your Mac. It has no accounts, analytics or telemetry, and it makes no
@@ -136,6 +174,14 @@ brew update && brew upgrade --cask whisker
   **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart.
 - **The pointer is suddenly too fast.** Wait a few seconds without confirming and Whisker reverts
   the change. Quitting Whisker also restores the original speed.
+- **Whisker still changes my mouse in an app I have bypassed.** Bypass follows the app that is in
+  front, which in a game may be its launcher or its own program; add the one that is in front
+  while you play. Opening a Whisker window ends the bypass until you switch back. See
+  [Application bypass](#application-bypass).
+- **The menu says "Pointer settings couldn’t be restored…".** macOS refused to take Whisker's
+  pointer speed or acceleration off a mouse, so it may still be in use. Whisker keeps the
+  original values and tries again each time the app in front or your settings change, and the
+  next time it starts.
 - **Trackpads and touch mice such as Magic Mouse** are left alone entirely (shown as
   "Touch mouse — left alone" under Devices): Whisker does not remap, reverse or change
   the speed of them.

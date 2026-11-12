@@ -110,3 +110,221 @@ struct EventEngineTests {
         ])
     }
 }
+
+@Suite("Event engine application bypass")
+struct EventEngineBypassTests {
+    typealias Recorder = EventEngineTests.Recorder
+
+    /// The app in front, switched the way the front-app monitor switches it.
+    final class FrontApp: @unchecked Sendable {
+        private let lock = NSLock()
+        private var app = FrontmostApp()
+
+        var bundleID: String? { lock.withLock { app.bundleID } }
+        func activate(_ bundleID: String?) { lock.withLock { app.activated(bundleID) } }
+    }
+
+    static let game = "com.example.game"
+    static let notes = "com.example.notes"
+    static let mouse = DeviceAttribution(id: "046d:c52b", exact: true)
+
+    static func settings(
+        action: Action = EventEngineTests.remap,
+        bypassing: [String] = [game],
+        enabled: Bool = true,
+        invertWheel: Bool = false
+    ) -> WhiskerSettings {
+        var settings = WhiskerSettings()
+        settings.general.enabled = enabled
+        settings.general.bypassApps = bypassing
+        settings.profiles[0].mappings = [Mapping(trigger: .button(3), action: action)]
+        if invertWheel { settings.devices[mouse.id] = DeviceSettings(wheel: WheelSettings(invertVertical: true)) }
+        return settings
+    }
+
+    /// Starting while a listed app is in front stands aside once, so tests count releases relative to this.
+    static func makeEngine(_ recorder: Recorder, front: FrontApp, _ settings: WhiskerSettings = settings()) -> EventEngine {
+        let engine = EventEngine(synthesizer: recorder, attribute: { _, _ in mouse }, frontmostApp: { front.bundleID })
+        engine.update(settings)
+        return engine
+    }
+
+    static func press() -> CGEvent { EventEngineTests.button3(down: true) }
+    static func release() -> CGEvent { EventEngineTests.button3(down: false) }
+
+    static func drag() -> CGEvent {
+        let event = CGEvent(mouseEventSource: nil, mouseType: .otherMouseDragged, mouseCursorPosition: .zero, mouseButton: .center)!
+        event.setIntegerValueField(.mouseEventButtonNumber, value: 3)
+        return event
+    }
+
+    static func wheelNotch() -> CGEvent {
+        CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0)!
+    }
+
+    @Test func standingAsideEndsWhatWasHeldOnce() {
+        let recorder = Recorder()
+        let front = FrontApp()
+        front.activate(Self.notes)
+        let engine = Self.makeEngine(recorder, front: front)
+        #expect(engine.handle(.otherMouseDown, Self.press()) == nil)
+
+        front.activate(Self.game)
+        engine.frontmostAppChanged()
+        engine.frontmostAppChanged()
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+
+        // The button is still down: it keeps moving the pointer, but the app sees no drag and no release.
+        let drag = Self.drag()
+        #expect(engine.handle(.otherMouseDragged, drag) != nil)
+        #expect(drag.type == .mouseMoved)
+        #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+        // The next press and release are the app's own.
+        #expect(engine.handle(.otherMouseDown, Self.press()) != nil)
+        #expect(engine.handle(.otherMouseUp, Self.release()) != nil)
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+    }
+
+    @Test func aRepeatingShortcutStopsWhenWhiskerStandsAside() {
+        let recorder = Recorder()
+        let front = FrontApp()
+        front.activate(Self.notes)
+        let repeating = Action.shortcut(KeyShortcut(keyCode: 0x7C), repeatWhileHeld: true)
+        let engine = Self.makeEngine(recorder, front: front, Self.settings(action: repeating))
+        #expect(engine.handle(.otherMouseDown, Self.press()) == nil)
+        let releasesBefore = recorder.releases
+
+        front.activate(Self.game)
+        engine.frontmostAppChanged()
+
+        #expect(recorder.calls == [
+            .init(action: repeating, phase: .down, clickState: 1),
+            .init(action: repeating, phase: .up, clickState: 1),
+        ])
+        #expect(recorder.releases == releasesBefore + 1)
+        #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+        engine.frontmostAppChanged()
+        #expect(recorder.calls.count == 2)
+        #expect(recorder.releases == releasesBefore + 1)
+    }
+
+    @Test func leavingABypassedAppNeedsNoCleanUp() {
+        let recorder = Recorder()
+        let front = FrontApp()
+        front.activate(Self.game)
+        let engine = Self.makeEngine(recorder, front: front)
+        #expect(engine.handle(.otherMouseDown, Self.press()) != nil)
+        #expect(engine.handle(.otherMouseUp, Self.release()) != nil)
+        let releasesBefore = recorder.releases
+
+        front.activate(Self.notes)
+        engine.frontmostAppChanged()
+
+        #expect(recorder.calls.isEmpty)
+        #expect(recorder.releases == releasesBefore)
+        #expect(engine.handle(.otherMouseDown, Self.press()) == nil)
+        #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+    }
+
+    @Test func rapidFocusChangesNeverLeaveAPressStuckOrReleasedTwice() {
+        let recorder = Recorder()
+        let front = FrontApp()
+        front.activate(Self.notes)
+        let engine = Self.makeEngine(recorder, front: front)
+        for _ in 0..<5 {
+            #expect(engine.handle(.otherMouseDown, Self.press()) == nil)
+            for app in [Self.game, Self.notes, Self.game] {
+                front.activate(app)
+                engine.frontmostAppChanged()
+            }
+            #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+            front.activate(Self.notes)
+            engine.frontmostAppChanged()
+        }
+
+        #expect(recorder.calls.map(\.phase) == Array(repeating: [ActionPhase.down, .up], count: 5).flatMap { $0 })
+    }
+
+    @Test func theWheelIsLeftAloneInABypassedApp() {
+        let recorder = Recorder()
+        let front = FrontApp()
+        front.activate(Self.game)
+        let engine = Self.makeEngine(recorder, front: front, Self.settings(invertWheel: true))
+
+        let inTheGame = Self.wheelNotch()
+        #expect(engine.handle(.scrollWheel, inTheGame) != nil)
+        #expect(inTheGame.getIntegerValueField(.scrollWheelEventDeltaAxis1) == 1)
+
+        front.activate(Self.notes)
+        let inNotes = Self.wheelNotch()
+        #expect(engine.handle(.scrollWheel, inNotes) != nil)
+        #expect(inNotes.getIntegerValueField(.scrollWheelEventDeltaAxis1) == -1)
+    }
+
+    @Test func sleepSessionChangesAndUnidentifiableAppsKeepTheBypassState() {
+        for (app, bypassed) in [(Self.game, true), (Self.notes, false)] {
+            let recorder = Recorder()
+            let front = FrontApp()
+            front.activate(app)
+            let engine = Self.makeEngine(recorder, front: front)
+
+            // Sleep and switching users let go of what is held; an app without an identity, or none, is no answer.
+            engine.releaseAll()
+            let releasesAfterSleep = recorder.releases
+            for unknown in [nil, ""] {
+                front.activate(unknown)
+                engine.frontmostAppChanged()
+            }
+
+            #expect(recorder.releases == releasesAfterSleep)
+            #expect((engine.handle(.otherMouseDown, Self.press()) != nil) == bypassed)
+            #expect((engine.handle(.otherMouseUp, Self.release()) != nil) == bypassed)
+            #expect(recorder.calls.map(\.phase) == (bypassed ? [] : [.down, .up]))
+        }
+    }
+
+    @Test func editingTheListWhileAnAppIsInFront() {
+        let recorder = Recorder()
+        let front = FrontApp()
+        front.activate(Self.game)
+        let engine = Self.makeEngine(recorder, front: front, Self.settings(bypassing: []))
+        #expect(engine.handle(.otherMouseDown, Self.press()) == nil)
+
+        // Adding the app in front lets go of the held press, as if the app had just come to the front.
+        engine.update(Self.settings(bypassing: [Self.game]))
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+        #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+        #expect(engine.handle(.otherMouseDown, Self.press()) != nil)
+        #expect(engine.handle(.otherMouseUp, Self.release()) != nil)
+
+        // Taking it off brings the mapping back straight away.
+        engine.update(Self.settings(bypassing: []))
+        #expect(engine.handle(.otherMouseDown, Self.press()) == nil)
+        #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+        #expect(recorder.calls.map(\.phase) == [.down, .up, .down, .up])
+    }
+
+    @Test func theMasterSwitchWinsOverTheList() {
+        let recorder = Recorder()
+        let front = FrontApp()
+        for app in [Self.game, Self.notes] {
+            front.activate(app)
+            let engine = Self.makeEngine(recorder, front: front, Self.settings(enabled: false))
+            #expect(engine.handle(.otherMouseDown, Self.press()) != nil)
+            #expect(engine.handle(.otherMouseUp, Self.release()) != nil)
+        }
+        #expect(recorder.calls.isEmpty)
+
+        // Turned back on while a listed app is in front, Whisker still leaves that app alone.
+        front.activate(Self.game)
+        let engine = Self.makeEngine(recorder, front: front, Self.settings(enabled: false))
+        engine.update(Self.settings())
+        #expect(engine.handle(.otherMouseDown, Self.press()) != nil)
+        #expect(engine.handle(.otherMouseUp, Self.release()) != nil)
+        front.activate(Self.notes)
+        #expect(engine.handle(.otherMouseDown, Self.press()) == nil)
+        #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+    }
+}

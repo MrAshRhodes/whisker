@@ -51,6 +51,7 @@
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#wheel-actions">Wheel actions</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
+          <li><a href="#application-bypass">Application bypass</a></li>
           <li><a href="#settings-file">Settings file</a></li>
           <li><a href="#updates">Updates</a></li>
           <li><a href="#switching-installs">Switching installs</a></li>
@@ -104,6 +105,8 @@ make app</code></pre>
             <tbody>
               <tr><th scope="row">Enabled</th><td>Switches Whisker on or off. When it's off, clicks and scrolls pass straight through, anything held is released, and your Mac's own pointer speed and acceleration come back. Switching on applies your settings again.</td></tr>
               <tr><th scope="row">Profile: <i>name</i></th><td>The profile in use for the app in front. Shows <span class="ui">Grant Accessibility Access…</span> instead when access is missing.</td></tr>
+              <tr><th scope="row">Bypassed for <i>app</i></th><td>Shown instead of the profile while an app on your <a href="#application-bypass">bypass list</a> is in front. Whisker is standing aside for it, and <span class="ui">Enabled</span> is unchanged.</td></tr>
+              <tr><th scope="row">Pointer settings couldn't be restored…</th><td>Appears when macOS wouldn't take a mouse's pointer speed or acceleration back. It opens <span class="ui">Settings › Pointer</span>, and Whisker keeps trying.</td></tr>
               <tr><th scope="row">Settings…</th><td>Opens the settings window.</td></tr>
               <tr><th scope="row">Check for Updates…</th><td>Looks for a new version now. See <a href="#updates">Updates</a>.</td></tr>
               <tr><th scope="row">About Whisker</th><td>Version, licence and links.</td></tr>
@@ -191,8 +194,8 @@ make app</code></pre>
             <li><span class="ui">Linear (no acceleration)</span>, so the pointer moves the same distance however fast you move.</li>
           </ul>
           <p>If you more than double the speed, Whisker asks <span class="ui">Keep this pointer speed? It changes back in a few seconds otherwise.</span> Choose <span class="ui">Keep</span>, or wait five seconds or choose <span class="ui">Revert</span> to go back. This saves you from a pointer too fast to reach the button.</p>
-          <p>Whisker applies your settings again when the mouse reconnects. Switching Whisker off or quitting it puts your Mac's own settings back, and if Whisker ever stops unexpectedly, it puts them back the next time it opens.</p>
-          <p>Some mice don't accept pointer changes. If so, Whisker shows <span class="ui">macOS didn't accept a pointer change for this mouse.</span></p>
+          <p>Whisker applies your settings again when the mouse reconnects. Switching Whisker off, quitting it, or bringing an app on your <a href="#application-bypass">bypass list</a> to the front puts your Mac's own settings back, and if Whisker ever stops unexpectedly, it puts them back the next time it opens.</p>
+          <p>Some mice don't accept pointer changes. If so, Whisker shows <span class="ui">macOS didn't accept a pointer change for this mouse.</span> If a mouse won't take its own settings back, Whisker says so and keeps trying; see <a href="#troubleshooting">Troubleshooting</a>.</p>
         </section>
 
         <section aria-labelledby="profiles">
@@ -205,6 +208,23 @@ make app</code></pre>
           <p>When you use your mouse, Whisker picks the most specific profile that matches: this mouse in this app, then this app, then this mouse, then Default. The menu shows which one is in use.</p>
           <p>A profile only holds what it changes. Its mappings sit on top of Default's: one with the same trigger and modifier keys replaces Default's, and the rest are inherited. To switch off an inherited mapping in one app, map the same trigger to <span class="ui">Default</span>. A profile with its own scrolling settings replaces Default's scrolling settings as a whole.</p>
           <p>You can delete app profiles; the Default profile stays.</p>
+        </section>
+
+        <section aria-labelledby="application-bypass">
+          <h2 id="application-bypass">Application bypass</h2>
+          <p>If an app, such as a game, should get your mouse exactly as macOS delivers it, you can tell Whisker to stand aside while that app is in front. Add the app under <span class="ui">Settings › Applications › Application Bypass</span> with <span class="ui">Bypass Running App</span> or <span class="ui">Choose App to Bypass…</span>, or tick <span class="ui">Bypass Whisker in this application</span> on an app profile. It covers every mouse, and changes to the list apply straight away.</p>
+          <ul>
+            <li>What stops: button remapping, wheel actions and scroll changes. Each mouse's own pointer speed and acceleration come back from the system too.</li>
+            <li>What doesn't change: your profiles and the <span class="ui">Enabled</span> switch stay as they are. Bypass never turns Whisker on, so if Whisker is off it stays off. The menu shows <span class="ui">Bypassed for <i>app</i></span> separately from <span class="ui">Enabled</span>.</li>
+            <li>When the app comes forward: anything Whisker was holding, such as a button held down for a drag or a shortcut that's repeating, is let go once. The real release that follows isn't passed on to an app that never saw the press.</li>
+            <li>When you switch to another app: your latest settings apply again. Anything you edit in the meantime waits until then.</li>
+            <li>If Whisker can't tell which app is in front: an app without a readable identifier changes nothing. Whisker stays out of the way if the app before it was bypassed, and keeps working if it wasn't, until an app it can identify comes forward. Sleep, switching users and quitting an app don't change this either.</li>
+            <li>Permissions: bypass works with or without Input Monitoring, and it doesn't change which permissions Whisker needs.</li>
+            <li>If a mouse won't take its values back: Whisker says so in the menu and in <span class="ui">Settings</span>, keeps the record of the original values and tries again, including the next time it starts.</li>
+          </ul>
+          <div class="callout-note">
+            <p>Whisker can see which app is in front, not what a game does with its input. Application bypass isn't a raw-input mode. It doesn't change Game Mode, doesn't make a game accept synthetic clicks or keys, and can't promise compatibility with anti-cheat software. A launcher and the game it starts can be separate apps, and which one is in front while you play hasn't been verified on hardware for particular games, so add whichever one is. Opening a Whisker window brings Whisker to the front, which ends the bypass until you switch back.</p>
+          </div>
         </section>
 
         <section aria-labelledby="settings-file">
@@ -277,6 +297,10 @@ make app</code></pre>
           <p>Your mouse may send smooth scrolling rather than notches. Also check that the keys aren't the same ones that scroll sideways and that no wheel action is set on them.</p>
           <h3>Pointer speed won't change</h3>
           <p>Some mice don't accept pointer changes from macOS. Whisker tells you when that happens.</p>
+          <h3>Whisker still changes my mouse in an app I've bypassed</h3>
+          <p>Bypass follows the app that's in front, which for a game may be its launcher or its own program. Add the one that's in front while you play. Opening a Whisker window ends the bypass until you switch back. See <a href="#application-bypass">Application bypass</a>.</p>
+          <h3>The menu says pointer settings couldn't be restored</h3>
+          <p>macOS wouldn't take Whisker's pointer speed or acceleration off a mouse, so it may still be in use. Whisker keeps the original values and tries again each time the app in front or your settings change, and the next time it starts. <span class="ui">Settings › Pointer</span> shows which mouse.</p>
           <h3>Settings say changes won't be saved</h3>
           <p>Whisker couldn't read your settings file, so it's protecting it. Check the file's permissions, or move it somewhere safe, then quit and reopen Whisker. See <a href="#settings-file">Settings file</a>.</p>
           <p>Still stuck? <a href="https://github.com/MrAshRhodes/whisker/issues">Open an issue on GitHub</a>.</p>

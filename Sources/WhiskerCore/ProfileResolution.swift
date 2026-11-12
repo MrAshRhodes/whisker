@@ -106,6 +106,7 @@ extension WhiskerSettings {
 public final class CompiledSettings: @unchecked Sendable {
     public let settings: WhiskerSettings
     private let resolvedByID: [String: ResolvedProfile]
+    private let bypassApps: Set<String>
     private var cache: [CacheKey: String] = [:]
     private let lock = NSLock()
 
@@ -124,9 +125,16 @@ public final class CompiledSettings: @unchecked Sendable {
             resolved[Profile.defaultID] = settings.resolvedProfile(id: Profile.defaultID)
         }
         resolvedByID = resolved
+        bypassApps = Set(settings.general.bypassApps)
     }
 
     public var general: GeneralSettings { settings.general }
+
+    /// Same answer as `WhiskerSettings.isBypassed(app:)`, as a set lookup for the event tap.
+    public func isBypassed(app: String?) -> Bool {
+        guard let app else { return false }
+        return bypassApps.contains(app)
+    }
 
     public func profile(device: String?, app: String?) -> ResolvedProfile {
         let key = CacheKey(device: device, app: app)

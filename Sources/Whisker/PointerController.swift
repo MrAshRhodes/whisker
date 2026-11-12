@@ -28,6 +28,9 @@ final class PointerController: ObservableObject {
     @Published private(set) var pending: PendingChange?
     /// Devices whose service refused a write, so the Pointer pane can say speed can't be changed.
     @Published private(set) var unsupported: Set<String> = []
+    /// Devices whose original pointer values couldn't be put back, so Whisker can say its values may still be
+    /// in use. The originals stay on record and the restore is tried again.
+    @Published private(set) var restoreFailures: Set<String> = []
 
     /// What was last written to a device, and to which services, so unchanged settings aren't rewritten.
     private struct Applied: Equatable {
@@ -51,12 +54,16 @@ final class PointerController: ObservableObject {
     /// Writes the settings for every connected device; restores devices whose pointer settings were cleared or
     /// switched off, including while Whisker as a whole is switched off.
     ///
+    /// While `bypassed` (an app on the bypass list is in front) nothing is wanted, so every device gets its
+    /// original values back; the latest settings are written when the app leaves the front. Writes happen
+    /// synchronously on the main actor, so whichever call comes last decides what the device ends up with.
+    ///
     /// A device is written again after it disconnects or its services change, and after a failed write.
-    func apply(_ settings: WhiskerSettings, connected: [ConnectedDevice]) {
+    func apply(_ settings: WhiskerSettings, connected: [ConnectedDevice], bypassed: Bool = false) {
         let present = Set(connected.filter { !$0.isExcluded }.map(\.id))
         applied = applied.filter { present.contains($0.key) }
         for device in connected where !device.isExcluded {
-            let wanted = settings.activePointer(for: device.id)
+            let wanted = bypassed ? nil : settings.activePointer(for: device.id)
             let target = Applied(pointer: wanted, services: hardware.serviceIDs(for: device.id))
             guard applied[device.id] != target else { continue }
             if let wanted {
@@ -65,7 +72,8 @@ final class PointerController: ObservableObject {
                     continue
                 }
             } else if originals[device.id] != nil {
-                restore(device.id)
+                // Left unapplied, so the next call tries again.
+                guard restore(device.id) else { continue }
             }
             applied[device.id] = target
         }
@@ -116,31 +124,48 @@ final class PointerController: ObservableObject {
             Log.pointer.notice("No pointer service found for \(device.id, privacy: .public)")
             return false
         }
+        var recordedNow = false
         if originals[device.id] == nil {
             originals[device.id] = current
             onOriginalsChange?(originals)
+            recordedNow = true
         }
         let native = originals[device.id]?.resolution.map { PointerMath.fromIOFixed($0) }
         let resolution = PointerMath.ioFixed(PointerMath.resolution(forSpeed: pointer.speed, nativeResolution: native))
         let acceleration = PointerMath.ioFixed(PointerMath.acceleration(pointer.acceleration, linear: pointer.linear))
         if hardware.write(resolution: Int64(resolution), acceleration: Int64(acceleration), to: device.id) {
             unsupported.remove(device.id)
+            restoreFailures.remove(device.id)
             Log.pointer.info("Pointer for \(device.id, privacy: .public): speed \(pointer.speed), acceleration \(pointer.linear ? -1 : pointer.acceleration)")
             return true
         }
         unsupported.insert(device.id)
         Log.pointer.error("The system refused pointer settings for \(device.id, privacy: .public)")
+        // A first write that was refused without changing anything leaves nothing to put back later.
+        if recordedNow, hardware.currentValues(of: device.id) == current {
+            originals[device.id] = nil
+            onOriginalsChange?(originals)
+        }
         return false
     }
 
-    private func restore(_ deviceID: String) {
-        guard let original = originals[deviceID] else { return }
+    /// Puts a device's recorded values back. When the system refuses, the record stays (so a later attempt,
+    /// or the next launch, can finish the job) and the device is reported in `restoreFailures`.
+    @discardableResult
+    private func restore(_ deviceID: String) -> Bool {
+        guard let original = originals[deviceID] else { return true }
         let resolution = original.resolution ?? Int64(PointerMath.ioFixed(PointerMath.standardResolution))
-        _ = hardware.write(resolution: resolution, acceleration: original.acceleration, to: deviceID)
-        originals[deviceID] = nil
         applied[deviceID] = nil
+        guard hardware.write(resolution: resolution, acceleration: original.acceleration, to: deviceID) else {
+            restoreFailures.insert(deviceID)
+            Log.pointer.error("Couldn’t put the pointer back for \(deviceID, privacy: .public); keeping its original values on record")
+            return false
+        }
+        originals[deviceID] = nil
+        restoreFailures.remove(deviceID)
         onOriginalsChange?(originals)
         Log.pointer.info("Restored pointer for \(deviceID, privacy: .public)")
+        return true
     }
 }
 

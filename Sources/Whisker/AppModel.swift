@@ -48,6 +48,9 @@ final class AppModel: ObservableObject {
     let engine: EventEngine
 
     @Published private(set) var engineRunning = false
+    /// The app in front while it's on the bypass list and Whisker stands aside for it. Separate from the master
+    /// switch, which stays as it was and still wins. Never saved: it follows the app in front.
+    @Published private(set) var bypassedApp: String?
     @Published var selectedPane: SettingsPane = .general
     @Published var selectedProfileID: String = Profile.defaultID
     /// While true the event tap lets everything through, so the settings window can see a button press.
@@ -87,6 +90,13 @@ final class AppModel: ObservableObject {
         store.settings.matchingProfile(device: nil, app: frontApp.frontmostBundleID).name
     }
 
+    /// Name of the app Whisker is standing aside for, for the menu. Nil while Whisker is switched off, because
+    /// then it isn't the bypass that's keeping it out of the way.
+    var bypassedAppName: String? {
+        guard isEnabled, let bypassedApp else { return nil }
+        return appName(forBundleID: bypassedApp)
+    }
+
     func start() {
         let leftovers = !runState.cleanExit && !runState.originalPointers.isEmpty
         runState.cleanExit = false
@@ -102,9 +112,18 @@ final class AppModel: ObservableObject {
         }
 
         frontApp.start()
+        refreshBypass(using: store.settings)
+        // Set after `start()`, which reads the app already in front; the first settings update below acts on it.
+        frontApp.onChange = { [weak self] in
+            guard let self else { return }
+            self.engine.frontmostAppChanged()
+            self.refreshBypass(using: self.store.settings)
+            self.applyPointers(self.store.settings)
+            self.onStatusChange?()
+        }
         devices.onChange = { [weak self] connected in
             guard let self else { return }
-            self.pointer.apply(self.store.settings, connected: connected)
+            self.applyPointers(self.store.settings, connected: connected)
         }
         devices.start()
         if leftovers {
@@ -117,9 +136,18 @@ final class AppModel: ObservableObject {
             .sink { [weak self] settings in
                 guard let self else { return }
                 self.engine.update(settings)
-                self.pointer.apply(settings, connected: self.devices.devices)
+                self.refreshBypass(using: settings)
+                self.applyPointers(settings)
                 self.onStatusChange?()
             }
+            .store(in: &cancellables)
+
+        // `@Published` announces before it stores, so wait a turn for the menu to read the new value.
+        pointer.$restoreFailures
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.onStatusChange?() }
             .store(in: &cancellables)
 
         permission.onChange = { [weak self] trusted in
@@ -135,9 +163,6 @@ final class AppModel: ObservableObject {
                 self?.engine.releaseAll()
             })
         }
-        observers.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onStatusChange?() }
-        })
         Log.app.info("Whisker \(AppInfo.version, privacy: .public) started; accessibility \(self.permission.isTrusted ? "granted" : "not granted", privacy: .public)")
     }
 
@@ -157,15 +182,49 @@ final class AppModel: ObservableObject {
         Log.app.info("Whisker \(enabled ? "enabled" : "disabled", privacy: .public)")
     }
 
+    /// Puts an app on the bypass list or takes it off. The settings update that follows applies it at once.
+    func setBypass(_ bundleID: String, _ bypassed: Bool) {
+        store.settings.general.setBypassed(bundleID, bypassed)
+    }
+
+    /// The name people know an app by, or its bundle identifier when it isn't installed.
+    func appName(forBundleID bundleID: String) -> String {
+        if let name = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.localizedName {
+            return name
+        }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return bundleID }
+        let name = FileManager.default.displayName(atPath: url.path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
+    }
+
     func shutdown() {
         permission.stopPolling()
         engine.stop()
         pointer.restoreAll()
-        runState.cleanExit = true
-        runState.originalPointers = [:]
+        // A mouse that wouldn't take its values back keeps its record, so the next launch tries again.
+        runState.originalPointers = pointer.originals
+        runState.cleanExit = pointer.originals.isEmpty
         store.saveRunState(runState)
         store.saveNow()
         Log.app.info("Whisker quit")
+    }
+
+    /// Follows the app in front. Takes the settings as an argument because the store's copy is one step behind
+    /// while it is publishing a change.
+    private func refreshBypass(using settings: WhiskerSettings) {
+        let front = frontApp.frontmostBundleID
+        let app = settings.isBypassed(app: front) ? front : nil
+        guard app != bypassedApp else { return }
+        bypassedApp = app
+        if let app {
+            Log.app.info("Standing aside for \(app, privacy: .public)")
+        } else {
+            Log.app.info("No longer standing aside")
+        }
+    }
+
+    private func applyPointers(_ settings: WhiskerSettings, connected: [ConnectedDevice]? = nil) {
+        pointer.apply(settings, connected: connected ?? devices.devices, bypassed: bypassedApp != nil)
     }
 
     // MARK: Editing helpers

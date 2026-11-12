@@ -119,6 +119,9 @@ public struct EventProcessor: Sendable {
     public static let wheelBurstGap: TimeInterval = 0.13
 
     private var held: [Int: Action] = [:]
+    /// Buttons still physically down whose press Whisker swallowed before it stood aside for an app. The
+    /// app never saw them go down, so it mustn't see them go up or drag either.
+    private var orphaned: Set<Int> = []
     private var lastWheelEvent: [MappingKey: TimeInterval] = [:]
     private var notchTimes: [TimeInterval] = []
     private var scaler = ScrollScaler()
@@ -142,16 +145,27 @@ public struct EventProcessor: Sendable {
     public mutating func releaseAll() -> [(button: Int, action: Action)] {
         let released = held.sorted { $0.key < $1.key }.filter { $0.value.followsTrigger }.map { (button: $0.key, action: $0.value) }
         held.removeAll()
+        orphaned.removeAll()
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
         scaler.reset()
         return released
     }
 
+    /// Like `releaseAll()`, for the moment Whisker stands aside for an app. Buttons still down keep being
+    /// swallowed (and their drags become plain movement) until they come up, so the app only ever sees
+    /// button events whose press it saw.
+    public mutating func releaseAllForBypass() -> [(button: Int, action: Action)] {
+        let buttons = orphaned.union(held.keys)
+        let released = releaseAll()
+        orphaned = buttons
+        return released
+    }
+
     // MARK: Buttons
 
     private func isActive(_ event: InputEvent, _ settings: CompiledSettings) -> Bool {
-        guard settings.general.enabled else { return false }
+        guard settings.general.enabled, !settings.isBypassed(app: event.app) else { return false }
         if let id = event.device?.id, settings.settings.devices[id]?.enabled == false { return false }
         return true
     }
@@ -167,6 +181,7 @@ public struct EventProcessor: Sendable {
     private mutating func buttonDown(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
         // A down without an up (missed event): finish the old one first by treating it as released.
         held[button] = nil
+        orphaned.remove(button)
         guard isActive(event, settings) else { return .passThrough }
         guard let mapping = lookup(.button(button), event, settings, exactOnly: false) else { return .passThrough }
         // The primary button with no modifiers is the way back if a mapping goes wrong.
@@ -179,12 +194,14 @@ public struct EventProcessor: Sendable {
     }
 
     private mutating func buttonUp(_ button: Int) -> EventPlan {
-        guard let action = held.removeValue(forKey: button) else { return .passThrough }
+        guard let action = held.removeValue(forKey: button) else {
+            return orphaned.remove(button) != nil ? .swallow : .passThrough
+        }
         return action.followsTrigger ? .perform(action, .up) : .swallow
     }
 
     private func dragged(_ button: Int) -> EventPlan {
-        guard let action = held[button] else { return .passThrough }
+        guard let action = held[button] else { return orphaned.contains(button) ? .dragAsMove : .passThrough }
         if case let .click(target, modifiers) = action { return .dragAs(button: target, modifiers: modifiers) }
         return .dragAsMove
     }
