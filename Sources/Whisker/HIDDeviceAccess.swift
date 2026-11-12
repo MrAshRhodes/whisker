@@ -15,6 +15,15 @@ struct HIDElementDescription: Hashable {
     /// can be told from a keyboard's on the same interface.
     var topLevelUsagePage = 0
     var topLevelUsage = 0
+    var cookie: UInt32 = 0
+    var hasKeyboardCollection = false
+    var isArray = false
+
+    var discoveryElement: ExtraButtonElement {
+        ExtraButtonElement(kind: kind, page: usagePage, usage: usage, minimum: logicalMin, maximum: logicalMax,
+                           reportID: reportID, topPage: topLevelUsagePage, topUsage: topLevelUsage,
+                           keyboardCollection: hasKeyboardCollection, isArray: isArray)
+    }
 }
 
 /// When one input report arrived, as the HID stack stamped it. Deliberately nothing else about the report:
@@ -56,12 +65,20 @@ protocol HIDDeviceAccess: AnyObject {
     func observeReports(of runtimeID: Int, onReport: @escaping @Sendable (HIDReportTiming) -> Void, onEnd: @escaping () -> Void) -> Bool
     /// Stops listening and releases the connection. Safe to repeat, and to call for a device never observed.
     func stopObservingReports(of runtimeID: Int)
+    /// A bounded queue containing only the explicitly selected safe Button/Consumer elements. Main-thread
+    /// callbacks include releases; no report callback, get-report request or keyboard stream is installed.
+    func observeExtraButtonValues(of runtimeID: Int, indexes: [Int],
+                                  onValue: @escaping (ExtraButtonObservation) -> Void, onEnd: @escaping () -> Void) -> Bool
+    func stopObservingExtraButtonValues(of runtimeID: Int)
 }
 
 extension HIDDeviceAccess {
     // Defaults so an implementation that only describes and reads (a test fake, say) doesn't have to listen.
     func observeReports(of runtimeID: Int, onReport: @escaping @Sendable (HIDReportTiming) -> Void, onEnd: @escaping () -> Void) -> Bool { false }
     func stopObservingReports(of runtimeID: Int) {}
+    func observeExtraButtonValues(of runtimeID: Int, indexes: [Int],
+                                  onValue: @escaping (ExtraButtonObservation) -> Void, onEnd: @escaping () -> Void) -> Bool { false }
+    func stopObservingExtraButtonValues(of runtimeID: Int) {}
 }
 
 /// IOKit's implementation. Reads go to a utility queue because reading a feature element can block.
@@ -69,6 +86,7 @@ final class IOKitHIDAccess: HIDDeviceAccess {
     private var devices: [Int: IOHIDDevice] = [:]
     private var elementCache: [Int: [IOHIDElement]] = [:]
     private var observations: [Int: (observation: HIDReportObservation, onEnd: () -> Void)] = [:]
+    private var valueObservations: [Int: (observation: HIDExtraButtonObservation, onEnd: () -> Void)] = [:]
     private var nextID = 0
     private let queue = DispatchQueue(label: "io.github.mrashrhodes.whisker.hid-read", qos: .utility)
 
@@ -81,6 +99,10 @@ final class IOKitHIDAccess: HIDDeviceAccess {
     func forget(runtimeID: Int) {
         devices[runtimeID] = nil
         elementCache[runtimeID] = nil
+        if let ended = valueObservations.removeValue(forKey: runtimeID) {
+            ended.observation.stop()
+            DispatchQueue.main.async(execute: ended.onEnd)
+        }
         if let ended = observations.removeValue(forKey: runtimeID) {
             ended.observation.stop()
             DispatchQueue.main.async(execute: ended.onEnd)
@@ -92,16 +114,31 @@ final class IOKitHIDAccess: HIDDeviceAccess {
               let elements = IOHIDDeviceCopyMatchingElements(device, nil, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement]
         else { return nil }
         elementCache[runtimeID] = elements
-        return elements.map {
-            let top = Self.topLevelCollection(of: $0)
-            return HIDElementDescription(
-                kind: HIDElementKind(ioKitType: Int(IOHIDElementGetType($0).rawValue)),
-                usagePage: Int(IOHIDElementGetUsagePage($0)), usage: Int(IOHIDElementGetUsage($0)),
-                logicalMin: IOHIDElementGetLogicalMin($0), logicalMax: IOHIDElementGetLogicalMax($0),
-                reportID: Int(IOHIDElementGetReportID($0)),
-                topLevelUsagePage: top.page, topLevelUsage: top.usage
-            )
+        return elements.map(Self.describe)
+    }
+
+    static func describe(_ element: IOHIDElement) -> HIDElementDescription {
+        let top = Self.topLevelCollection(of: element)
+        return HIDElementDescription(
+            kind: HIDElementKind(ioKitType: Int(IOHIDElementGetType(element).rawValue)),
+            usagePage: Int(IOHIDElementGetUsagePage(element)), usage: Int(IOHIDElementGetUsage(element)),
+            logicalMin: IOHIDElementGetLogicalMin(element), logicalMax: IOHIDElementGetLogicalMax(element),
+            reportID: Int(IOHIDElementGetReportID(element)),
+            topLevelUsagePage: top.page, topLevelUsage: top.usage,
+            cookie: IOHIDElementGetCookie(element), hasKeyboardCollection: keyboardAncestor(of: element),
+            isArray: IOHIDElementIsArray(element)
+        )
+    }
+
+    private static func keyboardAncestor(of element: IOHIDElement) -> Bool {
+        var current = element
+        for _ in 0..<16 {
+            let page = IOHIDElementGetUsagePage(current), usage = IOHIDElementGetUsage(current)
+            if page == 0x07 || (page == 1 && [6, 7].contains(usage)) { return true }
+            guard let parent = IOHIDElementGetParent(current) else { return false }
+            current = parent
         }
+        return true
     }
 
     /// The usage of the outermost collection an element belongs to. (0, 0) when the chain doesn't end in a
@@ -128,6 +165,24 @@ final class IOKitHIDAccess: HIDDeviceAccess {
 
     func stopObservingReports(of runtimeID: Int) {
         observations.removeValue(forKey: runtimeID)?.observation.stop()
+    }
+
+    func observeExtraButtonValues(of runtimeID: Int, indexes: [Int],
+                                  onValue: @escaping (ExtraButtonObservation) -> Void, onEnd: @escaping () -> Void) -> Bool {
+        guard valueObservations[runtimeID] == nil, let device = devices[runtimeID],
+              let cached = elementCache[runtimeID], !indexes.isEmpty,
+              cached.count <= ExtraButtonDiscovery.maximumElements,
+              indexes.allSatisfy({ cached.indices.contains($0) && Self.describe(cached[$0]).discoveryElement.observationAllowed }),
+              let observation = HIDExtraButtonObservation(
+                listeningTo: device, runtimeID: runtimeID,
+                selected: indexes.map { ($0, Self.describe(cached[$0])) }, onValue: onValue, onEnd: onEnd)
+        else { return false }
+        valueObservations[runtimeID] = (observation, onEnd)
+        return true
+    }
+
+    func stopObservingExtraButtonValues(of runtimeID: Int) {
+        valueObservations.removeValue(forKey: runtimeID)?.observation.stop()
     }
 
     func readValues(of runtimeID: Int, indexes: [Int], completion: @escaping ([Int?]) -> Void) {

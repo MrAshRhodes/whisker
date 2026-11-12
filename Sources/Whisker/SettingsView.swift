@@ -821,6 +821,7 @@ struct DevicesPane: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var devices: DeviceMonitor
     @StateObject private var timingSheet = InputTimingSheetState()
+    @StateObject private var discoverySheet = InputTimingSheetState()
 
     private var remembered: [(id: String, settings: DeviceSettings)] {
         let connected = Set(devices.devices.map(\.id))
@@ -843,7 +844,8 @@ struct DevicesPane: View {
                     } else {
                         deviceRow(
                             details, name: details.name, onOpen: { devices.refreshControls() },
-                            onTiming: { timingSheet.present(deviceID: details.id, name: details.name) }
+                            onTiming: { timingSheet.present(deviceID: details.id, name: details.name) },
+                            onDiscovery: { discoverySheet.present(deviceID: details.id, name: details.name) }
                         )
                     }
                 }
@@ -877,13 +879,22 @@ struct DevicesPane: View {
                 onClose: { timingSheet.isPresented = false }
             )
         }
+        .sheet(isPresented: $discoverySheet.isPresented, onDismiss: { model.extraButtonDiscovery.stop() }) {
+            ExtraButtonDiscoverySheet(
+                discovery: model.extraButtonDiscovery,
+                settings: model.deviceBinding(discoverySheet.deviceID, name: discoverySheet.deviceName),
+                deviceID: discoverySheet.deviceID, deviceName: discoverySheet.deviceName,
+                requestPermission: { devices.requestIdentification() },
+                onClose: { discoverySheet.isPresented = false }
+            )
+        }
     }
 
     /// `name` is what a new profile or first saved setting for the mouse is called; the row shows `details.name`.
     /// `onTiming` is only given for a connected mouse Whisker doesn't leave alone: it opens the opt-in Input Timing sheet.
     @ViewBuilder private func deviceRow(
         _ details: DeviceDetails, name: String, onOpen: @escaping () -> Void = {}, onTiming: (() -> Void)? = nil,
-        forget: (() -> Void)? = nil
+        onDiscovery: (() -> Void)? = nil, forget: (() -> Void)? = nil
     ) -> some View {
         let id = details.id
         let binding = model.deviceBinding(id, name: name)
@@ -921,6 +932,10 @@ struct DevicesPane: View {
                 }
             }
             if binding.wrappedValue.enabled {
+                if let onDiscovery {
+                    Button("Extra Button Discovery…", action: onDiscovery)
+                        .help("Opt-in read-only metadata and filtered value diagnostics. No vendor remapping.")
+                }
                 Toggle("Reverse vertical scrolling", isOn: binding.wheel.invertVertical)
                 Toggle("Reverse horizontal scrolling", isOn: binding.wheel.invertHorizontal)
                 ButtonSwapControls(store: store, devices: devices, id: id, name: name)

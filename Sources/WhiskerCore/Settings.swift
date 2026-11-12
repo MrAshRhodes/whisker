@@ -115,12 +115,16 @@ public struct DeviceSettings: Equatable, Sendable {
     /// Opt-in: this mouse's primary and secondary buttons trade places, as one pair (see `ButtonSwap`). It only acts
     /// while "Allow remapping the primary button" is on.
     public var swapPrimarySecondary: Bool
+    public var extraButtons: ExtraButtonSettings
+    /// Reserved, opaque namespaced mapping records. No adapter is approved and these are never executed.
+    public var extraButtonMappings: [String: JSONValue]
 
     public init(
         name: String = "", enabled: Bool = true, pointer: PointerSettings? = nil, wheel: WheelSettings = WheelSettings(),
         clickDebounce: ClickDebounceSettings? = nil, controlLabels: [ControlLabel] = [],
         pointerPresets: [PointerPreset] = [], activePointerPresetID: String? = nil, rotationDegrees: Double = 0,
-        swapPrimarySecondary: Bool = false
+        swapPrimarySecondary: Bool = false, extraButtons: ExtraButtonSettings = ExtraButtonSettings(),
+        extraButtonMappings: [String: JSONValue] = [:]
     ) {
         self.name = name
         self.enabled = enabled
@@ -132,6 +136,8 @@ public struct DeviceSettings: Equatable, Sendable {
         self.activePointerPresetID = activePointerPresetID
         self.rotationDegrees = PointerOrientationMath.normalisedDegrees(rotationDegrees) ?? rotationDegrees
         self.swapPrimarySecondary = swapPrimarySecondary
+        self.extraButtons = extraButtons
+        self.extraButtonMappings = extraButtonMappings
     }
 }
 
@@ -382,6 +388,7 @@ extension DeviceSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case name, enabled, pointer, wheel, clickDebounce, controlLabels, pointerPresets, activePointerPresetID, rotationDegrees
         case swapPrimarySecondary
+        case extraButtons, extraButtonMappings
     }
 
     public init(from decoder: Decoder) throws {
@@ -400,6 +407,8 @@ extension DeviceSettings: Codable {
         }
         rotationDegrees = normalised
         swapPrimarySecondary = try c.decodeIfPresent(Bool.self, forKey: .swapPrimarySecondary) ?? false
+        extraButtons = try c.decodeIfPresent(ExtraButtonSettings.self, forKey: .extraButtons) ?? ExtraButtonSettings()
+        extraButtonMappings = try c.decodeIfPresent([String: JSONValue].self, forKey: .extraButtonMappings) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -417,6 +426,8 @@ extension DeviceSettings: Codable {
         }
         if angle != 0 { try c.encode(angle, forKey: .rotationDegrees) }
         if swapPrimarySecondary { try c.encode(true, forKey: .swapPrimarySecondary) }
+        if extraButtons.discoveryEnabled { try c.encode(extraButtons, forKey: .extraButtons) }
+        if !extraButtonMappings.isEmpty { try c.encode(extraButtonMappings, forKey: .extraButtonMappings) }
     }
 }
 

@@ -373,3 +373,15 @@ extension DeviceMonitor: InputTimingSource {
         .sorted { $0.runtimeID < $1.runtimeID }
     }
 }
+
+protocol ExtraButtonSource: InputTimingSource {
+    /// Existing enumeration metadata only: this must never open the keyboard manager.
+    func discoveryMetadata(ofDevice id: String) -> [HIDInterfaceInfo]
+}
+
+extension DeviceMonitor: ExtraButtonSource {
+    func discoveryMetadata(ofDevice id: String) -> [HIDInterfaceInfo] {
+        guard let device = devices.first(where: { $0.id == id }) else { return [] }
+        return interfaces.values.filter { device.physicalKeys.contains($0.physicalKey) }
+    }
+}

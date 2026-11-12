@@ -45,6 +45,7 @@ final class AppModel: ObservableObject {
     let devices: DeviceMonitor
     /// The opt-in Input Timing sheet in Devices. Idle, and listening to no device, until the user starts a sample.
     let inputTiming: InputTimingController
+    let extraButtonDiscovery: ExtraButtonDiscoveryController
     let frontApp = FrontAppMonitor()
     let pointer: PointerController
     let wheel: WheelController
@@ -97,6 +98,10 @@ final class AppModel: ObservableObject {
             access: hidAccess, source: devices,
             permissionGranted: { DeviceMonitor.inputMonitoringAllowed },
             requestAccess: { devices.requestIdentification() }
+        )
+        extraButtonDiscovery = ExtraButtonDiscoveryController(
+            access: hidAccess, source: devices, permission: { DeviceMonitor.inputMonitoringAllowed },
+            settings: { store.settings }
         )
         let pointer = PointerController(originals: runState.originalPointers, store: store, connected: { devices.devices })
         self.pointer = pointer
@@ -191,6 +196,7 @@ final class AppModel: ObservableObject {
         frontApp.onChange = { [weak self] in
             guard let self else { return }
             self.engine.frontmostAppChanged()
+            self.extraButtonDiscovery.stop(reason: "Active app/profile changed. Observations cleared.")
             self.refreshBypass(using: self.store.settings)
             self.applyPointers(self.store.settings)
             self.onStatusChange?()
@@ -198,6 +204,7 @@ final class AppModel: ObservableObject {
         frontApp.onActivation = { [weak self] in self?.engine.applicationActivated() }
         devices.onChange = { [weak self] connected in
             guard let self else { return }
+            self.extraButtonDiscovery.environmentChanged()
             self.pointer.devicesChanged(connected, bypassed: self.bypassedApp != nil)
             self.wheel.apply(self.store.settings, connected: connected, bypassed: self.bypassedApp != nil)
             self.engine.devicesChanged(connected: Set(connected.filter { !$0.isExcluded }.map(\.id)))
@@ -217,6 +224,7 @@ final class AppModel: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] settings in
                 guard let self else { return }
+                self.extraButtonDiscovery.stop(reason: "Settings/profile changed. Inspect starts a new session.")
                 self.devices.setTrackingMotion(settings.usesMotionActions)
                 self.engine.update(settings)
                 self.refreshBypass(using: settings)
@@ -257,6 +265,7 @@ final class AppModel: ObservableObject {
                 self?.engine.releaseAll(because: .sleep)
                 MainActor.assumeIsolated { self?.cancelSlowPointer() }
                 MainActor.assumeIsolated { self?.inputTiming.interrupt(.sleep) }
+                MainActor.assumeIsolated { self?.extraButtonDiscovery.stop(reason: "Sleep or user switch. Observations cleared.") }
             })
         }
         // An auto-scroll is anchored to a spot on a display and a Space, and a change to either leaves that spot
@@ -409,6 +418,7 @@ final class AppModel: ObservableObject {
 
     func shutdown() {
         inputTiming.shutdown()
+        extraButtonDiscovery.stop()
         for id in Array(clickFilterTrials.keys) { revertClickFilter(device: id) }
         for id in Array(swapTrials.keys) { revertSwap(device: id) }
         permission.stopPolling()

@@ -167,6 +167,10 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   if you cancel or close the window. It is not the mouse's polling rate, latency, packet loss or
   the rate a game sees, and it has not yet been verified on hardware, wired or with a wireless
   receiver. See [Input timing](#input-timing).
+- **Extra button discovery (opt-in diagnostic).** Inspect one mouse's HID collections and
+  Button/Consumer controls in Devices. Safe, attributable values can be labelled observed;
+  unsupported and ambiguous controls stay metadata-only. This does not enable extra-button
+  remapping or vendor protocols. See [Extra button discovery](#extra-button-discovery).
 - **Duplicate clicks (advanced, off by default).** For one mouse and the buttons you choose,
   Whisker can ignore a press that follows the previous click within a very short time (20 to
   100 ms, 50 ms to start) and is let go just as quickly, dropping the press and its release
@@ -209,9 +213,11 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   can replace them with the actions you choose, and macOS only allows that for apps you have
   approved under Accessibility. Whisker does not read what you type.
 - Optionally, **Input Monitoring**, only if you want different settings for several mice that
-  are connected at the same time, or to run the opt-in [Input timing](#input-timing) sample,
+  are connected at the same time, or to run the opt-in [Input timing](#input-timing) sample
+  or [Extra button discovery](#extra-button-discovery),
   which asks for it only when you choose **Allow Input Monitoring…** in its window. With one
-  mouse, Whisker does not need it, and opening a mouse's details never asks for it.
+  mouse, ordinary mappings do not need it; these diagnostics do. Opening a mouse's details
+  never asks for it.
 
 ## Install
 
@@ -420,6 +426,49 @@ the device. A mouse that is not connected shows only what its saved settings rec
   Control Centre instead. **No mouse or receiver model has been verified yet**, including Magic
   Mouse (which Whisker leaves alone and whose battery macOS shows in its own menus), so do not
   expect a reading from any particular model.
+
+## Extra button discovery
+
+**Settings › Devices › Extra Button Discovery…** is stage 1 of extra-button support:
+read-only diagnostics, **not remapping**. It is off by default. Enable it for the mouse, then
+choose **Inspect** each time; a saved preference never starts listening automatically.
+Input Monitoring is required even with one mouse. Denying or revoking it stops discovery
+with a reason and leaves ordinary mappings unchanged.
+
+- **What it shows.** Collections and Button (0x09)/Consumer (0x0C) elements, with their
+  `hid.generic` namespace and report/page/usage identity, separate from CGEvent buttons 0–31.
+  **Observed** means a value arrived, including zero/releases; **Not yet observed** is not a
+  claim that the control works. **Unsupported** and **Ambiguous** mean metadata only.
+  Discovery does not decode vendor reports or establish physical button names.
+- **Attribution is deliberately strict.** Only one direct Bluetooth pointing interface with
+  a unique serial-backed identity and safe binary elements can supply values. USB devices
+  (including wired mice), shared receivers, identical or missing identities, duplicate
+  descriptor identities and other uncertain combinations remain metadata-only. A receiver's
+  identity or the only listed mouse is not proof of which paired mouse sent a control.
+  No model, firmware or transport combination has been verified on hardware.
+- **Privacy and safety.** Related keyboard interfaces are counted from enumeration metadata
+  only, never opened by discovery. Keyboard/Keypad (0x07), nested keyboard collections,
+  primary-button values, arrays and non-binary controls are never subscribed to. A private,
+  non-exclusive HID queue selects only eligible mouse elements; there are no report callbacks,
+  report requests, device writes, diversion or changes to ordinary mappings. Trackpads and
+  touch mice remain untouched. Controls with native effects stay diagnostic-only: those
+  effects still happen when you press them.
+- **Session and recovery limits.** Stop, closing the window, disabling discovery or Whisker,
+  changes to settings or the active app/profile, sleep, user switching, permission loss and
+  disconnect/reconnect clear all observations. Nothing resumes without **Inspect**. Observations
+  stay in memory, are never saved or logged, and are bounded (64 queued values, 128 recent
+  transitions per interface; up to 512 descriptor elements and eight interfaces). This is
+  best-effort diagnostic evidence, not a lossless recorder or a guarantee of current button
+  state. There are no held actions or device settings to restore.
+- **Stage 2 remains unavailable.** No vendor adapter is approved. Enabling one requires
+  documented provenance/version, verified model/firmware/transport, suppression of native
+  effects and tested rollback/crash/reconnect recovery. None is claimed here.
+
+The additive per-device `extraButtons.discoveryEnabled` preference defaults to false.
+`extraButtonMappings` is a separate, opaque reserved object: it round-trips but is never
+executed. Existing mappings and unknown top-level JSON keys remain unchanged. As before,
+unknown keys inside typed nested settings objects are discarded; this stage does **not**
+meet the roadmap's broader unknown-key preservation criterion. The schema remains version 2.
 
 ## Input timing
 
