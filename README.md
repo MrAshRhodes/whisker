@@ -181,9 +181,14 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   chatter from a deliberate fast double-click**, so one quicker than the interval is ignored
   too. This is different from the double-click speed in System Settings, which only changes how
   fast two clicks must be to count as a double-click. Turning it on starts a 60-second trial that
-  switches it off unless you press **Keep**. It has not yet been verified on real faulty
-  hardware or across apps (for example Finder double-clicks and text selection), and it does not
-  diagnose or repair a mouse.
+  switches it off unless you press **Keep**. To check the effect, turn on **Count accepted and
+  filtered clicks**: each filtered button then shows "N accepted, M filtered", with a **Reset
+  Counts** button. The counts stay in memory, are never saved or logged, and start again from
+  zero when a filter setting changes, while a button is being recorded or when macOS pauses
+  Whisker; the test ends when you turn the filter off, the mouse disconnects, the Mac sleeps or
+  you leave the page. Clicks Whisker sends itself are never filtered. It has not yet been
+  verified on real faulty hardware or across apps (for example Finder double-clicks and text
+  selection), and it does not diagnose or repair a mouse.
 - **Swap primary and secondary buttons (per mouse, off by default).** For one mouse, under
   **Devices** or in that mouse's own profile in **Buttons**, the primary and secondary buttons
   trade places, always as a pair, for example for a left-handed set-up. Only plain presses swap:
@@ -267,8 +272,9 @@ milliseconds. An omitted field inherits the parent's list (or means no chords wi
 `[]` disables inherited chords. A non-empty list replaces the parent's list, without changing
 ordinary mappings. Overlapping pairs are rejected, including pairs with different modifiers.
 A primary-button pair requires keyboard modifiers or **Allow remapping the primary button**;
-the middle-click preset uses the existing Click action, not a new action type. Unknown top-level
-settings keys remain preserved; unknown nested keys are still not preserved.
+the middle-click preset uses the existing Click action, not a new action type. Unknown keys,
+at the top level and inside a chord definition, survive a load and save (see
+[Settings file](#settings-file)).
 
 The pure recognition model is tested with either press order, original-payload fallback, held
 middle-click dragging, release draining and cancellation. Its provisional window is **75 ms**,
@@ -346,10 +352,14 @@ none of them reads **Custom**.
   identical mice Whisker cannot tell apart), and while the app in front is on the bypass list. The
   Pointer pane or menu says which. When a mouse reconnects, Whisker applies the last speed you
   kept, never one that was still waiting to be kept.
+- **If Whisker stops before you answer.** A speed waiting to be kept is never saved as your
+  setting. Before Whisker applies it, it writes a small record, `pointer-trial.json`, to its
+  Application Support folder. If Whisker crashes, is force-quit or the Mac restarts before you
+  press **Keep**, the next launch goes back to the last speed you kept and says so. If the record
+  can't be written, Whisker refuses the change and the mouse keeps its speed.
 - **Not yet verified on hardware.** Presets have only been tested against a stand-in for the
-  system's pointer settings, not against real mice. If Whisker is force-quit or crashes within
-  the 5 seconds, the speed it was waiting on stays saved and applies at the next launch; use
-  **Use System Settings** to drop it.
+  system's pointer settings, not against real mice, and recovery after a real crash, force quit
+  or restart has not yet been tried.
 
 ## Slow pointer while held
 
@@ -374,8 +384,8 @@ original values for recovery and retry.
 
 This changes macOS pointer response, **not sensor DPI**. Repeated restoration on real hardware,
 games and raw-input paths are **not yet verified**; no game or anti-cheat compatibility is claimed.
-The action is additive without another schema change. Existing top-level unknown settings keys
-are preserved; the codec still does not preserve unknown keys inside nested objects.
+The action is additive without another schema change. Unknown settings keys, at the top level
+and inside nested objects, survive a load and save (see [Privacy](#privacy)).
 
 ## Pointer orientation — foundation only
 
@@ -388,8 +398,9 @@ closely stroke directions agree; its thresholds are provisional, not verified on
 The per-device JSON key `rotationDegrees` defaults to zero, rejects non-finite numbers and
 normalises equivalent angles to −180° inclusive through 180° exclusive. It is dormant: editing
 it does not rotate movement or drags, enable custom pointer speed, change a speed preset, reverse
-a wheel or alter button identities. The primary-button guard is unchanged. Unknown top-level
-settings still survive a round trip, but unknown nested keys do not; that part of #32 remains unmet.
+a wheel or alter button identities. The primary-button guard is unchanged. Unknown settings
+keys, at the top level and inside nested objects such as a device's settings, survive a round
+trip (see [Privacy](#privacy)).
 
 Before any global control can be offered, a public-API prototype must demonstrate exact motion
 attribution (never inferred from one listed mouse), coherent pointer and drag coordinates across
@@ -499,9 +510,9 @@ with a reason and leaves ordinary mappings unchanged.
 
 The additive per-device `extraButtons.discoveryEnabled` preference defaults to false.
 `extraButtonMappings` is a separate, opaque reserved object: it round-trips but is never
-executed. Existing mappings and unknown top-level JSON keys remain unchanged. As before,
-unknown keys inside typed nested settings objects are discarded; this stage does **not**
-meet the roadmap's broader unknown-key preservation criterion. The schema remains version 2.
+executed. Existing mappings are unchanged, and unknown JSON keys, at the top level and inside
+nested settings objects, survive a load and save (see [Privacy](#privacy)). The
+schema remains version 2.
 
 ## Input timing
 
@@ -566,6 +577,16 @@ Whisker works entirely on your Mac. It has no accounts, analytics or telemetry, 
 network requests except update checks, which are off until you turn them on or choose
 **Check for Updates…**. Your settings stay in
 `~/Library/Application Support/Whisker/settings.json`.
+
+Settings written by a newer build of Whisker with the same schema version keep the keys this build doesn't know about, at the
+top level and inside nested objects, when Whisker loads and saves the file. Whisker matches each
+object by what identifies it (a profile's or speed preset's id, a mapping's trigger and modifier
+keys, a control label's trigger, a chord's two buttons and modifier keys), and the unknown keys of
+an object you delete don't come back. Unknown keys are
+lost when two objects share the same identity, when you edit a step of a shortcut sequence or
+when a known setting changes type, and numbers above 2^53 lose precision. While a pointer speed
+change waits to be kept, Whisker also keeps a small `pointer-trial.json` beside the settings
+file (see [Pointer speed presets](#pointer-speed-presets)).
 
 ## Updates
 
