@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-12
+
 ### Added
 
 - Menu bar app for configuring mouse buttons, scrolling and pointer speed.
@@ -19,3 +21,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release workflow for signed and notarized builds with opt-in Sparkle in-app updates and a Homebrew cask.
 
 [Unreleased]: https://github.com/MrAshRhodes/whisker/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/MrAshRhodes/whisker/releases/tag/v0.1.0
