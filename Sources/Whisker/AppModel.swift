@@ -54,6 +54,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var engineRunning = false
     /// Why the latest Hold to Scroll fell back or could not start, for the Buttons pane.
     @Published private(set) var holdToScrollNote: String?
+    /// Whether Whisker is holding the primary button down for a Click Lock, for the menu bar. Never saved.
+    @Published private(set) var clickLockActive = false
     /// Whether an auto-scroll is running, for the menu bar icon. Never saved: it ends with the app.
     @Published private(set) var autoScrollActive = false
     /// The app in front while it's on the bypass list and Whisker stands aside for it. Separate from the master
@@ -123,6 +125,12 @@ final class AppModel: ObservableObject {
         )
         engine.onHoldStatus = { [weak self] status in
             DispatchQueue.main.async { self?.holdToScrollNote = status.message }
+        }
+        engine.onClickLockChange = { [weak self] active in
+            DispatchQueue.main.async {
+                self?.clickLockActive = active
+                self?.onStatusChange?()
+            }
         }
         engine.onAutoScrollActive = { [weak self] active in
             DispatchQueue.main.async {
@@ -246,7 +254,7 @@ final class AppModel: ObservableObject {
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.engine.releaseAll()
+                self?.engine.releaseAll(because: .sleep)
                 MainActor.assumeIsolated { self?.cancelSlowPointer() }
                 MainActor.assumeIsolated { self?.inputTiming.interrupt(.sleep) }
             })
@@ -273,10 +281,17 @@ final class AppModel: ObservableObject {
     }
 
     func stopEngine() {
+        // The permission is gone, so the release below may be refused by the system; it is still asked for once.
+        engine.releaseClickLock(.permissionLoss)
         engine.stop()
         cancelSlowPointer()
         engineRunning = false
         onStatusChange?()
+    }
+
+    /// Lets go of a Click Lock from the menu bar. Does nothing when none is held.
+    func releaseClickLock() {
+        engine.releaseClickLock(.menu)
     }
 
     /// Whether a keyboard shortcut sequence is running, for the menu.

@@ -28,6 +28,11 @@ final class EventEngine: @unchecked Sendable {
         var reportedHold: HoldScrollStatus = .idle
         /// System Reduce Motion, snapshotted by the app outside the tap. While on, nothing is smoothed.
         var reduceMotion = false
+        /// Turns movement into a drag while a Click Lock is held. Nil until a Click Lock mapping needs it, and a
+        /// lock never begins without it.
+        var movement: (any ClickLockMovement)?
+        /// The Click Lock state last reported to `onClickLockChange`.
+        var reportedClickLock = false
         /// The generation of the auto-scroll the synthesizer is running, so it is only spoken to when that changes.
         var runningAutoScroll: Int?
         /// Whether `onAutoScrollActive` was last told that one is running.
@@ -52,8 +57,11 @@ final class EventEngine: @unchecked Sendable {
     private let frontmostApp: @Sendable () -> String?
     private let clock: any ClickClock
     private let attributeMotion: @Sendable (TimeInterval) -> DeviceAttribution?
+    private let makeMovement: ClickLockMovementFactory
     /// Called on the main queue when a hold-to-scroll starts, falls back or can't start.
     var onHoldStatus: (@Sendable (HoldScrollStatus) -> Void)?
+    /// Called on the main queue when a Click Lock begins or ends.
+    var onClickLockChange: (@Sendable (Bool) -> Void)?
     /// Called on the main queue with whether an auto-scroll is running, whenever that changes.
     var onAutoScrollActive: (@Sendable (Bool) -> Void)?
     var onSlowPointer: (@MainActor @Sendable (SlowPointerCommand) -> Void)?
@@ -68,13 +76,15 @@ final class EventEngine: @unchecked Sendable {
         attribute: @escaping @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution?,
         frontmostApp: @escaping @Sendable () -> String?,
         clock: any ClickClock = SystemClickClock(),
-        attributeMotion: @escaping @Sendable (TimeInterval) -> DeviceAttribution? = { _ in nil }
+        attributeMotion: @escaping @Sendable (TimeInterval) -> DeviceAttribution? = { _ in nil },
+        movement makeMovement: @escaping ClickLockMovementFactory = { runLoop, hooks in ClickLockMovementTap(runLoop: runLoop, hooks: hooks) }
     ) {
         self.clock = clock
         self.synthesizer = synthesizer
         self.attribute = attribute
         self.frontmostApp = frontmostApp
         self.attributeMotion = attributeMotion
+        self.makeMovement = makeMovement
     }
 
     var isRunning: Bool {
@@ -87,6 +97,8 @@ final class EventEngine: @unchecked Sendable {
         let app = frontmostApp()
         let location = Self.cursorLocation()
         state.withLock { state in
+            // A Click Lock began under the settings that are going away, so whatever changed, it ends.
+            endClickLock(&state, settings.general.enabled ? .settingsChanged : .disabled, at: location)
             state.compiled = CompiledSettings(settings, nativeWheelActive: state.compiled.nativeWheelActive)
             state.processor.resetScrollRecognition()
             // An auto-scroll started under settings that are going away, and a changed mapping or profile must
@@ -103,7 +115,7 @@ final class EventEngine: @unchecked Sendable {
                 synthesizer.cancelPendingClicks()
                 synthesizer.cancelSequence(.lifecycle)
             } else {
-                release(&state, at: location)
+                release(&state, at: location, because: .disabled)
             }
             // A hold whose mapping was removed ends now; one that is merely edited keeps the settings it started with.
             if !state.compiled.needsMotion { state.processor.cancelHold() }
@@ -113,6 +125,7 @@ final class EventEngine: @unchecked Sendable {
             syncAutoScroll(&state)
             reportHold(&state)
         }
+        prepareClickLockMovement()
     }
 
     /// Reduce Motion changed. Turning it on ends smoothing that is under way, and nothing is smoothed while it is on.
@@ -165,6 +178,9 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.cancelSequence(.applicationChanged)
             // The pointer is anchored in the window that was in front, so a hold never carries over to another app.
             state.processor.cancelHold()
+            // A Click Lock began in the app that has gone.
+            endClickLock(&state, .applicationChanged, at: location)
+            // A gesture was aimed at the app that has gone, so it is called off rather than carried over.
             state.processor.cancelGesture()
             // An auto-scroll is addressed to the window under its anchor, so it ends rather than scroll the new app.
             state.processor.cancelAutoScroll()
@@ -185,15 +201,21 @@ final class EventEngine: @unchecked Sendable {
         let location = Self.cursorLocation()
         state.withLock { state in
             state.capturing = capturing
-            if capturing { release(&state, at: location) }
+            if capturing { release(&state, at: location, because: .capture) }
             synthesizer.cancelSmoothScroll()
         }
     }
 
-    /// Lets go of held buttons and repeating keys (sleep, switching users, quitting).
-    func releaseAll() {
+    /// Lets go of held buttons, a Click Lock and repeating keys (sleep, switching users, quitting).
+    func releaseAll(because reason: ClickLockEnd = .quit) {
         let location = Self.cursorLocation()
-        state.withLock { release(&$0, at: location) }
+        state.withLock { release(&$0, at: location, because: reason) }
+    }
+
+    /// Lets go of a Click Lock and nothing else: the menu command, and the way out when the Accessibility permission goes.
+    func releaseClickLock(_ reason: ClickLockEnd = .menu) {
+        let location = Self.cursorLocation()
+        state.withLock { endClickLock(&$0, reason, at: location) }
     }
 
     /// The set of connected mice changed. A click gesture under way is called off if the mouse that started it is gone.
@@ -206,6 +228,9 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.cancelSmoothScroll(unlessConnected: connected)
             state.debouncer.devicesChanged(connected: connected)
             armExpiry(&state)
+            // A Click Lock begun by a mouse that has gone lets go now; nobody is left to press the button again.
+            let lockEnded = state.processor.cancelClickLock(unlessConnected: connected)
+            finishClickLock(&state, ended: lockEnded, at: location)
             // A hold started by a device that has gone ends now, and so does a gesture.
             state.processor.cancelHold(unlessConnected: connected)
             state.processor.cancelGesture(unlessConnected: connected)
@@ -234,6 +259,12 @@ final class EventEngine: @unchecked Sendable {
     /// Starts the tap. Returns false when the system refuses one (no Accessibility access).
     @discardableResult
     func start() -> Bool {
+        guard startTap() else { return false }
+        prepareClickLockMovement()
+        return true
+    }
+
+    private func startTap() -> Bool {
         tapLock.lock()
         defer { tapLock.unlock() }
         guard tap == nil else { return true }
@@ -276,10 +307,13 @@ final class EventEngine: @unchecked Sendable {
 
     func stop() {
         let location = Self.cursorLocation()
-        state.withLock { state in
+        let movement = state.withLock { state -> (any ClickLockMovement)? in
             state.stopped = true
-            release(&state, at: location)
+            release(&state, at: location, because: .quit)
+            defer { state.movement = nil }
+            return state.movement
         }
+        movement?.invalidate()
         tapLock.lock()
         defer { tapLock.unlock() }
         guard let port = tap else { return }
@@ -293,8 +327,8 @@ final class EventEngine: @unchecked Sendable {
     }
 
     /// Call with the state lock held.
-    private func release(_ state: inout State, at location: CGPoint) {
-        for (_, action) in state.processor.releaseAll() {
+    private func release(_ state: inout State, at location: CGPoint, because reason: ClickLockEnd = .quit) {
+        for (_, action) in state.processor.releaseAll(because: reason) {
             synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
         synthesizer.releaseAll()
@@ -303,6 +337,71 @@ final class EventEngine: @unchecked Sendable {
         state.debouncer.reset()
         armExpiry(&state)
         reportHold(&state)
+        syncClickLock(&state)
+    }
+
+    /// Call with the state lock held. Ends the Click Lock if there is one, posting its one release.
+    private func endClickLock(_ state: inout State, _ reason: ClickLockEnd, at location: CGPoint, flags: CGEventFlags = []) {
+        let ended = state.processor.cancelClickLock(reason)
+        finishClickLock(&state, ended: ended, at: location, flags: flags)
+    }
+
+    /// Call with the state lock held, once the processor has ended the lock (`ended`). The release is posted only
+    /// then, so no path can ask for a second one.
+    private func finishClickLock(_ state: inout State, ended: Bool, at location: CGPoint, flags: CGEventFlags = []) {
+        if ended { synthesizer.perform(.clickLock, phase: .up, at: location, flags: flags, clickState: 1) }
+        syncClickLock(&state)
+    }
+
+    /// Call with the state lock held. Keeps the movement tap on exactly while a lock is held and tells the app when
+    /// that changes, off the tap thread.
+    private func syncClickLock(_ state: inout State) {
+        let active = state.processor.isClickLockActive
+        state.movement?.setEnabled(active)
+        guard active != state.reportedClickLock else { return }
+        state.reportedClickLock = active
+        if active {
+            Log.events.notice("Click Lock began")
+        } else {
+            let reason = state.processor.lastClickLockEnd?.rawValue ?? "unknown"
+            Log.events.notice("Click Lock ended: \(reason, privacy: .public)")
+        }
+        guard let onClickLockChange else { return }
+        DispatchQueue.main.async { onClickLockChange(active) }
+    }
+
+    /// Makes the movement tap when Click Lock is on and mapped, and drops it when it no longer is. It takes the tap
+    /// lock, so it is never called with the state lock held (starting the tap nests them the other way round).
+    private func prepareClickLockMovement() {
+        let (needed, present) = state.withLock { ($0.compiled.needsClickLock && !$0.stopped, $0.movement != nil) }
+        if needed, !present {
+            tapLock.lock()
+            let loop = runLoop
+            tapLock.unlock()
+            let hooks = ClickLockMovementHooks(
+                isLockActive: { [weak self] in self?.state.withLock { $0.processor.isClickLockActive } ?? false },
+                interrupted: { [weak self] in self?.clickLockMovementInterrupted() }
+            )
+            guard let created = makeMovement(loop, hooks) else { return }
+            let kept = state.withLock { state -> Bool in
+                guard state.movement == nil, state.compiled.needsClickLock, !state.stopped else { return false }
+                state.movement = created
+                return true
+            }
+            if !kept { created.invalidate() }
+        } else if !needed, present {
+            let dropped = state.withLock { state -> (any ClickLockMovement)? in
+                defer { state.movement = nil }
+                return state.movement
+            }
+            dropped?.invalidate()
+        }
+    }
+
+    /// The system paused the movement tap, so a held lock would stop following the pointer: it lets go.
+    private func clickLockMovementInterrupted() {
+        let location = Self.cursorLocation()
+        state.withLock { endClickLock(&$0, .tapInterrupted, at: location) }
     }
 
     /// Call with the state lock held. Makes the synthesizer run exactly the auto-scroll the processor has: it is
@@ -359,6 +458,7 @@ final class EventEngine: @unchecked Sendable {
         synthesizer.releaseAll()
         state.debouncer.reset()
         armExpiry(&state)
+        syncClickLock(&state)
     }
 
     /// Call with the state lock held. Sets a timer for the oldest press the filter is holding back, if any.
@@ -382,8 +482,12 @@ final class EventEngine: @unchecked Sendable {
     /// their action and unmapped ones are posted as synthetic clicks (which the tap ignores).
     /// Call with the state lock held.
     private func replay(_ flushed: [FlushedPress], _ state: inout State) {
+        defer { syncClickLock(&state) }
         for press in flushed {
-            let plan = state.processor.process(press.event, settings: state.compiled, slowPointerDevices: state.slowPointerDevices)
+            // A press that waited can still let go of a Click Lock, but it can never begin one.
+            let plan = state.processor.process(
+                press.event, settings: state.compiled, slowPointerDevices: state.slowPointerDevices, startsClickLock: false
+            )
             syncAutoScroll(&state)
             reportSlowPointer(&state)
             if ClickInterruption.isCalledOffBy(press.event.kind, plan: plan) { synthesizer.cancelPendingClicks() }
@@ -396,6 +500,10 @@ final class EventEngine: @unchecked Sendable {
             case let .perform(action, phase), let .performWithScroll(action, phase, _):
                 state.actionSource = press.event.device?.id
                 synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: press.clickCount)
+            case let .performThenPassThrough(action, phase):
+                state.actionSource = press.event.device?.id
+                synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: press.clickCount)
+                synthesizer.perform(.click(button: button, modifiers: []), phase: .down, at: location, flags: flags, clickState: press.clickCount)
             default:
                 break
             }
@@ -412,7 +520,7 @@ final class EventEngine: @unchecked Sendable {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             // Releases may have been missed while the tap was off, so nothing held is trusted any more.
             let location = Self.cursorLocation()
-            state.withLock { release(&$0, at: location) }
+            state.withLock { release(&$0, at: location, because: .tapInterrupted) }
             tapLock.lock()
             let port = tap
             tapLock.unlock()
@@ -457,6 +565,10 @@ final class EventEngine: @unchecked Sendable {
         let (plan, clickState) = state.withLock { state -> (EventPlan, Int64) in
             guard !state.capturing, !state.stopped else { return (.passThrough, originalClickState) }
             var clickState = originalClickState
+            // A Click Lock whose app, profile or mapping has gone lets go before this event is handled.
+            if state.processor.releaseStaleClickLock(app: input.app, settings: state.compiled) {
+                finishClickLock(&state, ended: true, at: location, flags: flags)
+            }
             let outcome = state.debouncer.process(input, settings: state.compiled)
             defer { armExpiry(&state) }
             replay(outcome.flushed, &state)
@@ -465,7 +577,9 @@ final class EventEngine: @unchecked Sendable {
             case .moveOnly: return (.dragAsMove, originalClickState)
             case .proceed(let count): clickState = count
             }
-            var plan = state.processor.process(input, settings: state.compiled, slowPointerDevices: state.slowPointerDevices)
+            var plan = state.processor.process(
+                input, settings: state.compiled, slowPointerDevices: state.slowPointerDevices, startsClickLock: state.movement?.isReady == true
+            )
             // A press or scroll that ended an auto-scroll stops its timer before the event goes on, and a press
             // that started one starts it. Both only touch a lock and a timer request, never the UI.
             syncAutoScroll(&state)
@@ -477,7 +591,7 @@ final class EventEngine: @unchecked Sendable {
                 plan = smooth(request, flags: event.flags.rawValue, reduceMotion: state.reduceMotion)
             }
             switch plan {
-            case let .perform(action, phase), let .performWithScroll(action, phase, _):
+            case let .perform(action, phase), let .performWithScroll(action, phase, _), let .performThenPassThrough(action, phase):
                 state.actionSource = input.device?.id
                 synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: clickState)
             default:
@@ -487,6 +601,7 @@ final class EventEngine: @unchecked Sendable {
                 synthesizer.holdScroll(pixels, anchor: CGPoint(x: anchor.x, y: anchor.y))
             }
             reportHold(&state)
+            syncClickLock(&state)
             return (plan, clickState)
         }
         // The filter dropped presses the system counted, so the count of a press that goes through is put right.
@@ -517,6 +632,9 @@ final class EventEngine: @unchecked Sendable {
         case .perform, .holdScroll:
             // Already posted under the state lock in `handle`.
             return nil
+        case .performThenPassThrough:
+            // Posted under the state lock in `handle`; the event itself carries on after it.
+            return Unmanaged.passUnretained(event)
         case let .dragAs(button, modifiers):
             switch button {
             case 0: event.type = .leftMouseDragged

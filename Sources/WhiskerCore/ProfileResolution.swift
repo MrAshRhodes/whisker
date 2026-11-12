@@ -49,6 +49,18 @@ extension WhiskerSettings {
         general.enabled && profiles.contains { $0.mappings.contains { $0.usesMotion } }
     }
 
+    /// Whether Click Lock is switched on and a mapping could start it, so the app prepares the movement it needs.
+    /// A mapping on the primary button or the wheel, or one that carries gestures, never starts one.
+    public var usesClickLock: Bool {
+        guard general.enabled, general.experimentalClickLock else { return false }
+        return profiles.contains { profile in
+            profile.mappings.contains { mapping in
+                guard mapping.action == .clickLock, mapping.gestures == nil, case .button(let button) = mapping.trigger else { return false }
+                return button != 0
+            }
+        }
+    }
+
     /// The profile that applies to a device in an app.
     ///
     /// Most specific wins: device and app, then app on any device, then device in any app, then default.
@@ -117,6 +129,8 @@ public final class CompiledSettings: @unchecked Sendable {
     public let swappedDevices: Set<String>
     /// Whether any mapping needs pointer movement. When false, nothing in the app reads movement at all.
     public let needsMotion: Bool
+    /// Whether Click Lock is on and mapped, so the movement conversion it needs is worth preparing.
+    public let needsClickLock: Bool
     private var cache: [CacheKey: String] = [:]
     private let lock = NSLock()
 
@@ -139,6 +153,7 @@ public final class CompiledSettings: @unchecked Sendable {
         bypassApps = Set(settings.general.bypassApps)
         swappedDevices = Set(settings.devices.filter { $0.value.swapPrimarySecondary }.keys)
         needsMotion = settings.usesMotionActions
+        needsClickLock = settings.usesClickLock
     }
 
     public var general: GeneralSettings { settings.general }

@@ -124,13 +124,13 @@ extension ButtonGestures: Codable {
 extension Action {
     /// Whether a gesture can run the action: it is one step that is done once it is performed, so it can run when
     /// the button comes up. Actions that last as long as the trigger is held (Click, Hold to Scroll, Slow pointer while
-    /// held), run on for a while (Shortcut Sequence) or until something stops them (Auto-scroll) are left out. Keys
-    /// that repeat while held (volume, brightness) count: a gesture presses them once. Pointer Speed Preset is left
-    /// out for now: it points at a saved preset, and deleting a preset or forgetting a mouse only cleans up button
-    /// mappings, not gestures.
+    /// held), run on for a while (Shortcut Sequence) or until something stops them (Auto-scroll, Click Lock) are left
+    /// out. Keys that repeat while held (volume, brightness) count: a gesture presses them once. Pointer Speed Preset
+    /// is left out for now: it points at a saved preset, and deleting a preset or forgetting a mouse only cleans up
+    /// button mappings, not gestures.
     public var allowedInGestures: Bool {
         switch self {
-        case .passthrough, .none, .click, .shortcutSequence, .holdToScroll, .autoScroll, .slowPointer, .pointerPreset:
+        case .passthrough, .none, .click, .shortcutSequence, .holdToScroll, .autoScroll, .slowPointer, .pointerPreset, .clickLock:
             return false
         case .shortcut(_, let repeats):
             return !repeats

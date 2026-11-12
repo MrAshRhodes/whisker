@@ -304,11 +304,16 @@ struct ActionEditor: View {
     /// A gesture slot picks its kind itself (it can also be left empty), so it asks for the details alone.
     var showsKindPicker = true
 
-    /// Pointer speed presets are offered once there is a preset to switch to.
+    /// Pointer speed presets are offered once there is a preset to switch to, and Click Lock once it is switched on
+    /// in General. A mapping that already has either keeps showing it.
     private var kinds: [ActionKind] {
-        ActionKind.allCases.filter {
-            (!inGesture || $0.defaultAction.allowedInGestures)
-                && ($0 != .pointerPreset || action.kind == .pointerPreset || settings.firstPointerPreset() != nil)
+        ActionKind.allCases.filter { kind in
+            guard !inGesture || kind.defaultAction.allowedInGestures else { return false }
+            switch kind {
+            case .pointerPreset: return action.kind == .pointerPreset || settings.firstPointerPreset() != nil
+            case .clickLock: return action.kind == .clickLock || settings.general.experimentalClickLock
+            default: return true
+            }
         }
     }
 
@@ -318,7 +323,6 @@ struct ActionEditor: View {
         }
         return kind.defaultAction
     }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if showsKindPicker {
@@ -366,6 +370,13 @@ struct ActionEditor: View {
             ))
             Text("Three left clicks in a row at the pointer. What an app does with them is up to the app.")
                 .font(.footnote).foregroundStyle(.secondary)
+        case .clickLock:
+            Text("Experimental. Press once to hold the primary button down, so moving the pointer drags. Press again, or press the primary button, to let go. Not yet verified on hardware; if the button ever seems stuck, press and release the primary button yourself.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if !settings.general.experimentalClickLock {
+                Label("Turned off in General, so this does nothing for now.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
         case let .shortcut(shortcut, repeats):
             ShortcutField(shortcut: Binding(
                 get: { shortcut },

@@ -54,6 +54,7 @@ struct SettingsTests {
                 SequenceStep(shortcut: KeyShortcut(keyCode: 0x00, modifiers: .command), delayAfterMs: 150),
                 SequenceStep(shortcut: KeyShortcut(keyCode: 0x08, modifiers: [.command, .shift])),
             ]),
+            .clickLock,
         ]
         for action in actions {
             let data = try JSONEncoder().encode(action)

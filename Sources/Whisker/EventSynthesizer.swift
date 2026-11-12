@@ -113,6 +113,13 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
             guard phase != .up else { return }
             let held = CGEventFlags(rawValue: flags.rawValue | modifiers.eventFlags)
             clicks.start(.tripleClick, timing: tripleClickTiming(), at: location, flags: held)
+        case .clickLock:
+            // Only the press that starts the lock and the one release that ends it are ever posted.
+            switch phase {
+            case .down: postMouse(button: 0, down: true, at: location, flags: flags, clickState: 1)
+            case .up: postMouse(button: 0, down: false, at: location, flags: flags, clickState: 1)
+            case .once: return
+            }
         case let .shortcut(shortcut, repeats):
             runRepeating(phase: phase, repeats: repeats) { [weak self] in self?.postKey(shortcut) }
         case .shortcutSequence(let steps):

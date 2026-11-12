@@ -87,7 +87,8 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   from that button, and other buttons, other mappings and an unmodified primary click carry on
   as usual (a gesture on the primary button follows the same safeguard as any other mapping of
   it). Only actions that happen once can be chosen, so not Click, Hold to Scroll, Auto-scroll,
-  Slow pointer while held, a shortcut sequence, a repeating shortcut or a pointer speed preset.
+  Click Lock, Slow pointer while held, a shortcut sequence, a repeating shortcut or a pointer
+  speed preset.
   It needs Input Monitoring and a mouse Whisker can identify exactly: only the mouse you pressed
   counts, and the button keeps its normal behaviour when Whisker can't tell which mouse that
   was. Changing app (even if you come straight back), losing the mouse, changing settings, and
@@ -104,12 +105,33 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   choose Both Directions). You set the dead zone and the top speed. Pressing the same button
   again, pressing any other mouse button (the click still goes through), turning the wheel or
   swiping a trackpad, or a change of app, profile, Space, display or connected mice stops it, and
-  it never starts again by itself. There is no marker on screen: the menu bar icon changes and
-  its tooltip says auto-scroll is on, even if you have hidden the icon. It needs no Input
-  Monitoring of its own. The speeds are provisional, and it has not yet been verified on
-  hardware, including in TextEdit, in nested scrolling in Safari (which pane receives the
-  scrolling), across several displays or with mixed pointing devices. See the
+  it never starts again by itself. It will not start while a Click Lock is held. There is no
+  marker on screen: the menu bar icon changes and its tooltip says auto-scroll is on, even if
+  you have hidden the icon. It needs no Input Monitoring of its own. The speeds are
+  provisional, and it has not yet been verified on hardware, including in TextEdit, in nested
+  scrolling in Safari (which pane receives the scrolling), across several displays or with
+  mixed pointing devices. See the
   [guide](https://mrashrhodes.github.io/whisker/guide.html#auto-scroll).
+- **Click Lock (experimental, off by default).** Turn on **Enable Click Lock** in Settings ›
+  General › Experimental, then give a button the **Click Lock (Experimental)** action in
+  Buttons. Press that button once and Whisker holds the primary button down for you, so moving
+  the mouse drags; press it again, or any other button given Click Lock, on any mouse, to let
+  go. Letting go of the button itself does nothing. The trigger has to be a mouse button other
+  than the primary button, and not the wheel. The primary button is the way out: pressing it on
+  any mouse lets go first and then goes through as a normal click, a button or wheel direction
+  mapped to click the primary button lets go instead of clicking again, and **Release Click
+  Lock** at the top of the menu bar menu, shown only while it is held, lets go too. While it is
+  held the menu bar icon becomes a padlock, even if you have hidden the icon.
+  It lets go once, by itself, after a change of app, bypass, profile or settings, when Whisker
+  is switched off or loses Accessibility access, when the Mac sleeps or Whisker quits, when you
+  record a button, or when the mouse that began it is unplugged. It will not start while
+  another button is down or during Hold to Scroll or a button gesture, it is not offered for
+  button gestures, and auto-scroll and gestures cannot start while it is held. It needs
+  Accessibility but no Input Monitoring of its own. It has not yet been verified on hardware:
+  drag-selecting in TextEdit, moving and dragging in Finder, recovery after Accessibility
+  access is revoked or Whisker is force-quit while it is held (then press and release the
+  primary button yourself), Hold to Scroll, several displays and mixed pointing devices are all
+  untried. See the [guide](https://mrashrhodes.github.io/whisker/guide.html#click-lock).
 - **Profiles.** Give an app, a mouse, or an app on one mouse its own buttons and scrolling.
   Anything a profile does not set comes from the profile it inherits from, ending at the
   default profile, and Whisker switches profiles as you change apps.
@@ -502,12 +524,22 @@ brew update && brew upgrade --cask whisker
   swap. Clicks with a modifier key held are never swapped.
 - **Auto-scroll does not start, or scrolls the wrong thing.** Press its button once and let go.
   It does not start while Whisker is off, while the app in front is on the bypass list or during
-  Hold to Scroll, and the profile in front must map the button to **Auto-scroll**. The scrolling
-  goes to the window under the spot where you pressed, not under the pointer as it moves, so
-  stop it and start again with the pointer over the pane you want. If it keeps stopping, a
-  button press, the wheel or a mouse connecting or disconnecting is ending it, and it never
-  starts again by itself. It has not yet been verified on hardware. See the
-  [guide](https://mrashrhodes.github.io/whisker/guide.html#auto-scroll).
+  Hold to Scroll or a held Click Lock, and the profile in front must map the button to
+  **Auto-scroll**. The scrolling goes to the window under the spot where you pressed, not under
+  the pointer as it moves, so stop it and start again with the pointer over the pane you want.
+  If it keeps stopping, a button press, the wheel or a mouse connecting or disconnecting is
+  ending it, and it never starts again by itself. It has not yet been verified on hardware. See
+  the [guide](https://mrashrhodes.github.io/whisker/guide.html#auto-scroll).
+- **Click Lock does not start, or a button seems stuck.** Check that **Enable Click Lock** is on
+  in Settings › General › Experimental, that the profile in front maps the button to **Click Lock
+  (Experimental)**, and that the button is not the primary button or the wheel. Press it once
+  and let go. It does not start while Whisker is off, while the app in front is on the bypass
+  list, while another button is down or during Hold to Scroll or a button gesture, and then the
+  press and its release are ignored. If a button ever seems stuck, press and release the
+  primary button yourself, on any mouse, or choose **Release Click Lock** in the menu bar menu
+  while it is shown. If Whisker was force-quit or lost Accessibility access while a lock was
+  held, it may not have been able to let go, and recovery from that has not yet been verified.
+  See the [guide](https://mrashrhodes.github.io/whisker/guide.html#click-lock).
 - **A mouse's own settings are not used when another mouse is connected.** Click
   **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart, then open the
   mouse's **Details** to see how sure Whisker is which clicks are its.
@@ -566,7 +598,8 @@ builds cannot update themselves. See [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 Planned after 0.1, in no particular order:
 
 - Tilt-wheel buttons and two-button chords.
-- Auto-scroll and click lock.
+- Taking Auto-scroll and Click Lock out of experimental once they have been verified on
+  hardware.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
 
 ## Contributing

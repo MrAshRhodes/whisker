@@ -81,8 +81,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Status item
 
     private func refreshStatusItem() {
-        // A running auto-scroll is shown even when the icon is switched off, so it never runs unseen.
-        guard model.store.settings.general.showMenuBarIcon || model.autoScrollActive else {
+        // A held Click Lock or a running auto-scroll is shown even when the icon is switched off, so neither goes unseen.
+        let lockHeld = model.clickLockActive
+        let scrolling = model.autoScrollActive
+        guard model.store.settings.general.showMenuBarIcon || lockHeld || scrolling else {
             if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
             statusItem = nil
             return
@@ -95,18 +97,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem = item
         }
         guard let button = statusItem?.button else { return }
-        let scrolling = model.autoScrollActive
+        // The lock holds a button down, so it takes the icon when both are on.
         let image = NSImage(
-            systemSymbolName: scrolling ? ActionKind.autoScroll.symbolName : "computermouse",
-            accessibilityDescription: scrolling ? "Whisker, auto-scroll on" : "Whisker"
+            systemSymbolName: lockHeld ? "lock.fill" : scrolling ? ActionKind.autoScroll.symbolName : "computermouse",
+            accessibilityDescription: lockHeld ? "Whisker: Click Lock is on" : scrolling ? "Whisker, auto-scroll on" : "Whisker"
         )
         image?.isTemplate = true
         button.image = image
         let active = model.isEnabled && model.engineRunning
-        button.appearsDisabled = !active
+        button.appearsDisabled = !active && !lockHeld
         var tip = active ? "Whisker" : model.engineRunning ? "Whisker (off)" : "Whisker needs Accessibility access"
         if active, let app = model.bypassedAppName { tip = "Whisker (bypassed for \(app))" }
         if scrolling { tip = "Whisker: auto-scroll is on. Click or scroll to stop it." }
+        if lockHeld { tip += "\nClick Lock is on: press the primary button to let go" }
         if !model.pointer.restoreFailures.isEmpty { tip += "\nPointer settings couldn’t be restored" }
         if !model.wheel.restoreFailures.isEmpty { tip += "\nWheel settings couldn’t be restored" }
         button.toolTip = tip
@@ -114,6 +117,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        if model.clickLockActive {
+            let release = NSMenuItem(title: "Release Click Lock", action: #selector(releaseClickLock), keyEquivalent: "")
+            release.target = self
+            menu.addItem(release)
+            menu.addItem(.separator())
+        }
         let enabled = NSMenuItem(title: "Enabled", action: #selector(toggleEnabled(_:)), keyEquivalent: "")
         enabled.target = self
         enabled.state = model.isEnabled ? .on : .off
@@ -246,6 +255,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func cancelSequence() {
         model.cancelSequence()
+    }
+
+    @objc private func releaseClickLock() {
+        model.releaseClickLock()
     }
 
     @objc private func toggleEnabled(_ sender: Any?) {

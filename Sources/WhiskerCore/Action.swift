@@ -136,6 +136,9 @@ public enum Action: Hashable, Sendable {
     /// Three left clicks in a row at the pointer, counted 1, 2 and 3. What an app does with them (some
     /// select a line or paragraph) is up to the app.
     case tripleClick(modifiers: ModifierSet)
+    /// Experimental. One press holds the primary button down on the user's behalf and releasing the trigger does not
+    /// end it; the next press of an assigned button lets go. See `ClickLock`.
+    case clickLock
     case shortcut(KeyShortcut, repeatWhileHeld: Bool)
     /// Several shortcuts one after another, run once per activation within `ShortcutSequenceLimits`.
     case shortcutSequence([SequenceStep])
@@ -164,6 +167,7 @@ public enum Action: Hashable, Sendable {
         case .click: return .click
         case .doubleClick: return .doubleClick
         case .tripleClick: return .tripleClick
+        case .clickLock: return .clickLock
         case .shortcut: return .shortcut
         case .shortcutSequence: return .shortcutSequence
         case .scroll: return .scroll
@@ -185,6 +189,15 @@ public enum Action: Hashable, Sendable {
     public var usesMotion: Bool {
         if case .holdToScroll = self { return true }
         return false
+    }
+
+    /// Whether the action clicks the primary button, which a held Click Lock already has down.
+    public var clicksPrimaryButton: Bool {
+        switch self {
+        case .click(let button, _): return button == 0
+        case .doubleClick, .tripleClick: return true
+        default: return false
+        }
     }
 
     /// Actions that follow the trigger: pressed while it is down, released when it comes up.
@@ -239,6 +252,7 @@ public enum Action: Hashable, Sendable {
             return modifiers.isEmpty ? name : "\(modifiers.symbols) \(name)"
         case .doubleClick(let modifiers): return modifiers.isEmpty ? "Double Click" : "\(modifiers.symbols) Double Click"
         case .tripleClick(let modifiers): return modifiers.isEmpty ? "Triple Click" : "\(modifiers.symbols) Triple Click"
+        case .clickLock: return "Click Lock"
         case let .shortcut(shortcut, _): return "Keyboard Shortcut \(shortcut.displayString)"
         case .shortcutSequence(let steps): return "Shortcut Sequence \(steps.map(\.shortcut.displayString).joined(separator: " → "))"
         case let .scroll(direction, lines): return "\(direction.title) \(lines) \(lines == 1 ? "Line" : "Lines")"
@@ -290,7 +304,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, autoScroll, slowPointer, pointerPreset, open
+    case passthrough, none, click, doubleClick, tripleClick, clickLock, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, autoScroll, slowPointer, pointerPreset, open
 
     public var id: String { rawValue }
 
@@ -301,6 +315,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .click: return "Click"
         case .doubleClick: return "Double Click"
         case .tripleClick: return "Triple Click"
+        case .clickLock: return "Click Lock (Experimental)"
         case .shortcut: return "Keyboard Shortcut"
         case .shortcutSequence: return "Keyboard Shortcut Sequence"
         case .navigate: return "Back or Forward"
@@ -324,6 +339,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .click: return "cursorarrow.click"
         case .doubleClick: return "cursorarrow.click.2"
         case .tripleClick: return "cursorarrow.motionlines.click"
+        case .clickLock: return "lock"
         case .shortcut: return "keyboard"
         case .shortcutSequence: return "list.number"
         case .navigate: return "arrow.left.arrow.right"
@@ -349,6 +365,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .click: return .click(button: 2, modifiers: [])
         case .doubleClick: return .doubleClick(modifiers: [])
         case .tripleClick: return .tripleClick(modifiers: [])
+        case .clickLock: return .clickLock
         case .shortcut: return .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: false)
         case .shortcutSequence:
             return .shortcutSequence([
@@ -394,6 +411,7 @@ extension Action: Codable {
         case "click": self = .click(button: try container.decode(Int.self, forKey: .button), modifiers: try modifiers())
         case "doubleClick": self = .doubleClick(modifiers: try modifiers())
         case "tripleClick": self = .tripleClick(modifiers: try modifiers())
+        case "clickLock": self = .clickLock
         case "shortcut":
             self = .shortcut(
                 KeyShortcut(keyCode: try container.decode(UInt16.self, forKey: .keyCode), modifiers: try modifiers()),
@@ -453,6 +471,7 @@ extension Action: Codable {
         case .tripleClick(let modifiers):
             try container.encode("tripleClick", forKey: .kind)
             try container.encode(modifiers, forKey: .modifiers)
+        case .clickLock: try container.encode("clickLock", forKey: .kind)
         case let .shortcut(shortcut, repeats):
             try container.encode("shortcut", forKey: .kind)
             try container.encode(shortcut.keyCode, forKey: .keyCode)

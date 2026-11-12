@@ -635,7 +635,7 @@ struct ButtonGestureTests {
             .passthrough, .none, .click(button: 1, modifiers: []),
             .shortcut(KeyShortcut(keyCode: 0x7E), repeatWhileHeld: true),
             .shortcutSequence([SequenceStep(shortcut: KeyShortcut(keyCode: 0x00, modifiers: .command))]),
-            .holdToScroll(HoldScroll()), .autoScroll(AutoScroll()), .slowPointer(factor: 0.5),
+            .holdToScroll(HoldScroll()), .autoScroll(AutoScroll()), .slowPointer(factor: 0.5), .clickLock,
             .pointerPreset(deviceID: "046d:b034", presetID: "fast"),
         ]
         // Every kind of action has to be placed on one side or the other.
@@ -650,5 +650,6 @@ struct ButtonGestureTests {
         }
         #expect(WhiskerSettings.problem(withGestureAction: .slowPointer(factor: 0.5)) == "Slow pointer while held can't be a gesture action.")
         #expect(WhiskerSettings.problem(withGestureAction: .autoScroll(AutoScroll())) == "Auto-scroll (Experimental) can't be a gesture action.")
+        #expect(WhiskerSettings.problem(withGestureAction: .clickLock) == "Click Lock (Experimental) can't be a gesture action.")
     }
 }

@@ -95,6 +95,11 @@ struct GeneralPane: View {
                 Text("When off, the primary button always clicks unless you hold a modifier key, so a mapping can never leave you without a working click.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
+            Section("Experimental") {
+                Toggle("Enable Click Lock", isOn: $store.settings.general.experimentalClickLock)
+                Text("Lets a button hold the primary button down for you until you press again. It has not yet been verified on hardware. If the button ever seems stuck, press and release the primary button yourself, or choose Release Click Lock in the menu bar.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             Section("Settings File") {
                 HStack {
                     Button("Import…") { importSettings() }

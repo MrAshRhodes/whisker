@@ -326,6 +326,13 @@ extension WhiskerSettings {
 
     /// Why a single mapping can't be used, or nil when it is fine.
     public static func problem(with mapping: Mapping, allowPrimary: Bool) -> String? {
+        if mapping.action == .clickLock {
+            switch mapping.trigger {
+            case .button(0): return "Click Lock can't use the primary button as its trigger, because that button is how you get out."
+            case .wheel: return "Click Lock needs a mouse button as its trigger."
+            case .button: break
+            }
+        }
         switch mapping.trigger {
         case .button(let number):
             guard Trigger.buttonRange.contains(number) else { return "Button numbers run from 0 to 31." }

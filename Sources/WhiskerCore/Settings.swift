@@ -78,12 +78,19 @@ public struct GeneralSettings: Equatable, Sendable {
     /// actions, scroll changes and pointer overrides all switch off as if Whisker were off. It never turns
     /// Whisker on: the master switch still wins.
     public var bypassApps: [String]
+    /// Experimental opt-in for the Click Lock action. While off, Click Lock mappings stay in the file but do
+    /// nothing and the picker doesn't offer the action.
+    public var experimentalClickLock: Bool
 
-    public init(enabled: Bool = true, showMenuBarIcon: Bool = true, allowPrimaryButtonRemap: Bool = false, bypassApps: [String] = []) {
+    public init(
+        enabled: Bool = true, showMenuBarIcon: Bool = true, allowPrimaryButtonRemap: Bool = false, bypassApps: [String] = [],
+        experimentalClickLock: Bool = false
+    ) {
         self.enabled = enabled
         self.showMenuBarIcon = showMenuBarIcon
         self.allowPrimaryButtonRemap = allowPrimaryButtonRemap
         self.bypassApps = bypassApps
+        self.experimentalClickLock = experimentalClickLock
     }
 }
 
@@ -358,7 +365,7 @@ public struct Mapping: Equatable, Sendable {
 // MARK: - Coding
 
 extension GeneralSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case enabled, showMenuBarIcon, allowPrimaryButtonRemap, bypassApps }
+    private enum CodingKeys: String, CodingKey { case enabled, showMenuBarIcon, allowPrimaryButtonRemap, bypassApps, experimentalClickLock }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -367,6 +374,7 @@ extension GeneralSettings: Codable {
         showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? defaults.showMenuBarIcon
         allowPrimaryButtonRemap = try c.decodeIfPresent(Bool.self, forKey: .allowPrimaryButtonRemap) ?? defaults.allowPrimaryButtonRemap
         bypassApps = try c.decodeIfPresent([String].self, forKey: .bypassApps) ?? defaults.bypassApps
+        experimentalClickLock = try c.decodeIfPresent(Bool.self, forKey: .experimentalClickLock) ?? defaults.experimentalClickLock
     }
 }
 
