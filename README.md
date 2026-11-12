@@ -259,37 +259,45 @@ access returns.
 
 See the [user guide](https://mrashrhodes.github.io/whisker/guide.html) for each settings pane.
 
-## Two-button chords — foundation only
+## Two-button chords
 
-**Two-button chords are not active in this build.** Buttons shows disabled **Record two-button
-chord…** and **Primary + secondary → middle click** controls with the reason. No presses are
-buffered, no chord clicks are generated and ordinary mappings, primary clicks and Click Lock's
-primary-button escape are unchanged. Granting Input Monitoring does not enable chords.
+Press two buttons of the same mouse together to run an action, for example the primary and
+secondary buttons for a middle click. Set chords up in the **Two-button Chords** section of
+**Settings › Buttons**: **Record Two-button Chord…** records the pair (recording never runs an
+action), and **Add Primary + Secondary → Middle Click** adds the preset. Each chord has a press
+window, 75 ms unless you change it, from 20 to 200 ms.
 
-The additive per-profile `chords` field can retain definitions for future use: `first` and
-`second` are distinct button numbers, alongside `modifiers`, `action` and `pressWindow` in
-milliseconds. An omitted field inherits the parent's list (or means no chords without a parent);
-`[]` disables inherited chords. A non-empty list replaces the parent's list, without changing
-ordinary mappings. Overlapping pairs are rejected, including pairs with different modifiers.
-A primary-button pair requires keyboard modifiers or **Allow remapping the primary button**;
-the middle-click preset uses the existing Click action, not a new action type. Unknown keys,
+- **When chords work.** Only for a mouse connected over Bluetooth, while Whisker has Input
+  Monitoring access, and only when no other connected mouse is the same model. Presses from
+  identical models, USB mice, wireless receivers, or presses Whisker can't tie to a mouse pass
+  through unchanged. Adding or recording a chord is unavailable until Whisker is listening and
+  such a mouse is connected, and the section says which mice are ready; saved chords can always
+  be edited or removed.
+- **Delay.** While a chord is set, a single press of one of its buttons waits up to the press
+  window for the other one, then goes through and runs its normal mapping. Other buttons, other
+  mice and buttons in no chord are never held back.
+- **Primary button.** A chord that uses the primary button is blocked unless **Allow remapping the
+  primary button** is on in General, which also applies when the left and right buttons are
+  swapped. With that setting off, the middle-click preset adds ⌥, so you hold Option and press
+  both main buttons.
+- **What a chord sends.** The action runs with any modifier keys you are holding, like other
+  mappings. The middle-click chord sends one middle button down when the chord is recognised, so
+  you can drag, and the release when you let go of either button.
+- **Cancelling.** A chord in progress is called off when you switch apps, change settings, record
+  a button, disconnect the mouse, the Mac sleeps, Whisker quits or macOS interrupts its event tap.
+  After sleep, quitting or an interruption, an app may see a release without its press.
+- **Limits.** If Whisker learns which mouse a press came from more than about 30 ms late, the press
+  passes through. Any movement while a button is down abandons a waiting chord, so jitter can
+  cancel one. Chords pass through while the buttons are swapped in macOS's own settings. Chords
+  have not yet been verified on hardware.
+
+In the settings file each profile has an additive `chords` list: `first` and `second` are
+distinct button numbers, alongside `modifiers`, `action` and `pressWindow` in milliseconds. An
+omitted field inherits the parent's list (or means no chords without a parent); `[]` turns off
+inherited chords. A non-empty list replaces the parent's list, without changing ordinary
+mappings. Overlapping pairs are rejected, including pairs with different modifiers. Unknown keys,
 at the top level and inside a chord definition, survive a load and save (see
-[Settings file](#settings-file)).
-
-The pure recognition model is tested with either press order, original-payload fallback, held
-middle-click dragging, release draining and cancellation. Its provisional window is **75 ms**,
-bounded to **20–200 ms**. Live recognition would delay eligible single clicks by up to that window;
-timeout, early release or drag would resolve the originals through ordinary mappings in order.
-The window has **not yet been verified on hardware or through usability testing**.
-
-Live integration remains blocked on reliable **physical-connection** attribution for presses
-and releases, including identical mice and shared receivers, plus retained Quartz-event replay,
-timer expiry and ownership shared with other held actions. Existing model-level attribution is
-not enough; Input Monitoring may become a prerequisite. Before activation, app/profile/bypass
-changes, recording, disconnect, sleep, disable, quit and tap interruption must discard pending
-clicks without replay into another app and release owned outputs once. These adapter and recovery
-paths, recording, and real-app/hardware trials are not implemented or verified by the pure tests.
-There is no chord state to recover in the running app today. Issue [#24] remains partial.
+[Privacy](#privacy)). See [#24].
 
 [#24]: https://github.com/MrAshRhodes/whisker/issues/24
 
@@ -700,7 +708,7 @@ builds cannot update themselves. See [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 
 Planned after 0.1, in no particular order:
 
-- Tilt-wheel buttons and two-button chords.
+- Tilt-wheel buttons.
 - Taking Auto-scroll and Click Lock out of experimental once they have been verified on
   hardware.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
