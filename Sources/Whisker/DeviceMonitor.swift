@@ -7,23 +7,49 @@ import WhiskerCore
 typealias ConnectedDevice = PointingDevice
 
 /// Watches mice come and go, and — when Input Monitoring is allowed — which one each click came from.
+///
+/// What the Devices pane explains (what a mouse reports, whether it sent input lately, whether Whisker is
+/// listening) is read and published here on the main thread, apart from the event path: it never reaches
+/// `onChange` or the attributor, and when it can't be read the pane just says so.
 final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     @Published private(set) var devices: [ConnectedDevice] = []
-    @Published private(set) var canIdentifyDevices = false
+    /// Whether Whisker is listening for button and wheel reports. That is permission, not a promise about any one click.
+    @Published private(set) var identification: IdentificationStatus = .notAllowed
+    /// What each listed device reports it has, by device id.
+    @Published private(set) var controls: [String: ControlsReport] = [:]
+    /// Devices that sent a button or wheel report within `AttributionEvidence.window`.
+    @Published private(set) var recentInput: Set<String> = []
     var onChange: (([ConnectedDevice]) -> Void)?
+
+    var canIdentifyDevices: Bool { identification == .listening }
 
     private var manager: IOHIDManager?
     /// Only matched, never opened: keyboards are watched just to tell a keyboard's mouse-keys interface from a mouse.
     private var keyboardManager: IOHIDManager?
     private var interfaces: [IOHIDDevice: HIDInterfaceInfo] = [:]
+    /// What each pointing interface reported, before it is combined per listed device.
+    private var interfaceControls: [IOHIDDevice: ControlsReport] = [:]
     /// The listed device each pointing interface belongs to, for attributing input.
     private var deviceIDs: [IOHIDDevice: String] = [:]
     private var opened = false
     private let attributor = OSAllocatedUnfairLock(initialState: DeviceAttributor())
+    /// Main thread only. One time per device, never saved or logged.
+    private var evidence = AttributionEvidence()
+    private var expiryTimer: Timer?
 
     /// Called from the event tap thread.
     func attribute(_ kind: DeviceAttributor.ReportKind, at time: TimeInterval) -> DeviceAttribution? {
         attributor.withLock { $0.attribute(kind: kind, at: time) }
+    }
+
+    /// Details for the connected devices, for the Devices pane.
+    var connectedDetails: [DeviceDetails] {
+        DeviceDetailsBuilder.details(for: devices, controls: controls, identification: identification, recentInput: recentInput)
+    }
+
+    /// Limited details for a mouse with saved settings that isn't connected.
+    func rememberedDetails(id: String, name: String) -> DeviceDetails {
+        DeviceDetailsBuilder.remembered(id: id, name: name, identification: identification)
     }
 
     func start() {
@@ -35,6 +61,7 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
                 interfaces[device] = Self.info(for: device)
             }
         }
+        readControls()
         refresh()
         openIfAllowed()
     }
@@ -65,8 +92,10 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     }
 
     private func openIfAllowed() {
-        guard let manager, !opened, IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted else {
-            canIdentifyDevices = opened
+        guard let manager else { return }
+        let granted = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+        guard !opened, granted else {
+            identification = IdentificationStatus(accessGranted: granted, listening: opened)
             return
         }
         let context = Unmanaged.passUnretained(self).toOpaque()
@@ -77,19 +106,70 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         }, context)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         opened = result == kIOReturnSuccess
-        canIdentifyDevices = opened
+        identification = IdentificationStatus(accessGranted: true, listening: opened)
         Log.devices.info("Device identification \(self.opened ? "on" : "unavailable", privacy: .public)")
+        // macOS may only describe a device's controls once the manager has opened it.
+        if opened { refreshControls() }
     }
 
     private func added(_ device: IOHIDDevice) {
         guard interfaces[device] == nil else { return }
-        interfaces[device] = Self.info(for: device)
+        let info = Self.info(for: device)
+        interfaces[device] = info
+        if info.isPointing { interfaceControls[device] = Self.report(for: device, allowed: Self.inputMonitoringAllowed) }
         refresh()
     }
 
     private func removed(_ device: IOHIDDevice) {
         guard interfaces.removeValue(forKey: device) != nil else { return }
+        interfaceControls[device] = nil
         refresh()
+    }
+
+    /// Reads what every pointing interface reports again, for when the answer may have changed: Input
+    /// Monitoring was allowed, or someone opened a device's details. Opens nothing and asks for no permission.
+    func refreshControls() {
+        readControls()
+        publishControls()
+    }
+
+    private func readControls() {
+        let allowed = Self.inputMonitoringAllowed
+        for (device, info) in interfaces where info.isPointing {
+            interfaceControls[device] = Self.report(for: device, allowed: allowed)
+        }
+    }
+
+    private func publishControls() {
+        var reports: [String: [ControlsReport]] = [:]
+        for (device, id) in deviceIDs {
+            reports[id, default: []].append(interfaceControls[device] ?? .unavailable(.notProvided))
+        }
+        let combined = reports.mapValues(ControlsReport.combine)
+        if combined != controls { controls = combined }
+    }
+
+    private static var inputMonitoringAllowed: Bool {
+        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+    }
+
+    /// Whisker doesn't ask macOS to describe a device until Input Monitoring is allowed: it has to be the user
+    /// who chooses to turn that on, and asking about an undetermined permission could prompt for it.
+    private static func report(for device: IOHIDDevice, allowed: Bool) -> ControlsReport {
+        allowed ? controls(for: device) : .unavailable(.inputMonitoringOff)
+    }
+
+    /// The elements an interface says it has. macOS hands back nothing for a device it won't describe, which is
+    /// read as "unavailable" and never as "no buttons".
+    static func controls(for device: IOHIDDevice) -> ControlsReport {
+        let elements = IOHIDDeviceCopyMatchingElements(device, nil, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement]
+        return ControlsReport.read(elements?.map {
+            HIDElementInfo(
+                kind: HIDElementKind(ioKitType: Int(IOHIDElementGetType($0).rawValue)),
+                usagePage: Int(IOHIDElementGetUsagePage($0)),
+                usage: Int(IOHIDElementGetUsage($0))
+            )
+        })
     }
 
     static func info(for device: IOHIDDevice) -> HIDInterfaceInfo {
@@ -122,6 +202,8 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
             for key in device.physicalKeys { owner[key] = device.id }
         }
         deviceIDs = interfaces.compactMapValues { $0.isPointing ? owner[$0.physicalKey] : nil }
+        publishControls()
+        pruneEvidence(keeping: Set(listed.map(\.id)))
         guard listed != devices else { return }
         let before = Set(devices.map(\.id)), after = Set(listed.map(\.id))
         for device in listed where !before.contains(device.id) {
@@ -153,5 +235,37 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         }
         let now = ProcessInfo.processInfo.systemUptime
         attributor.withLock { $0.record(deviceID: id, kind: kind, at: now) }
+        recordInput(from: id, at: Self.clock())
+    }
+
+    /// Keeps counting while the Mac sleeps, so input from before a sleep isn't still recent on waking.
+    static func clock() -> TimeInterval { TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1_000_000_000 }
+
+    /// Notes that a device sent a button or wheel report. The pane only hears about it when the device becomes
+    /// recent, so a busy mouse costs one timestamp update here and nothing more.
+    func recordInput(from id: String, at now: TimeInterval) {
+        guard evidence.record(deviceID: id, at: now) else { return }
+        publishRecent(at: now)
+    }
+
+    /// Publishes which devices are recent as of `now`, if that changed, and waits for the next one to go stale.
+    func publishRecent(at now: TimeInterval) {
+        let recent = evidence.recent(at: now)
+        if recent != recentInput { recentInput = recent }
+        expiryTimer?.invalidate()
+        expiryTimer = nil
+        guard let due = evidence.nextExpiry(at: now) else { return }
+        let timer = Timer(timeInterval: due - now + 0.1, repeats: false) { [weak self] _ in
+            self?.publishRecent(at: Self.clock())
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        expiryTimer = timer
+    }
+
+    /// Forgets devices that are gone, so one that comes back has to send input again before it counts.
+    func pruneEvidence(keeping connected: Set<String>, at now: TimeInterval = DeviceMonitor.clock()) {
+        guard !evidence.isEmpty else { return }
+        evidence.prune(keeping: connected, at: now)
+        publishRecent(at: now)
     }
 }

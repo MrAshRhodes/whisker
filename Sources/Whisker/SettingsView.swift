@@ -619,54 +619,60 @@ struct DevicesPane: View {
     }
 
     var body: some View {
+        let connected = devices.connectedDetails
         Form {
             Section("Connected") {
-                if devices.devices.isEmpty {
+                if connected.isEmpty {
                     Text("No mouse is connected.").foregroundStyle(.secondary)
                 }
-                ForEach(devices.devices) { device in
-                    if device.isExcluded {
-                        LabeledContent(device.name) { Text(device.excludedKind?.listLabel ?? "Left alone").foregroundStyle(.secondary) }
+                ForEach(connected) { details in
+                    if let kind = details.excludedKind {
+                        VStack(alignment: .leading, spacing: 6) {
+                            LabeledContent(details.name) { Text(kind.listLabel).foregroundStyle(.secondary) }
+                            DeviceDetailsDisclosure(details: details, onOpen: { devices.refreshControls() })
+                        }
                     } else {
-                        deviceRow(id: device.id, name: device.name)
+                        deviceRow(details, name: details.name, onOpen: { devices.refreshControls() })
                     }
                 }
             }
             if !remembered.isEmpty {
                 Section("Not Connected") {
                     ForEach(remembered, id: \.id) { entry in
-                        HStack {
-                            deviceRow(id: entry.id, name: entry.settings.name.isEmpty ? entry.id : entry.settings.name)
-                            Button {
-                                store.settings.devices[entry.id] = nil
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Forget this mouse")
-                        }
+                        deviceRow(
+                            devices.rememberedDetails(id: entry.id, name: entry.settings.name),
+                            name: entry.settings.name.isEmpty ? entry.id : entry.settings.name,
+                            forget: { store.settings.devices[entry.id] = nil }
+                        )
                     }
                 }
             }
             Section("Telling Mice Apart") {
-                if devices.canIdentifyDevices {
-                    Label("Whisker can tell which mouse each click comes from.", systemImage: "checkmark.circle")
-                } else {
-                    Text("With one mouse, Whisker knows every click is from it. To use different settings for several mice at once, allow Input Monitoring so Whisker can see which one sent each click.")
-                        .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("Allow Input Monitoring…") { devices.requestIdentification() }
+                LabeledContent("Input Monitoring") { Text(devices.identification.title) }
+                Text(devices.identification.explanation)
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                switch devices.identification {
+                case .listening: EmptyView()
+                case .notAllowed: Button("Allow Input Monitoring…") { devices.requestIdentification() }
+                case .couldNotListen: Button("Try Again") { devices.requestIdentification() }
                 }
             }
         }
         .formStyle(.grouped)
     }
 
-    @ViewBuilder private func deviceRow(id: String, name: String) -> some View {
+    /// `name` is what a new profile or first saved setting for the mouse is called; the row shows `details.name`.
+    @ViewBuilder private func deviceRow(
+        _ details: DeviceDetails, name: String, onOpen: @escaping () -> Void = {}, forget: (() -> Void)? = nil
+    ) -> some View {
+        let id = details.id
         let binding = model.deviceBinding(id, name: name)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Toggle(isOn: binding.enabled) {
                     VStack(alignment: .leading) {
-                        Text(name)
-                        Text(id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Text(details.name)
+                        Text(details.summaryText).font(.caption.monospaced()).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
@@ -680,11 +686,18 @@ struct DevicesPane: View {
                     }
                     model.selectedPane = .buttons
                 }
+                if let forget {
+                    Button(action: forget) { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                        .help("Forget this mouse")
+                        .accessibilityLabel("Forget \(details.name)")
+                }
             }
             if binding.wrappedValue.enabled {
                 Toggle("Reverse vertical scrolling", isOn: binding.wheel.invertVertical)
                 Toggle("Reverse horizontal scrolling", isOn: binding.wheel.invertHorizontal)
             }
+            DeviceDetailsDisclosure(details: details, onOpen: onOpen)
         }
     }
 }

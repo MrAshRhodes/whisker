@@ -1,12 +1,18 @@
 import Foundation
 
-/// HID usage numbers the classifier cares about (HID Usage Tables, Generic Desktop page).
+/// HID usage numbers the classifier and the controls summary care about (HID Usage Tables).
 public enum HIDUsage {
     public static let genericDesktopPage = 0x01
     public static let pointer = 0x01
     public static let mouse = 0x02
     public static let keyboard = 0x06
     public static let keypad = 0x07
+    /// Generic Desktop: the vertical wheel.
+    public static let wheel = 0x38
+    public static let buttonPage = 0x09
+    public static let consumerPage = 0x0C
+    /// Consumer: AC Pan, the horizontal wheel.
+    public static let acPan = 0x238
 }
 
 /// One HID interface as the system reports it. A physical device often has several: a gaming mouse adds a
@@ -60,6 +66,7 @@ public struct HIDInterfaceInfo: Hashable, Sendable {
 /// A physical pointing device worth listing, built from its HID interfaces.
 public struct PointingDevice: Hashable, Sendable, Identifiable {
     public var id: String
+    /// What the lists show: the product name, or one made from the ids when the device has none.
     public var name: String
     public var vendorID: Int
     public var productID: Int
@@ -70,6 +77,8 @@ public struct PointingDevice: Hashable, Sendable, Identifiable {
     public var isExcluded: Bool { excludedKind != nil }
     /// `HIDInterfaceInfo.physicalKey` of every device that makes up this entry.
     public var physicalKeys: Set<String>
+    /// The product name the device reported, trimmed; nil when it reported none or a blank one.
+    public var productName: String?
 }
 
 public enum PointingDeviceClassifier {
@@ -80,7 +89,8 @@ public enum PointingDeviceClassifier {
     public static func pointingDevices(from interfaces: [HIDInterfaceInfo]) -> [PointingDevice] {
         let groups = Dictionary(grouping: interfaces, by: \.physicalKey)
         var byID: [String: PointingDevice] = [:]
-        for (key, group) in groups {
+        // Sorted, so a shared identity always shows the details of the same device instead of whichever came first.
+        for (key, group) in groups.sorted(by: { $0.key < $1.key }) {
             guard let pointing = group.filter(\.isPointing).min(by: lead), !isKeyboard(group) else { continue }
             let identity = pointing.identity
             if var existing = byID[identity.id] {
@@ -94,7 +104,8 @@ public enum PointingDeviceClassifier {
                 vendorID: pointing.vendorID, productID: pointing.productID, serial: identity.serial,
                 transport: pointing.transport,
                 excludedKind: DeviceIdentity.excludedKind(transport: pointing.transport, product: pointing.product, vendorID: pointing.vendorID),
-                physicalKeys: [key]
+                physicalKeys: [key],
+                productName: DeviceIdentity.productName(pointing.product)
             )
         }
         return byID.values.sorted {

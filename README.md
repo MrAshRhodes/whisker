@@ -58,7 +58,9 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 - **Devices.** Lists connected mice and trackballs, including ones you plug in or pair while
   Whisker is running. With several mice connected, allow Input Monitoring so Whisker can tell
   which one each click came from and apply that mouse's settings. Trackpads and touch mice such
-  as Magic Mouse are left alone.
+  as Magic Mouse are listed but left alone. Open **Details** under any of them to see how Whisker
+  identifies it, the buttons and wheels it reports and how sure Whisker is which clicks are its.
+  See [Device details](#device-details).
 - **Menu bar item** to turn Whisker on or off, see the active profile (or the app it is bypassed
   for) and open its settings. The icon can be hidden, and Whisker can open at login.
 - **Settings file.** Everything is kept in one readable JSON file that you can export, import or
@@ -75,7 +77,8 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   can replace them with the actions you choose, and macOS only allows that for apps you have
   approved under Accessibility. Whisker does not read what you type.
 - Optionally, **Input Monitoring**, only if you want different settings for several mice that
-  are connected at the same time. With one mouse, Whisker does not need it.
+  are connected at the same time. With one mouse, Whisker does not need it, and opening a
+  mouse's details never asks for it.
 
 ## Install
 
@@ -142,6 +145,44 @@ launcher or the game's own program is in front while you play depends on the gam
 been verified for particular games, so add whichever app is in front while you play. Opening a
 Whisker window brings Whisker to the front, which ends the bypass until you switch back.
 
+## Device details
+
+Open **Details** under a mouse in **Settings › Devices** to see what Whisker knows about it. It is
+read-only: opening it changes no setting, does not ask for Input Monitoring and does not touch
+the device. A mouse that is not connected shows only what its saved settings record.
+
+- **Who it is.** The product name, the connection (such as USB or Bluetooth) and the vendor and
+  product ids. Anything a device does not report says "Not reported", and a device without a name
+  is listed by its ids.
+- **Serial number.** Whether the mouse reports one. The number stays hidden until you choose
+  **Show** and is hidden again when you close the details. Whisker already uses it as part of the
+  mouse's identity in your settings, and saves nothing more.
+- **Permission and attribution are separate.** **Input Monitoring** says whether Whisker can
+  listen for button and wheel reports: Allowed, Not allowed, or Allowed but Whisker could not
+  start listening. **Attribution** says how sure Whisker is which mouse a click came from:
+  **Recent matching input** (that mouse sent a button press or wheel turn in the last minute),
+  **Inferred from one eligible mouse** (it is the only mouse Whisker handles, so clicks are assumed
+  to be its), **Ambiguous identity** (several connected devices look the same) or **Unknown**.
+  It is evidence, not a guarantee, and a mouse can be allowed yet Unknown until you use it.
+- **Reported controls.** The buttons and wheels the mouse reports to macOS, each listed once. It is
+  not a count of physical buttons, and "None reported" or "Unavailable" never means there are
+  none. Whisker reads controls once Input Monitoring is allowed and does not ask for it just to
+  show them. This is not yet verified on hardware: in one test on macOS 26.6 with Input Monitoring
+  off, macOS gave Whisker no controls for any of twelve built-in, USB and Bluetooth interfaces, so
+  every mouse showed Unavailable. Other versions of macOS, other connections and what you see once
+  Input Monitoring is allowed have not been tried.
+- **Shared settings.** Mice with the same vendor and product ids and no serial number have the
+  same identity, so they share one set of settings, and the details say how many connected
+  devices share it. Whisker can only notice this when each device reports where it is connected:
+  two such mice that do not are listed as one. A mouse that reports a serial number is kept apart
+  from the others.
+- **Left alone.** Trackpads and touch mice such as Magic Mouse are listed with the reason Whisker
+  leaves them alone, and are not counted as a second mouse.
+- **Privacy.** Whisker keeps only when each mouse last sent a button press or wheel turn, in memory,
+  and treats it as recent for 60 seconds. It does not keep what was sent or a history, never
+  saves, logs or sends it anywhere, and forgets it when the mouse is unplugged or Whisker quits.
+  Details add nothing to the settings file.
+
 ## Privacy
 
 Whisker works entirely on your Mac. It has no accounts, analytics or telemetry, and it makes no
@@ -183,7 +224,10 @@ brew update && brew upgrade --cask whisker
 - **Back and forward do nothing in an app.** These send ⌘[ and ⌘]. Map the button to a different
   shortcut in a profile for that app.
 - **A mouse's own settings are not used when another mouse is connected.** Click
-  **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart.
+  **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart, then open the
+  mouse's **Details** to see how sure Whisker is which clicks are its.
+- **Two mice share one set of settings.** They report the same vendor and product ids and no
+  serial number, so Whisker cannot tell them apart. Their **Details** say so.
 - **The pointer is suddenly too fast.** Wait a few seconds without confirming and Whisker reverts
   the change. Quitting Whisker also restores the original speed.
 - **Whisker still changes my mouse in an app I have bypassed.** Bypass follows the app that is in

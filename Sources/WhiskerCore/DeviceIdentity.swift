@@ -35,11 +35,15 @@ public struct DeviceIdentity: Hashable, Sendable, Identifiable, CustomStringConv
 
     public var description: String { id }
 
+    /// The reported product name, trimmed; nil when the device reported none or a blank one.
+    public static func productName(_ product: String?) -> String? {
+        let trimmed = product?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty ?? true) ? nil : trimmed
+    }
+
     /// The name to show for a device, falling back to its ids when it doesn't have a product name.
     public static func displayName(product: String?, vendorID: Int, productID: Int) -> String {
-        if let product = product?.trimmingCharacters(in: .whitespacesAndNewlines), !product.isEmpty {
-            return product
-        }
+        if let name = productName(product) { return name }
         return String(format: "Mouse %04X:%04X", vendorID & 0xFFFF, productID & 0xFFFF)
     }
 

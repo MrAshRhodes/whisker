@@ -46,7 +46,7 @@
           <li><a href="#getting-started">Getting started</a></li>
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#menu-bar">Menu bar</a></li>
-          <li><a href="#devices">Devices</a></li>
+          <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li></ol></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li></ol></li>
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
@@ -91,7 +91,7 @@ make app</code></pre>
           <p>To grant it, open <span class="ui">System Settings › Privacy &amp; Security › Accessibility</span> and turn on Whisker, or choose <span class="ui">Grant Accessibility Access…</span> from Whisker's menu. Whisker checks every second while it's running, so it starts working as soon as access is on, even if you closed the welcome window.</p>
           <p>To take access away, turn Whisker off in the same list. Whisker stops changing your mouse straight away and lets go of any button or key it was holding.</p>
           <h3>Input Monitoring (optional)</h3>
-          <p>Only needed if you use two or more mice and want settings for each one. Without it, macOS doesn't say which mouse an event came from, so Whisker can only be sure when one mouse is connected. Turn it on from <span class="ui">Settings › Devices › Telling Mice Apart › Allow Input Monitoring…</span>.</p>
+          <p>Only needed if you use two or more mice and want settings for each one. Without it, macOS doesn't say which mouse an event came from, so Whisker can only be sure when one mouse is connected. Turn it on from <span class="ui">Settings › Devices › Telling Mice Apart › Allow Input Monitoring…</span>. Opening a mouse's <a href="#device-details">details</a> never asks for it.</p>
           <div class="callout-note">
             <p>A copy you built yourself is signed only for your Mac, so each rebuild looks like a new app to macOS. If Whisker stops responding after a rebuild, remove it from the Accessibility list with the <kbd>−</kbd> button and add it again.</p>
           </div>
@@ -123,8 +123,23 @@ make app</code></pre>
           <ul>
             <li><span class="ui">Make Profile</span> creates a profile for that mouse. <span class="ui">Edit Buttons</span> opens its mappings.</li>
             <li>Settings for a single mouse, such as <a href="#pointer">pointer speed</a> and <a href="#direction">scroll direction</a>, follow that mouse wherever you plug it in.</li>
-            <li>Trackpads aren't listed. Magic Mouse appears as <span class="ui">Touch mouse — left alone</span>: Whisker doesn't change its buttons, scrolling or pointer.</li>
+            <li>Trackpads and touch mice are listed too, as <span class="ui">Trackpad — left alone</span> and <span class="ui">Touch mouse — left alone</span> (Magic Mouse is one). Whisker doesn't change their buttons, scrolling or pointer.</li>
+            <li>Choose <span class="ui">Details</span> under any device to see what Whisker knows about it.</li>
           </ul>
+          <h3 id="device-details">Details</h3>
+          <p>Choose <span class="ui">Details</span> under a device to open a read-only summary. Opening it changes no setting, doesn't ask for Input Monitoring and doesn't touch the device. For a mouse that isn't connected it shows only what its saved settings record.</p>
+          <ul>
+            <li>Who it is: <span class="ui">Product name</span>, <span class="ui">Connection</span> (such as USB or Bluetooth), <span class="ui">Vendor ID</span> and <span class="ui">Product ID</span>. Anything a device doesn't report says <span class="ui">Not reported</span>, and a device without a name is listed by its ids.</li>
+            <li><span class="ui">Serial number</span>: whether the device reports one. The number stays hidden until you choose <span class="ui">Show</span>, and it's hidden again when you close the details. Whisker already uses it as part of the mouse's identity in your settings, and saves nothing more.</li>
+            <li><span class="ui">Input Monitoring</span> and <span class="ui">Attribution</span> are separate. Input Monitoring says whether Whisker can listen for button and wheel reports: <span class="ui">Allowed</span>, <span class="ui">Not allowed</span> or <span class="ui">Allowed, but Whisker couldn't start listening</span>. Attribution says how sure Whisker is which mouse a click came from: <span class="ui">Recent matching input</span> (that mouse sent a button press or wheel turn in the last minute), <span class="ui">Inferred from one eligible mouse</span> (it's the only mouse Whisker handles, so clicks are assumed to be its), <span class="ui">Ambiguous identity</span> (several connected devices look the same) or <span class="ui">Unknown</span>. It's evidence, not a guarantee, and a mouse can be allowed yet Unknown until you use it.</li>
+            <li><span class="ui">Reported buttons</span> and <span class="ui">Reported wheels</span>: what the device tells macOS it can send, each listed once. This isn't a count of physical buttons, and <span class="ui">None reported</span> or <span class="ui">Unavailable</span> never means there are none. Whisker reads them once Input Monitoring is allowed and doesn't ask for it just to show them.</li>
+            <li>Shared settings: mice with the same vendor and product ids and no serial number have the same identity, so they share one set of settings, and the details say how many connected devices share it. Whisker can only notice this when each device reports where it's connected: two such mice that don't are listed as one. A mouse that reports a serial number is kept apart from the others.</li>
+            <li>Left alone: a trackpad or touch mouse's details say why Whisker leaves it alone, and it isn't counted as a second mouse.</li>
+            <li>Privacy: Whisker keeps only when each mouse last sent a button press or wheel turn, in memory, and treats it as recent for 60 seconds. It doesn't keep what was sent or a history, never saves, logs or sends it anywhere, and forgets it when the mouse is unplugged or Whisker quits. Details add nothing to the settings file.</li>
+          </ul>
+          <div class="callout-note">
+            <p>Not yet verified on hardware: reported buttons and wheels. In one test on macOS 26.6 with Input Monitoring off, macOS gave Whisker no controls for any of twelve built-in, USB and Bluetooth interfaces, so every mouse showed <span class="ui">Unavailable</span>. Other versions of macOS, other connections and what you see once Input Monitoring is allowed haven't been tried, and neither has how closely <span class="ui">Recent matching input</span> follows real use.</p>
+          </div>
         </section>
 
         <section aria-labelledby="buttons">
@@ -307,9 +322,13 @@ make app</code></pre>
           <h3>An action just beeps</h3>
           <p>The action uses a macOS keyboard shortcut that's switched off. Turn it on in <span class="ui">System Settings › Keyboard › Keyboard Shortcuts</span>. A web address or file path that can't be opened also beeps.</p>
           <h3>Settings for one mouse apply to the wrong one</h3>
-          <p>With more than one mouse connected, allow Input Monitoring so Whisker can tell them apart. See <a href="#permissions">Permissions</a>.</p>
+          <p>With more than one mouse connected, allow Input Monitoring so Whisker can tell them apart. See <a href="#permissions">Permissions</a>. Then open the mouse's <span class="ui">Details</span>: <span class="ui">Attribution</span> shows how sure Whisker is which clicks are its.</p>
+          <h3>Two mice share one set of settings</h3>
+          <p>They report the same vendor and product ids and no serial number, so Whisker can't tell them apart. Each one's <span class="ui">Details</span> says so. See <a href="#device-details">Details</a>.</p>
+          <h3>Details shows Unavailable for a mouse's buttons</h3>
+          <p>Whisker didn't get a list from macOS. That says nothing about how many buttons the mouse has. Whisker reads buttons and wheels once Input Monitoring is allowed and doesn't ask for it just to show them, and this hasn't been verified on hardware yet. See <a href="#device-details">Details</a>.</p>
           <h3>My trackpad or Magic Mouse isn't affected</h3>
-          <p>That's deliberate: Whisker leaves trackpads and touch mice alone.</p>
+          <p>That's deliberate: Whisker leaves trackpads and touch mice alone. Their <span class="ui">Details</span> say why.</p>
           <h3>Lines per notch makes no difference</h3>
           <p>Your mouse probably sends smooth scrolling rather than notches. Direction settings still apply.</p>
           <h3>Speed while holding keys makes no difference</h3>
