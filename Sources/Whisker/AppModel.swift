@@ -210,6 +210,11 @@ final class AppModel: ObservableObject {
                 self?.engine.releaseAll()
             })
         }
+        // Read here, never in the tap: smoothing stands aside while Reduce Motion is on, and live when it changes.
+        engine.setReduceMotion(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        observers.append(center.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.engine.setReduceMotion(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        })
         Log.app.info("Whisker \(AppInfo.version, privacy: .public) started; accessibility \(self.permission.isTrusted ? "granted" : "not granted", privacy: .public)")
     }
 

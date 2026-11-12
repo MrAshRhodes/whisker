@@ -24,10 +24,20 @@ protocol ActionPerforming: AnyObject, Sendable {
     func releaseAll()
     /// Scrolls by whole pixels and puts the pointer back on `anchor`.
     func holdScroll(_ pixels: ScrollPixels, anchor: CGPoint)
+    /// Hands pixel distance to smooth scrolling. False means it was refused and the caller must deliver the
+    /// event itself.
+    func smoothScroll(vertical: Double, horizontal: Double, context: SmoothingContext, durationMilliseconds: Int) -> Bool
+    /// Drops smooth scrolling that is still waiting; none of it is delivered later.
+    func cancelSmoothScroll()
+    /// Drops it when it came from a device that is no longer connected.
+    func cancelSmoothScroll(unlessConnected connected: Set<String>)
 }
 
 extension ActionPerforming {
     func holdScroll(_ pixels: ScrollPixels, anchor: CGPoint) {}
+    func smoothScroll(vertical: Double, horizontal: Double, context: SmoothingContext, durationMilliseconds: Int) -> Bool { false }
+    func cancelSmoothScroll() {}
+    func cancelSmoothScroll(unlessConnected connected: Set<String>) {}
 }
 
 /// Posts the events and runs the commands that mapped actions turn into.
@@ -45,6 +55,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     private let tripleClickTiming: @Sendable () -> ClickTiming
     private let sequences: ShortcutSequenceRunner
     private var repeatTimer: DispatchSourceTimer?
+    private let smoother = SmoothScroller()
 
     /// `tripleClickTiming` is asked at every activation. It posts all three clicks back to back, like Double Click
     /// does, until spacing them out is shown to be needed: `{ .spaced(withinInterval: NSEvent.doubleClickInterval) }`.
@@ -138,6 +149,18 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
         event.location = anchor
         mark(event)
         event.post(tap: .cghidEventTap)
+    }
+
+    func smoothScroll(vertical: Double, horizontal: Double, context: SmoothingContext, durationMilliseconds: Int) -> Bool {
+        smoother.enqueue(vertical: vertical, horizontal: horizontal, context: context, durationMilliseconds: durationMilliseconds)
+    }
+
+    func cancelSmoothScroll() {
+        smoother.cancel()
+    }
+
+    func cancelSmoothScroll(unlessConnected connected: Set<String>) {
+        smoother.cancel(unlessConnected: connected)
     }
 
     /// Calls off a click gesture that is still under way; a press already posted gets its release.

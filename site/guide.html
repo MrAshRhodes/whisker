@@ -48,7 +48,7 @@
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li><li><a href="#duplicate-clicks">Duplicate clicks</a></li></ol></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li></ol></li>
-          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
+          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#smooth-notched-scrolling">Smooth notched scrolling</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
           <li><a href="#application-bypass">Application bypass</a></li>
@@ -250,6 +250,17 @@ make app</code></pre>
             <li>If any of the values can't be written, read back or restored, Whisker undoes the whole change for that mouse and doesn't retry by itself.</li>
           </ul>
           <p>This has not yet been verified on hardware, so the accepted ranges and the real effect on mice such as the Logitech Lift and MX Master 3S are untested. If a mouse won't take its values back, see <a href="#troubleshooting">Troubleshooting</a>.</p>
+          <h3 id="smooth-notched-scrolling">Smooth notched scrolling</h3>
+          <p>Turn on <span class="ui">Smooth notched scrolling</span> in <span class="ui">Settings › Scrolling</span> and choose a <span class="ui">Duration</span>, from 40 to 400 milliseconds (120 to begin with). It is off by default, and each profile has its own setting, which replaces Default's along with the rest of its scrolling settings.</p>
+          <ul>
+            <li>It spreads a distance the wheel already scrolls over time. It adds no distance and no coasting: the total is the same as without it, including the effect of lines per notch, speed while holding keys, reversed direction and scrolling sideways.</li>
+            <li>A wheel action on the same direction and keys still takes priority, and that notch doesn't scroll as well. The smooth sideways stream for Scroll Left and Scroll Right keeps its own handling and isn't smoothed.</li>
+            <li>If you use the mouse's <a href="#native-wheel-settings">own wheel settings</a>, Whisker spreads the distance the mouse then reports and adds no acceleration of its own.</li>
+            <li>It applies only to notches from a mouse Whisker can identify exactly. Trackpads, mice that already send smooth scrolling, coasting, touch mice and anything Whisker is unsure about are passed through untouched. If Whisker can't take a notch on, it scrolls at once as it would with smoothing off.</li>
+            <li>While <span class="ui">Reduce Motion</span> is on in System Settings, smoothing is bypassed, and it stops as soon as you turn it on.</li>
+            <li>Whatever is still pending is dropped, never delayed into something else, when Whisker is switched off, you record a button, the Mac sleeps, Accessibility is lost, a bypassed app or another app comes to the front, the mouse is unplugged, or you start Hold to Scroll. Moving the pointer over another window mid-scroll isn't detected.</li>
+          </ul>
+          <p>Smoothing has not yet been verified in real applications, native or browser: apps differ in how they treat pixel-based scrolling, and some may scroll differently from how they do with notches. Duration and feel are untested on hardware.</p>
           <h3 id="wheel-actions">Wheel actions</h3>
           <p>The wheel can trigger actions too. In <span class="ui">Settings › Buttons</span>, choose <span class="ui">Record Button…</span> and turn the wheel: each direction (up, down, left and right) is its own trigger, with any modifier keys. <kbd>⌥</kbd> + wheel up for Volume Up is a common one. Most people keep a modifier on wheel mappings so that plain scrolling still works.</p>
           <p><span class="ui">Repeat for every notch</span> runs the action once per notch. With it off, the action runs once for each burst of turning.</p>

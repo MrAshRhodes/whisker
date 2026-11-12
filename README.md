@@ -54,6 +54,12 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   mouse's own driver settings instead; it is offered only when Whisker can read and restore the
   values, replaces Whisker's lines per notch and acceleration for that mouse, and is not yet
   verified on hardware.
+- **Smooth notched scrolling (opt-in).** Spreads the distance a wheel notch already scrolls over
+  a short time you choose, from 40 to 400 milliseconds, per profile. It adds no distance and no
+  coasting, applies only to notches from a mouse Whisker can identify exactly, leaves trackpads,
+  smooth-scrolling and touch mice alone, and switches itself off while Reduce Motion is on.
+  It has not yet been verified in real applications, native or browser, and apps may treat the
+  pixel scrolling it sends differently.
 - **Hold to Scroll (experimental).** Hold a button and roll the ball to scroll instead of moving
   the pointer, which stays where it was and does not jump when you let go. Choose the axes
   (including Automatic Axis Lock, which picks vertical or horizontal from each hold's first
@@ -329,7 +335,6 @@ Planned after 0.1, in no particular order:
 - Tilt-wheel buttons and two-button chords.
 - Auto-scroll and click lock.
 - Quick-switch pointer speed presets.
-- Smooth scrolling for notched wheels.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
 
 ## Contributing

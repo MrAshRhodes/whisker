@@ -238,6 +238,7 @@ struct ScrollingPane: View {
                     }
                 }
                 speedSection(scroll)
+                smoothSection(scroll)
                 if !profile.wrappedValue.isDefault {
                     Section {
                         Button("Use Inherited Settings") { profile.wrappedValue.scroll = nil }
@@ -251,6 +252,28 @@ struct ScrollingPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: Smooth scrolling
+
+    @ViewBuilder private func smoothSection(_ scroll: Binding<ScrollSettings>) -> some View {
+        Section("Smooth notched scrolling") {
+            Toggle("Smooth notched scrolling", isOn: scroll.smoothScrolling)
+            if scroll.wrappedValue.smoothScrolling {
+                LabeledContent("Duration") {
+                    Slider(value: Binding(
+                        get: { Double(scroll.wrappedValue.smoothDuration) },
+                        set: { scroll.wrappedValue.smoothDuration = Int($0.rounded()) }
+                    ), in: Double(ScrollMath.smoothDurationRange.lowerBound)...Double(ScrollMath.smoothDurationRange.upperBound), step: 10) {
+                        EmptyView()
+                    } minimumValueLabel: { Text("Short") } maximumValueLabel: { Text("Long") }
+                }
+                Text("\(scroll.wrappedValue.smoothDuration) ms. Reduce Motion in System Settings switches smoothing off.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Text("Spreads the distance a wheel notch already scrolls over a short time. It adds no distance and no coasting. Trackpads, smooth-scrolling mice, touch mice and mice Whisker can't identify with certainty are left alone. Not yet verified in real apps.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
     }
 
     // MARK: Speed while holding keys

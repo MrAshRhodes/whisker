@@ -132,6 +132,29 @@ public enum EventPlan: Equatable, Sendable {
     /// Perform the action and let the rest of the scroll event through: the mapped axis is already taken out
     /// of the sample. A zero sample means nothing is left to deliver.
     case performWithScroll(Action, ActionPhase, remaining: ScrollSample)
+    /// Deliver the (already transformed) distance spread over time instead of at once. The caller hands it to the
+    /// smoother and drops the event; if the smoother refuses, `request.unsmoothed` is the plan to follow instead.
+    case smooth(SmoothRequest)
+}
+
+/// A wheel notch whose distance smoothing may spread over time.
+public struct SmoothRequest: Equatable, Sendable {
+    /// The distance after wheel mappings, direction, sideways, distance and scaling.
+    public var sample: ScrollSample
+    /// Modifier flags the transformation used up; the generated events leave them out.
+    public var removing: ModifierSet
+    public var device: String
+    public var profile: String
+    public var app: String?
+    /// Milliseconds, within `ScrollMath.smoothDurationRange`.
+    public var duration: Int
+    /// Whether smoothing off would have rewritten the event.
+    public var changed: Bool
+
+    /// What happens to the event when nothing is smoothed.
+    public var unsmoothed: EventPlan {
+        changed ? .scroll(sample, removing: removing) : .passThrough
+    }
 }
 
 /// Decides, for each mouse event, whether to pass it, drop it or turn it into an action.
@@ -374,6 +397,15 @@ public struct EventProcessor: Sendable {
             rewritten = scaled
             removing.formUnion(scaling.modifiers.withoutFunction)
             changed = true
+        }
+
+        // Only a notch from a mouse the tap is sure of is smoothed. The sideways-stream path keeps its own
+        // delivery: it is continuous input, which returned above, and it is never smoothed.
+        if scroll.smoothScrolling, hold == nil, fired == nil, !rewritten.isZero, let attribution = event.device, attribution.exact {
+            return .smooth(SmoothRequest(
+                sample: rewritten, removing: removing, device: attribution.id, profile: resolved.profileID, app: event.app,
+                duration: ScrollMath.smoothDurationRange.clamp(scroll.smoothDuration), changed: changed
+            ))
         }
 
         return finish(rewritten, changed: changed, fired: fired, removing: removing)

@@ -148,13 +148,21 @@ public struct ScrollSettings: Equatable, Sendable {
     public var horizontalModifier: ModifierSet
     /// Scales the distance while modifiers are held. Nil = off.
     public var modifierScaling: ModifierScaling?
+    /// Spreads each wheel notch's distance over `smoothDuration` milliseconds. Off unless saved as on.
+    public var smoothScrolling: Bool
+    /// Milliseconds a notch's distance is spread over, `ScrollMath.smoothDurationRange`.
+    public var smoothDuration: Int
 
     public init(
         linesPerNotch: Int? = nil,
         acceleration: Double = 0,
         horizontalModifier: ModifierSet = [],
-        modifierScaling: ModifierScaling? = nil
+        modifierScaling: ModifierScaling? = nil,
+        smoothScrolling: Bool = false,
+        smoothDuration: Int = ScrollMath.defaultSmoothDuration
     ) {
+        self.smoothScrolling = smoothScrolling
+        self.smoothDuration = smoothDuration
         self.linesPerNotch = linesPerNotch
         self.acceleration = acceleration
         self.horizontalModifier = horizontalModifier
@@ -416,7 +424,7 @@ extension NativeWheelSettings: Codable {
 }
 
 extension ScrollSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case linesPerNotch, acceleration, horizontalModifier, modifierScaling }
+    private enum CodingKeys: String, CodingKey { case linesPerNotch, acceleration, horizontalModifier, modifierScaling, smoothScrolling, smoothDuration }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -424,10 +432,15 @@ extension ScrollSettings: Codable {
         acceleration = try c.decodeIfPresent(Double.self, forKey: .acceleration) ?? 0
         horizontalModifier = try c.decodeIfPresent(ModifierSet.self, forKey: .horizontalModifier) ?? []
         modifierScaling = try c.decodeIfPresent(ModifierScaling.self, forKey: .modifierScaling)
+        smoothScrolling = try c.decodeIfPresent(Bool.self, forKey: .smoothScrolling) ?? false
+        smoothDuration = try c.decodeIfPresent(Int.self, forKey: .smoothDuration) ?? ScrollMath.defaultSmoothDuration
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        // Only written when set, so a file that never used smoothing stays as it was.
+        if smoothScrolling { try c.encode(true, forKey: .smoothScrolling) }
+        if smoothDuration != ScrollMath.defaultSmoothDuration { try c.encode(smoothDuration, forKey: .smoothDuration) }
         try c.encodeIfPresent(linesPerNotch, forKey: .linesPerNotch)
         try c.encode(acceleration, forKey: .acceleration)
         try c.encode(horizontalModifier, forKey: .horizontalModifier)

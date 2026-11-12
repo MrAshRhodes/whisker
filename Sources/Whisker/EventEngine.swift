@@ -26,6 +26,8 @@ final class EventEngine: @unchecked Sendable {
         var cancelExpiry: (@Sendable () -> Void)?
         /// The hold-to-scroll status last reported to `onHoldStatus`.
         var reportedHold: HoldScrollStatus = .idle
+        /// System Reduce Motion, snapshotted by the app outside the tap. While on, nothing is smoothed.
+        var reduceMotion = false
     }
 
     static let eventMask: CGEventMask = {
@@ -78,6 +80,8 @@ final class EventEngine: @unchecked Sendable {
         state.withLock { state in
             state.compiled = CompiledSettings(settings, nativeWheelActive: state.compiled.nativeWheelActive)
             state.processor.resetScrollRecognition()
+            // Pending smoothing was planned under settings that are going away.
+            synthesizer.cancelSmoothScroll()
             // Settings that decide what to filter may have changed under a press that is being held back.
             state.debouncer.reset()
             armExpiry(&state)
@@ -92,6 +96,15 @@ final class EventEngine: @unchecked Sendable {
             if !state.compiled.needsMotion { state.processor.cancelHold() }
             syncBypass(&state, app: app, at: location)
             reportHold(&state)
+        }
+    }
+
+    /// Reduce Motion changed. Turning it on ends smoothing that is under way, and nothing is smoothed while it is on.
+    func setReduceMotion(_ reduce: Bool) {
+        state.withLock { state in
+            guard state.reduceMotion != reduce else { return }
+            state.reduceMotion = reduce
+            if reduce { synthesizer.cancelSmoothScroll() }
         }
     }
 
@@ -111,6 +124,8 @@ final class EventEngine: @unchecked Sendable {
         let location = Self.cursorLocation()
         state.withLock { state in
             synthesizer.cancelPendingClicks()
+            // What is still being spread out was aimed at the app that has gone.
+            synthesizer.cancelSmoothScroll()
             synthesizer.cancelSequence(.applicationChanged)
             // The pointer is anchored in the window that was in front, so a hold never carries over to another app.
             state.processor.cancelHold()
@@ -130,6 +145,7 @@ final class EventEngine: @unchecked Sendable {
         state.withLock { state in
             state.capturing = capturing
             if capturing { release(&state, at: location) }
+            synthesizer.cancelSmoothScroll()
         }
     }
 
@@ -145,6 +161,7 @@ final class EventEngine: @unchecked Sendable {
             if ClickInterruption.isCalledOffByDeviceChange(startedBy: state.actionSource, connected: connected) {
                 synthesizer.cancelPendingClicks()
             }
+            synthesizer.cancelSmoothScroll(unlessConnected: connected)
             state.debouncer.devicesChanged(connected: connected)
             armExpiry(&state)
             // A hold started by a device that has gone ends now.
@@ -220,6 +237,7 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
         synthesizer.releaseAll()
+        synthesizer.cancelSmoothScroll()
         state.debouncer.reset()
         armExpiry(&state)
         reportHold(&state)
@@ -243,6 +261,7 @@ final class EventEngine: @unchecked Sendable {
         let bypassed = state.compiled.isBypassed(app: app)
         defer { state.bypassed = bypassed }
         guard bypassed, !state.bypassed else { return }
+        synthesizer.cancelSmoothScroll()
         for (_, action) in state.processor.releaseAllForBypass() {
             synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
@@ -353,8 +372,14 @@ final class EventEngine: @unchecked Sendable {
             case .moveOnly: return (.dragAsMove, originalClickState)
             case .proceed(let count): clickState = count
             }
-            let plan = state.processor.process(input, settings: state.compiled)
+            var plan = state.processor.process(input, settings: state.compiled)
+            // A hold starting takes over the scrolling: pending smoothing is dropped, never replayed.
+            if state.processor.isHolding { synthesizer.cancelSmoothScroll() }
+            // A scroll calls off a triple click whether or not smoothing takes it over.
             if ClickInterruption.isCalledOffBy(kind, plan: plan) { synthesizer.cancelPendingClicks() }
+            if case let .smooth(request) = plan {
+                plan = smooth(request, flags: event.flags.rawValue, reduceMotion: state.reduceMotion)
+            }
             switch plan {
             case let .perform(action, phase), let .performWithScroll(action, phase, _):
                 state.actionSource = input.device?.id
@@ -371,6 +396,20 @@ final class EventEngine: @unchecked Sendable {
         // The filter dropped presses the system counted, so the count of a press that goes through is put right.
         if clickState != originalClickState { event.setIntegerValueField(.mouseEventClickState, value: clickState) }
         return apply(plan, to: event)
+    }
+
+    /// Call with the state lock held. Hands the distance over for spreading out and drops the original, or, when
+    /// that isn't possible, falls back to what would have happened with smoothing off (fail open).
+    private func smooth(_ request: SmoothRequest, flags: UInt64, reduceMotion: Bool) -> EventPlan {
+        guard !reduceMotion else { return request.unsmoothed }
+        let context = SmoothingContext(
+            device: request.device, profile: request.profile, app: request.app, flags: flags & ~request.removing.eventFlags
+        )
+        let accepted = synthesizer.smoothScroll(
+            vertical: request.sample.vertical.pixels, horizontal: request.sample.horizontal.pixels,
+            context: context, durationMilliseconds: request.duration
+        )
+        return accepted ? .swallow : request.unsmoothed
     }
 
     private func apply(_ plan: EventPlan, to event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -398,6 +437,9 @@ final class EventEngine: @unchecked Sendable {
             // The action was posted under the state lock in `handle`; only the unmapped axis carries on.
             guard !remaining.isZero else { return nil }
             Self.write(remaining, to: event)
+            return Unmanaged.passUnretained(event)
+        case .smooth:
+            // `handle` always settles it first.
             return Unmanaged.passUnretained(event)
         case let .scroll(sample, removing):
             Self.write(sample, to: event)

@@ -166,6 +166,12 @@ extension WhiskerSettings {
                 issues.append(ValidationIssue("\(path).scroll.acceleration", "Must be between 0 and 1."))
                 scroll.acceleration = acceleration
             }
+            let duration = ScrollMath.smoothDurationRange.clamp(scroll.smoothDuration)
+            if duration != scroll.smoothDuration {
+                let range = ScrollMath.smoothDurationRange
+                issues.append(ValidationIssue("\(path).scroll.smoothDuration", "Must be between \(range.lowerBound) and \(range.upperBound) milliseconds."))
+                scroll.smoothDuration = duration
+            }
             if let scaling = scroll.modifierScaling {
                 let scalingPath = "\(path).scroll.modifierScaling"
                 if let problem = scaling.problem(horizontalModifier: scroll.horizontalModifier) {

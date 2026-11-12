@@ -51,6 +51,35 @@ struct EventEngineTests {
                 _anchors.append(anchor)
             }
         }
+
+        struct Smooth: Equatable {
+            var vertical: Double
+            var horizontal: Double
+            var context: SmoothingContext
+            var duration: Int
+        }
+
+        private var _smooth: [Smooth] = []
+        private var _smoothCancels = 0
+        private var _accepting = true
+        var smooth: [Smooth] { lock.withLock { _smooth } }
+        var smoothCancels: Int { lock.withLock { _smoothCancels } }
+        var acceptsSmoothing: Bool {
+            get { lock.withLock { _accepting } }
+            set { lock.withLock { _accepting = newValue } }
+        }
+
+        func smoothScroll(vertical: Double, horizontal: Double, context: SmoothingContext, durationMilliseconds: Int) -> Bool {
+            lock.withLock {
+                guard _accepting else { return false }
+                _smooth.append(Smooth(vertical: vertical, horizontal: horizontal, context: context, duration: durationMilliseconds))
+                return true
+            }
+        }
+
+        func cancelSmoothScroll() {
+            lock.withLock { _smoothCancels += 1 }
+        }
     }
 
     static let remap = Action.click(button: 0, modifiers: [])
