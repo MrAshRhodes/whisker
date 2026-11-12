@@ -77,6 +77,18 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   movement, drops sideways drift and treats a diagonal as vertical; its threshold is
   provisional and not yet verified on thumb or finger trackballs), speed and direction. It needs Input Monitoring, is not yet verified on hardware, and falls
   back to normal pointer movement when Whisker can't tell which mouse you're using.
+- **Auto-scroll (experimental).** Press a button you choose to anchor the pointer, then let go:
+  the window under that spot keeps scrolling, faster the further you move the pointer from it,
+  down when the pointer is below the anchor and up when it is above (and sideways too, if you
+  choose Both Directions). You set the dead zone and the top speed. Pressing the same button
+  again, pressing any other mouse button (the click still goes through), turning the wheel or
+  swiping a trackpad, or a change of app, profile, Space, display or connected mice stops it, and
+  it never starts again by itself. There is no marker on screen: the menu bar icon changes and
+  its tooltip says auto-scroll is on, even if you have hidden the icon. It needs no Input
+  Monitoring of its own. The speeds are provisional, and it has not yet been verified on
+  hardware, including in TextEdit, in nested scrolling in Safari (which pane receives the
+  scrolling), across several displays or with mixed pointing devices. See the
+  [guide](https://mrashrhodes.github.io/whisker/guide.html#auto-scroll).
 - **Profiles.** Give an app, a mouse, or an app on one mouse its own buttons and scrolling.
   Anything a profile does not set comes from the profile it inherits from, ending at the
   default profile, and Whisker switches profiles as you change apps.
@@ -401,6 +413,14 @@ brew update && brew upgrade --cask whisker
   **Allow remapping the primary button** being off in General, Input Monitoring not being allowed,
   or a profile that maps the plain Primary Button or Secondary Button itself, which wins over the
   swap. Clicks with a modifier key held are never swapped.
+- **Auto-scroll does not start, or scrolls the wrong thing.** Press its button once and let go.
+  It does not start while Whisker is off, while the app in front is on the bypass list or during
+  Hold to Scroll, and the profile in front must map the button to **Auto-scroll**. The scrolling
+  goes to the window under the spot where you pressed, not under the pointer as it moves, so
+  stop it and start again with the pointer over the pane you want. If it keeps stopping, a
+  button press, the wheel or a mouse connecting or disconnecting is ending it, and it never
+  starts again by itself. It has not yet been verified on hardware. See the
+  [guide](https://mrashrhodes.github.io/whisker/guide.html#auto-scroll).
 - **A mouse's own settings are not used when another mouse is connected.** Click
   **Allow Input Monitoring…** under Devices so Whisker can tell the mice apart, then open the
   mouse's **Details** to see how sure Whisker is which clicks are its.

@@ -46,6 +46,7 @@ struct SettingsTests {
             .scroll(direction: .left, lines: 4), .media(.volumeUp), .navigate(.forward),
             .missionControl(.appWindows), .space(.right), .appSwitch(.previous),
             .holdToScroll(HoldScroll(axes: .free, sensitivity: 2.5, invertVertical: true, invertHorizontal: false)),
+            .autoScroll(AutoScroll(axes: .twoAxis, deadZone: 20, maxSpeed: 2000)),
             .slowPointer(factor: 0.4),
             .open(url: "https://example.com"),
             .pointerPreset(deviceID: "046d:c52b", presetID: "fast"),

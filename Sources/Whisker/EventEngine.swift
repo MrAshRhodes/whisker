@@ -28,6 +28,10 @@ final class EventEngine: @unchecked Sendable {
         var reportedHold: HoldScrollStatus = .idle
         /// System Reduce Motion, snapshotted by the app outside the tap. While on, nothing is smoothed.
         var reduceMotion = false
+        /// The generation of the auto-scroll the synthesizer is running, so it is only spoken to when that changes.
+        var runningAutoScroll: Int?
+        /// Whether `onAutoScrollActive` was last told that one is running.
+        var reportedAutoScroll = false
         var slowPointerDevices: Set<String> = []
         var reportedSlowPointer: UInt64 = 0
     }
@@ -50,6 +54,8 @@ final class EventEngine: @unchecked Sendable {
     private let attributeMotion: @Sendable (TimeInterval) -> DeviceAttribution?
     /// Called on the main queue when a hold-to-scroll starts, falls back or can't start.
     var onHoldStatus: (@Sendable (HoldScrollStatus) -> Void)?
+    /// Called on the main queue with whether an auto-scroll is running, whenever that changes.
+    var onAutoScrollActive: (@Sendable (Bool) -> Void)?
     var onSlowPointer: (@MainActor @Sendable (SlowPointerCommand) -> Void)?
 
     private let tapLock = NSLock()
@@ -83,6 +89,9 @@ final class EventEngine: @unchecked Sendable {
         state.withLock { state in
             state.compiled = CompiledSettings(settings, nativeWheelActive: state.compiled.nativeWheelActive)
             state.processor.resetScrollRecognition()
+            // An auto-scroll started under settings that are going away, and a changed mapping or profile must
+            // never carry one on.
+            state.processor.cancelAutoScroll()
             state.processor.cancelSlowPointer()
             // Pending smoothing was planned under settings that are going away.
             synthesizer.cancelSmoothScroll()
@@ -99,6 +108,7 @@ final class EventEngine: @unchecked Sendable {
             // A hold whose mapping was removed ends now; one that is merely edited keeps the settings it started with.
             if !state.compiled.needsMotion { state.processor.cancelHold() }
             syncBypass(&state, app: app, at: location)
+            syncAutoScroll(&state)
             reportHold(&state)
         }
     }
@@ -152,8 +162,11 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.cancelSequence(.applicationChanged)
             // The pointer is anchored in the window that was in front, so a hold never carries over to another app.
             state.processor.cancelHold()
+            // An auto-scroll is addressed to the window under its anchor, so it ends rather than scroll the new app.
+            state.processor.cancelAutoScroll()
             state.processor.cancelSlowPointer()
             syncBypass(&state, app: app, at: location)
+            syncAutoScroll(&state)
             reportHold(&state)
         }
     }
@@ -196,7 +209,20 @@ final class EventEngine: @unchecked Sendable {
             for (_, action) in state.processor.releaseSwaps(unlessConnected: connected) {
                 synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
             }
+            // An auto-scroll follows the pointer, whichever mouse moves it, and which one started it is not
+            // recorded. Any change to the set of mice ends it rather than guess what the new set means for it.
+            state.processor.cancelAutoScroll()
+            syncAutoScroll(&state)
             reportHold(&state)
+        }
+    }
+
+    /// Ends an auto-scroll without touching anything else, for changes that leave its anchor meaning something
+    /// else (displays rearranged, another Space) and so can't be told from the inside.
+    func cancelAutoScroll() {
+        state.withLock { state in
+            state.processor.cancelAutoScroll()
+            syncAutoScroll(&state)
         }
     }
 
@@ -268,9 +294,26 @@ final class EventEngine: @unchecked Sendable {
         }
         synthesizer.releaseAll()
         synthesizer.cancelSmoothScroll()
+        syncAutoScroll(&state)
         state.debouncer.reset()
         armExpiry(&state)
         reportHold(&state)
+    }
+
+    /// Call with the state lock held. Makes the synthesizer run exactly the auto-scroll the processor has: it is
+    /// started or stopped the moment the processor's session changes, before the event that changed it goes on.
+    /// Also tells the app, off the tap thread.
+    private func syncAutoScroll(_ state: inout State) {
+        let session = state.processor.autoScrollSession
+        if session?.generation != state.runningAutoScroll {
+            if let session { synthesizer.startAutoScroll(session) } else { synthesizer.cancelAutoScroll() }
+            state.runningAutoScroll = session?.generation
+        }
+        let active = session != nil
+        guard active != state.reportedAutoScroll else { return }
+        state.reportedAutoScroll = active
+        guard let onAutoScrollActive else { return }
+        DispatchQueue.main.async { onAutoScrollActive(active) }
     }
 
     /// Call with the state lock held. Tells the app about a change of hold-to-scroll status, off the tap thread.
@@ -336,6 +379,7 @@ final class EventEngine: @unchecked Sendable {
     private func replay(_ flushed: [FlushedPress], _ state: inout State) {
         for press in flushed {
             let plan = state.processor.process(press.event, settings: state.compiled, slowPointerDevices: state.slowPointerDevices)
+            syncAutoScroll(&state)
             reportSlowPointer(&state)
             if ClickInterruption.isCalledOffBy(press.event.kind, plan: plan) { synthesizer.cancelPendingClicks() }
             let location = CGPoint(x: press.event.location?.x ?? 0, y: press.event.location?.y ?? 0)
@@ -417,6 +461,9 @@ final class EventEngine: @unchecked Sendable {
             case .proceed(let count): clickState = count
             }
             var plan = state.processor.process(input, settings: state.compiled, slowPointerDevices: state.slowPointerDevices)
+            // A press or scroll that ended an auto-scroll stops its timer before the event goes on, and a press
+            // that started one starts it. Both only touch a lock and a timer request, never the UI.
+            syncAutoScroll(&state)
             // A hold starting takes over the scrolling: pending smoothing is dropped, never replayed.
             if state.processor.isHolding { synthesizer.cancelSmoothScroll() }
             // A scroll calls off a triple click whether or not smoothing takes it over.

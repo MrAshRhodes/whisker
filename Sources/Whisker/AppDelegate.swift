@@ -81,7 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Status item
 
     private func refreshStatusItem() {
-        guard model.store.settings.general.showMenuBarIcon else {
+        // A running auto-scroll is shown even when the icon is switched off, so it never runs unseen.
+        guard model.store.settings.general.showMenuBarIcon || model.autoScrollActive else {
             if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
             statusItem = nil
             return
@@ -94,13 +95,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem = item
         }
         guard let button = statusItem?.button else { return }
-        let image = NSImage(systemSymbolName: "computermouse", accessibilityDescription: "Whisker")
+        let scrolling = model.autoScrollActive
+        let image = NSImage(
+            systemSymbolName: scrolling ? ActionKind.autoScroll.symbolName : "computermouse",
+            accessibilityDescription: scrolling ? "Whisker, auto-scroll on" : "Whisker"
+        )
         image?.isTemplate = true
         button.image = image
         let active = model.isEnabled && model.engineRunning
         button.appearsDisabled = !active
         var tip = active ? "Whisker" : model.engineRunning ? "Whisker (off)" : "Whisker needs Accessibility access"
         if active, let app = model.bypassedAppName { tip = "Whisker (bypassed for \(app))" }
+        if scrolling { tip = "Whisker: auto-scroll is on. Click or scroll to stop it." }
         if !model.pointer.restoreFailures.isEmpty { tip += "\nPointer settings couldn’t be restored" }
         if !model.wheel.restoreFailures.isEmpty { tip += "\nWheel settings couldn’t be restored" }
         button.toolTip = tip

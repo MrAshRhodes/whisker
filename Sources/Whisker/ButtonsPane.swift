@@ -436,6 +436,32 @@ struct ActionEditor: View {
             if let note = model.holdToScrollNote {
                 Label(note, systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
             }
+        case let .autoScroll(config):
+            Picker("Scroll", selection: Binding(
+                get: { config.axes },
+                set: { var updated = config; updated.axes = $0; action = .autoScroll(updated) }
+            )) {
+                ForEach(AutoScrollAxes.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                Text("Dead zone")
+                Slider(value: Binding(
+                    get: { config.deadZone },
+                    set: { var updated = config; updated.deadZone = $0; action = .autoScroll(updated) }
+                ), in: AutoScroll.deadZoneRange)
+                Text(String(format: "%.0f pt", config.deadZone)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Top speed")
+                Slider(value: Binding(
+                    get: { config.maxSpeed },
+                    set: { var updated = config; updated.maxSpeed = $0; action = .autoScroll(updated) }
+                ), in: AutoScroll.maxSpeedRange)
+                Text(String(format: "%.0f px/s", config.maxSpeed)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            Text("Experimental. Press the button to anchor the pointer, then move it away from that spot: the further it goes, the faster the window under it scrolls, and inside the dead zone nothing moves. Press the button again, click, or scroll to stop; a change of app or profile, of connected mice, or going to sleep stops it too. There is no marker at the pointer, but the menu bar icon shows while it runs. The speeds are provisional, and TextEdit, nested scrolling in Safari, several displays, mixed pointing devices and which pane receives the scrolling have not yet been verified on hardware.")
+                .font(.footnote).foregroundStyle(.secondary)
         case .open(let url):
             OpenField(url: Binding(get: { url }, set: { action = .open(url: $0) }))
         }

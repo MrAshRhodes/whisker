@@ -178,6 +178,8 @@ public struct EventProcessor: Sendable {
     private var hold: HoldScrollSession?
     private var idleHoldStatus: HoldScrollStatus = .idle
     private var horizontalStream = HorizontalStream()
+    private var autoScroll: AutoScrollSession?
+    private var autoScrollGeneration = 0
     private var slowPointer = SlowPointerHolds()
 
     public var slowPointerCommand: SlowPointerCommand { slowPointer.command }
@@ -193,6 +195,10 @@ public struct EventProcessor: Sendable {
 
     /// Whether a hold-to-scroll is in progress and wants the movement details of drag events.
     public var isHolding: Bool { hold != nil }
+
+    /// The auto-scroll in progress. The processor only decides when one starts and ends; whoever reads this
+    /// runs it, and must stop it as soon as the session is gone or is no longer the one it was running.
+    public var autoScrollSession: AutoScrollSession? { autoScroll }
 
     /// How the latest hold-to-scroll went, for diagnostics. A fall-back is kept until the next press.
     public var holdStatus: HoldScrollStatus {
@@ -223,6 +229,7 @@ public struct EventProcessor: Sendable {
         released += swapped.map { (button: $0.button, action: Action.click(button: $0.target, modifiers: [])) }
         orphaned.formUnion(swapped.map(\.button))
         endHold(cancelled: true)
+        autoScroll = nil
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
         scaler.reset()
@@ -264,6 +271,12 @@ public struct EventProcessor: Sendable {
         endHold(cancelled: false)
     }
 
+    /// Ends the auto-scroll in progress, whatever caused it (settings changed, the app in front changed, a
+    /// device came or went…). The trigger button may still be down; it stays swallowed until it comes up.
+    public mutating func cancelAutoScroll() {
+        autoScroll = nil
+    }
+
     private mutating func endHold(cancelled releaseButton: Bool) {
         guard let session = hold else { return }
         hold = nil
@@ -289,6 +302,10 @@ public struct EventProcessor: Sendable {
     }
 
     private mutating func buttonDown(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings, slowPointerDevices: Set<String>) -> EventPlan {
+        // Any press ends an auto-scroll, and goes on to be handled as if none had been running, so a click
+        // used to stop it still reaches what is under the pointer.
+        let running = autoScroll
+        autoScroll = nil
         if slowPointer.owns(button: button, device: event.device) { return .swallow }
         if isActive(event, settings),
            let mapping = lookup(.button(button), event, settings, exactOnly: false),
@@ -312,9 +329,25 @@ public struct EventProcessor: Sendable {
         let action = mapping.action
         if action == .passthrough { return .passThrough }
         if case .holdToScroll(let config) = action { return beginHold(button, config, event) }
+        if case .autoScroll(let config) = action { return toggleAutoScroll(button, mapping.key, config, event, running: running) }
         held[button] = action
         if action == .none { return .swallow }
         return .perform(action, action.followsTrigger ? .down : .once)
+    }
+
+    /// The press of an auto-scroll trigger. Pressed while its own auto-scroll runs, it stops it and does nothing
+    /// else; otherwise it starts one anchored where the pointer is.
+    private mutating func toggleAutoScroll(_ button: Int, _ key: MappingKey, _ config: AutoScroll, _ event: InputEvent, running: AutoScrollSession?) -> EventPlan {
+        if running?.key == key || hold != nil {
+            // A hold owns the pointer, so an auto-scroll can't start until it ends.
+            held[button] = .autoScroll(config)
+            return .swallow
+        }
+        guard let anchor = event.location, config.isValid else { return .passThrough }
+        held[button] = .autoScroll(config)
+        autoScrollGeneration += 1
+        autoScroll = AutoScrollSession(generation: autoScrollGeneration, key: key, anchor: anchor, config: config)
+        return .swallow
     }
 
     private mutating func beginHold(_ button: Int, _ config: HoldScroll, _ event: InputEvent) -> EventPlan {
@@ -361,6 +394,9 @@ public struct EventProcessor: Sendable {
     // MARK: Wheel
 
     private mutating func scroll(_ sample: ScrollSample, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+        // A real turn of the wheel or a trackpad swipe ends an auto-scroll, even where Whisker has no mapping.
+        // Momentum is only the tail of an earlier gesture and an empty event moves nothing, so neither does.
+        if autoScroll != nil, !sample.isMomentum, !sample.isZero { autoScroll = nil }
         guard isActive(event, settings) else { return .passThrough }
         let isNotch = !sample.isContinuous
         var sample = sample

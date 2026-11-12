@@ -31,6 +31,11 @@ protocol ActionPerforming: AnyObject, Sendable {
     func cancelSmoothScroll()
     /// Drops it when it came from a device that is no longer connected.
     func cancelSmoothScroll(unlessConnected connected: Set<String>)
+    /// Starts scrolling for an auto-scroll, in place of any that was running. Never posts for a session that has
+    /// been cancelled, and keeps no timer while there is none.
+    func startAutoScroll(_ session: AutoScrollSession)
+    /// Ends the auto-scroll that is running. Nothing is posted for it once this returns.
+    func cancelAutoScroll()
 }
 
 extension ActionPerforming {
@@ -38,6 +43,8 @@ extension ActionPerforming {
     func smoothScroll(vertical: Double, horizontal: Double, context: SmoothingContext, durationMilliseconds: Int) -> Bool { false }
     func cancelSmoothScroll() {}
     func cancelSmoothScroll(unlessConnected connected: Set<String>) {}
+    func startAutoScroll(_ session: AutoScrollSession) {}
+    func cancelAutoScroll() {}
 }
 
 /// Posts the events and runs the commands that mapped actions turn into.
@@ -57,6 +64,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     private let sequences: ShortcutSequenceRunner
     private var repeatTimer: DispatchSourceTimer?
     private let smoother = SmoothScroller()
+    private let autoScroller = AutoScroller()
 
     /// `tripleClickTiming` is asked at every activation. It posts all three clicks back to back, like Double Click
     /// does, until spacing them out is shown to be needed: `{ .spaced(withinInterval: NSEvent.doubleClickInterval) }`.
@@ -133,6 +141,9 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
         case .holdToScroll, .slowPointer:
             // Driven by pointer movement through `holdScroll`, not by the press itself.
             return
+        case .autoScroll:
+            // The engine starts it from the processor's session through `startAutoScroll`.
+            return
         case .open(let string):
             guard phase != .up else { return }
             DispatchQueue.main.async { Self.open(string) }
@@ -171,6 +182,14 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
         smoother.cancel(unlessConnected: connected)
     }
 
+    func startAutoScroll(_ session: AutoScrollSession) {
+        autoScroller.start(session)
+    }
+
+    func cancelAutoScroll() {
+        autoScroller.cancel()
+    }
+
     /// Calls off a click gesture that is still under way; a press already posted gets its release.
     func cancelPendingClicks() {
         clicks.cancel()
@@ -184,6 +203,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     func releaseAll() {
         clicks.cancel()
         sequences.cancel(.lifecycle)
+        autoScroller.cancel()
         queue.async { [weak self] in self?.stopRepeat() }
     }
 

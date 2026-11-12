@@ -318,6 +318,13 @@ extension WhiskerSettings {
         case .holdToScroll(let config):
             let range = HoldScroll.sensitivityRange
             guard config.isValid else { return "Hold to Scroll sensitivity must be between \(String(format: "%g", range.lowerBound)) and \(String(format: "%g", range.upperBound))." }
+        case .autoScroll(let config):
+            guard case .button = mapping.trigger else { return "Auto-scroll needs a mouse button as its trigger." }
+            let zone = AutoScroll.deadZoneRange
+            let speed = AutoScroll.maxSpeedRange
+            guard config.isValid else {
+                return "Auto-scroll dead zone must be between \(String(format: "%g", zone.lowerBound)) and \(String(format: "%g", zone.upperBound)) points, and top speed between \(String(format: "%g", speed.lowerBound)) and \(String(format: "%g", speed.upperBound)) pixels a second."
+            }
         case .shortcut(let shortcut, _):
             guard shortcut.keyCode < 0x80 else { return "Key code \(shortcut.keyCode) is not a key." }
         case .shortcutSequence(let steps):

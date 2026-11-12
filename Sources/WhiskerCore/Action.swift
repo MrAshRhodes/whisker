@@ -147,6 +147,9 @@ public enum Action: Hashable, Sendable {
     case appSwitch(AppSwitchDirection)
     /// While the button is held, movement of the device that pressed it scrolls instead of moving the pointer.
     case holdToScroll(HoldScroll)
+    /// Anchors the pointer where the button was pressed, then scrolls at a speed set by how far the pointer is
+    /// from that spot until the trigger or any click, wheel turn or app change ends it.
+    case autoScroll(AutoScroll)
     case slowPointer(factor: Double)
     /// An app, file or web address.
     case open(url: String)
@@ -170,13 +173,15 @@ public enum Action: Hashable, Sendable {
         case .space: return .space
         case .appSwitch: return .appSwitch
         case .holdToScroll: return .holdToScroll
+        case .autoScroll: return .autoScroll
         case .slowPointer: return .slowPointer
         case .open: return .open
         case .pointerPreset: return .pointerPreset
         }
     }
 
-    /// Whether the action needs to see pointer movement, not just buttons and the wheel.
+    /// Whether the action needs to see pointer movement, not just buttons and the wheel. Auto-scroll doesn't:
+    /// it reads where the pointer is on a timer of its own, away from the event tap.
     public var usesMotion: Bool {
         if case .holdToScroll = self { return true }
         return false
@@ -243,6 +248,7 @@ public enum Action: Hashable, Sendable {
         case .space(let direction): return "Move to \(direction.title)"
         case .appSwitch(let direction): return "Switch to \(direction.title)"
         case .holdToScroll(let config): return config.summary
+        case .autoScroll(let config): return config.summary
         case .slowPointer: return "Slow pointer while held"
         case .open(let url): return "Open \(Self.openTitle(url))"
         case .pointerPreset: return "Pointer Speed Preset"
@@ -284,7 +290,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, slowPointer, pointerPreset, open
+    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, autoScroll, slowPointer, pointerPreset, open
 
     public var id: String { rawValue }
 
@@ -304,6 +310,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return "Switch App"
         case .scroll: return "Scroll"
         case .holdToScroll: return "Hold to Scroll (Experimental)"
+        case .autoScroll: return "Auto-scroll (Experimental)"
         case .slowPointer: return "Slow pointer while held"
         case .pointerPreset: return "Pointer Speed Preset"
         case .open: return "Open App, File or Website"
@@ -326,6 +333,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return "rectangle.stack"
         case .scroll: return "arrow.up.and.down"
         case .holdToScroll: return "arrow.up.and.down.and.arrow.left.and.right"
+        case .autoScroll: return "arrow.up.and.down.circle"
         case .slowPointer: return "tortoise"
         case .pointerPreset: return "cursorarrow.motionlines"
         case .open: return "arrow.up.forward.app"
@@ -354,6 +362,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return .appSwitch(.next)
         case .scroll: return .scroll(direction: .down, lines: 3)
         case .holdToScroll: return .holdToScroll(HoldScroll())
+        case .autoScroll: return .autoScroll(AutoScroll())
         case .slowPointer: return .slowPointer(factor: 0.5)
         case .pointerPreset: return .pointerPreset(deviceID: "", presetID: "")
         case .open: return .open(url: "")
@@ -363,7 +372,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
 
 extension Action: Codable {
     private enum CodingKeys: String, CodingKey {
-        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, steps, axes, sensitivity, invertVertical, invertHorizontal
+        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, steps, axes, sensitivity, invertVertical, invertHorizontal, deadZone, maxSpeed
         case device, preset, factor
     }
 
@@ -407,6 +416,13 @@ extension Action: Codable {
                 sensitivity: try container.decodeIfPresent(Double.self, forKey: .sensitivity) ?? 1,
                 invertVertical: try container.decodeIfPresent(Bool.self, forKey: .invertVertical) ?? false,
                 invertHorizontal: try container.decodeIfPresent(Bool.self, forKey: .invertHorizontal) ?? false
+            ))
+        case "autoScroll":
+            let defaults = AutoScroll()
+            self = .autoScroll(AutoScroll(
+                axes: try container.decodeIfPresent(AutoScrollAxes.self, forKey: .axes) ?? defaults.axes,
+                deadZone: try container.decodeIfPresent(Double.self, forKey: .deadZone) ?? defaults.deadZone,
+                maxSpeed: try container.decodeIfPresent(Double.self, forKey: .maxSpeed) ?? defaults.maxSpeed
             ))
         case "open": self = .open(url: try container.decode(String.self, forKey: .url))
         case "pointerPreset":
@@ -470,6 +486,11 @@ extension Action: Codable {
             try container.encode(config.sensitivity, forKey: .sensitivity)
             try container.encode(config.invertVertical, forKey: .invertVertical)
             try container.encode(config.invertHorizontal, forKey: .invertHorizontal)
+        case .autoScroll(let config):
+            try container.encode("autoScroll", forKey: .kind)
+            try container.encode(config.axes, forKey: .axes)
+            try container.encode(config.deadZone, forKey: .deadZone)
+            try container.encode(config.maxSpeed, forKey: .maxSpeed)
         case .open(let url):
             try container.encode("open", forKey: .kind)
             try container.encode(url, forKey: .url)
