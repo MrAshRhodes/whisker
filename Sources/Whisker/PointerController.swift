@@ -15,10 +15,12 @@ protocol PointerHardware: AnyObject {
 }
 
 /// Where the controller reads the settings and writes a switch to: `SettingsStore` in the app, memory alone
-/// where nothing needs to be saved.
+/// where nothing needs to be saved. Only confirmed selections are ever written here.
 @MainActor
 protocol PointerSettingsSource: AnyObject {
     var settings: WhiskerSettings { get set }
+    /// Writes the settings out now rather than shortly.
+    func saveNow()
 }
 
 extension SettingsStore: PointerSettingsSource {}
@@ -30,13 +32,87 @@ final class DetachedSettings: PointerSettingsSource {
     init(_ settings: WhiskerSettings = .default) {
         self.settings = settings
     }
+
+    func saveNow() {}
 }
+
+/// A speed change that has to be kept, written down before it reaches the mouse so that the next launch
+/// knows it never was, whether Whisker crashed, was force quit or the Mac restarted.
+struct PointerTrialRecord: Codable, Equatable {
+    static let currentVersion = 1
+
+    struct Pointer: Codable, Equatable {
+        var speed: Double
+        var acceleration: Double
+        var linear: Bool
+    }
+
+    /// A `PointerSelection` as written to disk.
+    struct Selection: Codable, Equatable {
+        /// Nil is the system's own speed.
+        var pointer: Pointer?
+        var presetID: String?
+
+        init(_ selection: PointerSelection) {
+            pointer = selection.pointer.map { Pointer(speed: $0.speed, acceleration: $0.acceleration, linear: $0.linear) }
+            presetID = selection.presetID
+        }
+
+        var selection: PointerSelection {
+            PointerSelection(
+                pointer: pointer.map { PointerSettings(speed: $0.speed, acceleration: $0.acceleration, linear: $0.linear) },
+                presetID: presetID
+            )
+        }
+
+        /// The selection, or nil when a value is outside what Whisker would ever write.
+        var validSelection: PointerSelection? {
+            if let pointer {
+                guard pointer.speed.isFinite, PointerMath.speedRange.contains(pointer.speed),
+                      pointer.acceleration.isFinite, PointerMath.accelerationRange.contains(pointer.acceleration)
+                else { return nil }
+            }
+            return selection
+        }
+    }
+
+    var version = PointerTrialRecord.currentVersion
+    var deviceID: String
+    /// The last confirmed speed and preset, from before the first unconfirmed value was applied.
+    var confirmed: Selection
+    /// What is waiting to be kept; nil while a slider drag is still choosing it.
+    var trial: Selection?
+    var startedAt: Date
+}
+
+/// What `PointerTrialJournal.loadPointerTrial()` found.
+enum PointerTrialJournalEntry: Equatable {
+    case empty
+    case record(PointerTrialRecord)
+    /// Something is there but can't be read, or is from another version: nothing in it is trusted.
+    case unreadable
+}
+
+/// Where an unconfirmed speed change is written down: `pointer-trial.json` next to the settings in the app,
+/// memory in tests. A save must be complete (atomic) when it returns.
+@MainActor
+protocol PointerTrialJournal: AnyObject {
+    func loadPointerTrial() -> PointerTrialJournalEntry
+    func savePointerTrial(_ record: PointerTrialRecord) throws
+    func clearPointerTrial() throws
+}
+
+extension SettingsStore: PointerTrialJournal {}
 
 /// Applies per-device pointer speed and acceleration by writing to the device's HID event service, and puts
 /// the original values back when settings are cleared or Whisker quits.
 ///
 /// Every route that changes a speed on purpose goes through here, so they share one confirmation and one
 /// rollback: the slider in the Pointer pane, the menu bar and a mapped button. Nothing else writes to a device.
+///
+/// Unconfirmed values (a slider drag, a change waiting to be kept) live only in memory and on the mouse; the
+/// settings store only ever receives confirmed selections. A change that has to be kept is also written to the
+/// `PointerTrialJournal` before it reaches the mouse, and `recoverInterruptedTrial()` deals with one left behind.
 @MainActor
 final class PointerController: ObservableObject {
     /// A big speed increase waiting to be kept; it reverts on its own unless confirmed.
@@ -47,6 +123,7 @@ final class PointerController: ObservableObject {
         /// What is applied while the change waits.
         var proposed: PointerSelection
         var deadline: Date
+        fileprivate var services: Set<UInt64>
     }
 
     /// What a request to switch to a preset led to.
@@ -64,14 +141,29 @@ final class PointerController: ObservableObject {
         var message: String
     }
 
+    /// What launch recovery found left behind by the previous run.
+    enum InterruptedTrial: Equatable {
+        /// A change on the device was never kept; its last confirmed selection stands.
+        case reverted(deviceID: String)
+        /// A record was there but couldn't be trusted; the saved settings are used as they are.
+        case unreadable
+    }
+
     /// A slider drag in progress, with the confirmed speed to compare against when it ends.
     private struct SpeedEdit {
         var deviceID: String
         var baseline: PointerSelection
+        var proposed: PointerSelection
+        var services: Set<UInt64>
+        /// Its unconfirmed speed couldn't be written down, so the rest of the drag is ignored.
+        var stopped = false
     }
 
     @Published private(set) var pending: PendingChange? {
-        didSet { onSlowPointerAvailabilityChange?() }
+        didSet {
+            onSlowPointerAvailabilityChange?()
+            settleTrialRecord()
+        }
     }
     /// Devices whose service refused a write, so the Pointer pane can say speed can't be changed.
     @Published private(set) var unsupported: Set<String> = []
@@ -97,14 +189,21 @@ final class PointerController: ObservableObject {
 
     private let hardware: PointerHardware
     private let store: PointerSettingsSource
+    private let journal: PointerTrialJournal?
+    private let now: () -> Date
     private let connected: () -> [ConnectedDevice]
     private let confirmationTimeout: TimeInterval
     /// What Whisker found on each device before changing it. A record stays until the values are back.
     private(set) var originals: [String: OriginalPointer]
     private var applied: [String: Applied] = [:]
     @Published private var speedEdit: SpeedEdit? {
-        didSet { onSlowPointerAvailabilityChange?() }
+        didSet {
+            onSlowPointerAvailabilityChange?()
+            settleTrialRecord()
+        }
     }
+    /// What is in the journal for the change in progress.
+    private var journaled: PointerTrialRecord?
     private var revertTimer: Timer?
     var onOriginalsChange: (([String: OriginalPointer]) -> Void)?
     /// Asked to bring the Pointer pane forward: a change is waiting to be kept, or the system refused one.
@@ -113,6 +212,13 @@ final class PointerController: ObservableObject {
 
     /// Whether a speed change is waiting or being dragged, so no other can start.
     var isBusy: Bool { pending != nil || speedEdit != nil }
+
+    /// The live selection shown by controls; only the confirmed selection belongs in saved settings.
+    func selection(on deviceID: String) -> PointerSelection {
+        if let pending, pending.deviceID == deviceID { return pending.proposed }
+        if let speedEdit, speedEdit.deviceID == deviceID { return speedEdit.proposed }
+        return store.settings.devices[deviceID]?.pointerSelection ?? .system
+    }
 
     var slowPointerDevices: Set<String> {
         Set(connected().filter { slowPointerUnavailable(on: $0.id) == nil }.map(\.id))
@@ -161,14 +267,18 @@ final class PointerController: ObservableObject {
         originals: [String: OriginalPointer] = [:],
         hardware: PointerHardware = IOHIDPointerHardware(),
         store: PointerSettingsSource? = nil,
+        journal: PointerTrialJournal? = nil,
         connected: @escaping () -> [ConnectedDevice] = { [] },
-        confirmationTimeout: TimeInterval = PointerMath.confirmationTimeout
+        confirmationTimeout: TimeInterval = PointerMath.confirmationTimeout,
+        now: @escaping () -> Date = Date.init
     ) {
         self.originals = originals
         self.hardware = hardware
         self.store = store ?? DetachedSettings()
+        self.journal = journal
         self.connected = connected
         self.confirmationTimeout = confirmationTimeout
+        self.now = now
     }
 
     /// Writes the settings for every connected device; restores devices whose pointer settings were cleared or
@@ -183,6 +293,16 @@ final class PointerController: ObservableObject {
     func apply(_ settings: WhiskerSettings, connected: [ConnectedDevice], bypassed: Bool = false) {
         latestSettings = settings
         if isBypassed != bypassed { isBypassed = bypassed }
+        if let pending, !canContinuePreview(
+            pending.previous, on: pending.deviceID, services: pending.services, settings: settings, connected: connected
+        ) {
+            cancelPending()
+        }
+        if let speedEdit, !canContinuePreview(
+            speedEdit.baseline, on: speedEdit.deviceID, services: speedEdit.services, settings: settings, connected: connected
+        ) {
+            self.speedEdit = nil
+        }
         let present = Set(connected.filter { !$0.isExcluded }.map(\.id))
         for id in Array(slowPointerFactors.keys) {
             if bypassed || !present.contains(id) || settings.activePointer(for: id) == nil
@@ -195,7 +315,15 @@ final class PointerController: ObservableObject {
         }
         applied = applied.filter { present.contains($0.key) }
         for device in connected where !device.isExcluded {
-            let baseline = bypassed ? nil : settings.activePointer(for: device.id)
+            var baseline = bypassed ? nil : settings.activePointer(for: device.id)
+            if baseline != nil, let pending, pending.deviceID == device.id,
+               settings.devices[device.id]?.pointerSelection == pending.previous {
+                baseline = pending.proposed.pointer
+            }
+            if baseline != nil, let speedEdit, speedEdit.deviceID == device.id,
+               settings.devices[device.id]?.pointerSelection == speedEdit.baseline {
+                baseline = speedEdit.proposed.pointer
+            }
             let wanted = baseline.map { pointer in
                 slowPointerFactors[device.id].map { SlowPointer.applying($0, to: pointer) } ?? pointer
             }
@@ -213,6 +341,18 @@ final class PointerController: ObservableObject {
                             notify(.hardwareRefused, on: device.id)
                             continue
                         }
+                    }
+                    if pending?.deviceID == device.id, let confirmed = settings.activePointer(for: device.id) {
+                        cancelPending()
+                        if write(confirmed, to: device) {
+                            applied[device.id] = Applied(pointer: confirmed, services: target.services)
+                            slowPointerRestorations.remove(device.id)
+                            notify(.hardwareRefused, on: device.id)
+                        } else {
+                            restoreFailures.insert(device.id)
+                            notify(.restoreFailed, on: device.id)
+                        }
+                        continue
                     }
                     if slowPointerRestorations.contains(device.id) {
                         restoreFailures.insert(device.id)
@@ -237,6 +377,16 @@ final class PointerController: ObservableObject {
         apply(store.settings, connected: connected(), bypassed: isBypassed)
     }
 
+    private func canContinuePreview(
+        _ baseline: PointerSelection, on deviceID: String, services: Set<UInt64>,
+        settings: WhiskerSettings, connected: [ConnectedDevice]
+    ) -> Bool {
+        settings.activePointer(for: deviceID) != nil
+            && settings.devices[deviceID]?.pointerSelection == baseline
+            && !services.isEmpty && services == hardware.serviceIDs(for: deviceID)
+            && PointerPresetRefusal.targetRefusal(deviceID: deviceID, connected: connected) == nil
+    }
+
     /// Mice came or went. A change that was waiting on a mouse that is gone is dropped, so that when the
     /// mouse comes back only the last confirmed speed is written to it.
     func devicesChanged(_ connected: [ConnectedDevice], bypassed: Bool = false) {
@@ -244,7 +394,6 @@ final class PointerController: ObservableObject {
         if let edit = speedEdit,
            PointerPresetRefusal.targetRefusal(deviceID: edit.deviceID, connected: connected) != nil {
             speedEdit = nil
-            setSelection(edit.baseline, on: edit.deviceID)
         }
         if let pending, PointerPresetRefusal.targetRefusal(deviceID: pending.deviceID, connected: connected) != nil {
             revertPending()
@@ -255,6 +404,8 @@ final class PointerController: ObservableObject {
     /// Puts back every value Whisker changed. A device that refuses keeps its record, so the values are
     /// remembered for the next launch.
     func restoreAll() {
+        cancelPending()
+        speedEdit = nil
         for id in slowPointerFactors.keys { blockedSlowPointer[id] = slowPointerSessions[id] }
         slowPointerFactors.removeAll()
         for id in Array(originals.keys) { restore(id) }
@@ -265,6 +416,55 @@ final class PointerController: ObservableObject {
     func restoreLeftovers(connected: [ConnectedDevice]) {
         let ids = Set(connected.map(\.id))
         for id in Array(originals.keys) where ids.contains(id) { restore(id) }
+    }
+
+    /// Runs once at launch, before anything is written to a mouse. A record left in the journal means the
+    /// previous run stopped (a crash, force quit or restart) while a change waited to be kept.
+    ///
+    /// Saved settings only ever hold confirmed selections, so they are what gets applied; nothing in the record
+    /// is ever written to a mouse. Should the unconfirmed selection have reached the settings anyway, the
+    /// record's confirmed one is put back, or the system's own speed when that copy isn't valid. The record is
+    /// removed only after that is saved, so a recovery cut short runs again to the same result.
+    @discardableResult
+    func recoverInterruptedTrial() -> InterruptedTrial? {
+        guard let journal else { return nil }
+        let found: InterruptedTrial
+        switch journal.loadPointerTrial() {
+        case .empty:
+            return nil
+        case .unreadable:
+            Log.pointer.error("An unconfirmed pointer change was left on record but can’t be read; using the saved pointer settings")
+            found = .unreadable
+            notice = Notice(
+                deviceID: nil,
+                message: "Whisker stopped before a pointer speed change was kept. Its record couldn’t be read, so the saved speeds are in use."
+            )
+        case .record(let record):
+            found = .reverted(deviceID: record.deviceID)
+            var settings = store.settings
+            if var device = settings.devices[record.deviceID], let trial = record.trial?.selection,
+               trial != record.confirmed.selection, device.pointerSelection == trial {
+                var confirmed = record.confirmed.validSelection ?? .system
+                if let id = confirmed.presetID, device.pointerPreset(id: id) == nil { confirmed.presetID = nil }
+                device.pointerSelection = confirmed
+                settings.devices[record.deviceID] = device
+                store.settings = settings
+                store.saveNow()
+            }
+            Log.pointer.notice("A pointer change for \(record.deviceID, privacy: .public) was never kept; the confirmed speed stands")
+            let name = settings.devices[record.deviceID]?.name ?? ""
+            notice = Notice(
+                deviceID: record.deviceID,
+                message: "Whisker stopped before the new speed for \(name.isEmpty ? "this mouse" : name) was kept, so the last kept speed is in use."
+            )
+        }
+        do {
+            try journal.clearPointerTrial()
+        } catch {
+            Log.pointer.error("Couldn’t remove the pointer change record: \(error.localizedDescription, privacy: .public)")
+        }
+        journaled = nil
+        return found
     }
 
     // MARK: Switching presets
@@ -291,17 +491,30 @@ final class PointerController: ObservableObject {
         guard device.selectPointerPreset(id: presetID) else { return reject(.unknownPreset, on: deviceID) }
         guard device.pointerSelection != baseline else { return .alreadyActive }
 
+        let services = hardware.serviceIDs(for: deviceID)
         var updated = before
         updated.devices[deviceID] = device
-        store.settings = updated
-        reapply()
+        let needsConfirmation = PointerMath.needsConfirmation(
+            confirmed: baseline.pointer?.speed ?? 1, new: device.pointer?.speed ?? 1
+        )
+        if needsConfirmation, !recordTrial(on: deviceID, confirmed: baseline, trial: device.pointerSelection) {
+            return reject(.trialNotRecorded, on: deviceID, attention: true)
+        }
+        // Trial writes never enter the store: a crash can only reload a confirmed selection.
+        apply(updated, connected: connected(), bypassed: isBypassed)
         guard !refused(deviceID) else {
-            return reject(rollBack(to: baseline, on: deviceID), on: deviceID, attention: true)
+            let refusal = rollBack(to: baseline, on: deviceID)
+            settleTrialRecord()
+            return reject(refusal, on: deviceID, attention: true)
         }
         clearNotice(for: deviceID)
-        let speed = device.pointer?.speed ?? 1
-        guard PointerMath.needsConfirmation(confirmed: baseline.pointer?.speed ?? 1, new: speed) else { return .applied }
-        beginConfirmation(deviceID: deviceID, previous: baseline)
+        guard needsConfirmation else {
+            store.settings = updated
+            reapply()
+            return .applied
+        }
+        beginConfirmation(deviceID: deviceID, previous: baseline, proposed: device.pointerSelection, services: services)
+        reapply()
         onAttention?()
         return .awaitingConfirmation
     }
@@ -328,31 +541,75 @@ final class PointerController: ObservableObject {
 
     /// A slider drag starts. What is confirmed now is what a big jump reverts to.
     func beginSpeedEdit(on deviceID: String) {
+        if speedEdit?.deviceID == deviceID { return }
         endSpeedEdit()
-        guard pending == nil, let device = store.settings.devices[deviceID] else { return }
-        speedEdit = SpeedEdit(deviceID: deviceID, baseline: device.pointerSelection)
+        guard pending == nil, let device = store.settings.devices[deviceID], device.pointer != nil else { return }
+        speedEdit = SpeedEdit(
+            deviceID: deviceID, baseline: device.pointerSelection, proposed: device.pointerSelection,
+            services: hardware.serviceIDs(for: deviceID)
+        )
+    }
+
+    /// Slider values stay in memory until the drag ends and, for a big increase, Keep is chosen.
+    /// Keyboard/accessibility adjustments without drag callbacks use the same confirmation path.
+    func setSpeed(_ speed: Double, on deviceID: String) {
+        guard pending == nil, speed.isFinite else { return }
+        let standalone = speedEdit == nil
+        if standalone { beginSpeedEdit(on: deviceID) }
+        guard var edit = speedEdit, edit.deviceID == deviceID, !edit.stopped, var pointer = edit.proposed.pointer else { return }
+        pointer.speed = min(max(speed, PointerMath.speedRange.lowerBound), PointerMath.speedRange.upperBound)
+        edit.proposed = PointerSelection(pointer: pointer)
+        // A speed that will have to be kept is written down before the mouse gets it; the drag's first such
+        // record keeps its confirmed baseline however far the drag goes on.
+        if PointerMath.needsConfirmation(confirmed: edit.baseline.pointer?.speed ?? 1, new: pointer.speed),
+           !recordTrial(on: deviceID, confirmed: edit.baseline, trial: nil) {
+            // The confirmed speed goes back on the mouse, and nothing more from this drag is applied.
+            edit.proposed = edit.baseline
+            edit.stopped = true
+            notify(.trialNotRecorded, on: deviceID)
+        }
+        speedEdit = edit
+        reapply()
+        if standalone { endSpeedEdit() }
     }
 
     /// The slider drag ended: the speed it reached is rolled back if the system refused it, and waits to be
     /// kept if it is a big increase.
     func endSpeedEdit() {
         guard let edit = speedEdit else { return }
-        speedEdit = nil
-        guard let selection = store.settings.devices[edit.deviceID]?.pointerSelection, selection != edit.baseline else { return }
-        if refused(edit.deviceID) {
-            notify(rollBack(to: edit.baseline, on: edit.deviceID), on: edit.deviceID)
-        } else if PointerMath.needsConfirmation(confirmed: edit.baseline.pointer?.speed ?? 1, new: selection.pointer?.speed ?? 1) {
-            beginConfirmation(deviceID: edit.deviceID, previous: edit.baseline)
+        guard canContinuePreview(edit.baseline, on: edit.deviceID, services: edit.services, settings: store.settings, connected: connected()) else {
+            speedEdit = nil
+            reapply()
+            return
         }
+        let selection = edit.proposed
+        guard selection != edit.baseline else {
+            speedEdit = nil
+            return
+        }
+        if refused(edit.deviceID) {
+            speedEdit = nil
+            notify(rollBack(to: edit.baseline, on: edit.deviceID), on: edit.deviceID)
+            return
+        } else if PointerMath.needsConfirmation(confirmed: edit.baseline.pointer?.speed ?? 1, new: selection.pointer?.speed ?? 1) {
+            // Waiting starts before the drag ends, so the record of the unconfirmed speed is never dropped between them.
+            beginConfirmation(deviceID: edit.deviceID, previous: edit.baseline, proposed: selection, services: edit.services)
+            speedEdit = nil
+        } else {
+            speedEdit = nil
+            setSelection(selection, on: edit.deviceID)
+        }
+        reapply()
     }
 
     // MARK: Confirmation
 
-    private func beginConfirmation(deviceID: String, previous: PointerSelection) {
-        guard let proposed = store.settings.devices[deviceID]?.pointerSelection else { return }
+    private func beginConfirmation(deviceID: String, previous: PointerSelection, proposed: PointerSelection, services: Set<UInt64>) {
+        // Usually written already, before the value reached the mouse; this adds the speed a drag settled on.
+        _ = recordTrial(on: deviceID, confirmed: previous, trial: proposed)
         revertTimer?.invalidate()
-        let deadline = Date().addingTimeInterval(confirmationTimeout)
-        pending = PendingChange(deviceID: deviceID, previous: previous, proposed: proposed, deadline: deadline)
+        let deadline = now().addingTimeInterval(confirmationTimeout)
+        pending = PendingChange(deviceID: deviceID, previous: previous, proposed: proposed, deadline: deadline, services: services)
         revertTimer = Timer.scheduledTimer(withTimeInterval: confirmationTimeout, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.revertPending() }
         }
@@ -360,7 +617,16 @@ final class PointerController: ObservableObject {
 
     /// The waiting speed is now the confirmed one.
     func confirmPending() {
+        guard let change = pending else { return }
         cancelPending()
+        if canContinuePreview(change.previous, on: change.deviceID, services: change.services, settings: store.settings, connected: connected()) {
+            guard !refused(change.deviceID) else {
+                notify(rollBack(to: change.previous, on: change.deviceID), on: change.deviceID)
+                return
+            }
+            setSelection(change.proposed, on: change.deviceID)
+        }
+        reapply()
     }
 
     /// Puts back the last confirmed speed and preset. Also what the timeout does.
@@ -368,10 +634,6 @@ final class PointerController: ObservableObject {
         guard let change = pending else { return }
         cancelPending()
         Log.pointer.info("Pointer speed change not confirmed; reverting \(change.deviceID, privacy: .public)")
-        // Only while the speed is still the proposed one: a settings import or reset since is left alone.
-        if store.settings.devices[change.deviceID]?.pointer?.speed == change.proposed.pointer?.speed {
-            setSelection(change.previous, on: change.deviceID)
-        }
         reapply()
         if refused(change.deviceID), connected().contains(where: { $0.id == change.deviceID && !$0.isExcluded }) {
             notify(.restoreFailed, on: change.deviceID)
@@ -386,6 +648,44 @@ final class PointerController: ObservableObject {
         revertTimer?.invalidate()
         revertTimer = nil
         pending = nil
+    }
+
+    // MARK: Journal
+
+    /// Writes down an unconfirmed change before it reaches the mouse. A record already kept for the device keeps
+    /// its confirmed baseline and start, so later writes in the same change can't move the baseline. False when
+    /// it couldn't be written; the caller then applies nothing.
+    private func recordTrial(on deviceID: String, confirmed: PointerSelection, trial: PointerSelection?) -> Bool {
+        guard let journal else { return true }
+        var record = PointerTrialRecord(
+            deviceID: deviceID, confirmed: .init(confirmed), trial: trial.map { .init($0) }, startedAt: now()
+        )
+        if let journaled, journaled.deviceID == deviceID {
+            record.confirmed = journaled.confirmed
+            record.startedAt = journaled.startedAt
+            if record.trial == nil { record.trial = journaled.trial }
+        }
+        guard record != journaled else { return true }
+        do {
+            try journal.savePointerTrial(record)
+        } catch {
+            Log.pointer.error("Couldn’t write down an unconfirmed pointer change: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        journaled = record
+        return true
+    }
+
+    /// Removes the record once no unconfirmed change is left. One that can't be removed only means the next
+    /// launch goes back to the speed confirmed before that change.
+    private func settleTrialRecord() {
+        guard journaled != nil, pending == nil, speedEdit == nil, let journal else { return }
+        journaled = nil
+        do {
+            try journal.clearPointerTrial()
+        } catch {
+            Log.pointer.error("Couldn’t remove the pointer change record: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Whether the system refused the latest write to the device: a new speed, or the original values.

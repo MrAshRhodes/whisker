@@ -190,7 +190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         var seen = Set<String>()
         for device in model.devices.devices where !device.isExcluded && seen.insert(device.id).inserted {
-            guard let saved = settings.devices[device.id], !saved.pointerPresets.isEmpty else { continue }
+            guard var saved = settings.devices[device.id], !saved.pointerPresets.isEmpty else { continue }
+            saved.pointerSelection = pointer.selection(on: device.id)
             items.append(pointerSubmenuItem(for: device, saved: saved))
         }
         guard !items.isEmpty else { return }

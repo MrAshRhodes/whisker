@@ -454,9 +454,15 @@ struct PointerDeviceControls: View {
     let device: ConnectedDevice
     @StateObject private var edit = PresetEditState()
 
+    private var displayedSettings: DeviceSettings {
+        var saved = store.settings.device(device.id)
+        saved.pointerSelection = pointer.selection(on: device.id)
+        return saved
+    }
+
     var body: some View {
         let binding = model.deviceBinding(device.id, name: device.name)
-        let saved = binding.wrappedValue
+        let saved = displayedSettings
         // While a change waits to be kept, nothing else may change the speed.
         let waiting = pointer.pending != nil
         if let factor = pointer.slowPointerFactors[device.id], let baseline = saved.pointer {
@@ -481,7 +487,7 @@ struct PointerDeviceControls: View {
                 HStack {
                     Slider(value: Binding(
                         get: { current.speed },
-                        set: { binding.wrappedValue.setPointerSpeed($0) }
+                        set: { pointer.setSpeed($0, on: device.id) }
                     ), in: PointerMath.speedRange) {
                         EmptyView()
                     } minimumValueLabel: { Text("Slow") } maximumValueLabel: { Text("Fast") } onEditingChanged: { editing in

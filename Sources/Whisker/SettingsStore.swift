@@ -45,6 +45,8 @@ final class SettingsStore: ObservableObject {
     let directory: URL
     var fileURL: URL { directory.appendingPathComponent("settings.json") }
     var stateURL: URL { directory.appendingPathComponent("state.json") }
+    /// Written while a pointer speed change waits to be kept, removed once it is kept or reverted.
+    var pointerTrialURL: URL { directory.appendingPathComponent("pointer-trial.json") }
 
     private var pendingSave: DispatchWorkItem?
 
@@ -164,6 +166,34 @@ final class SettingsStore: ObservableObject {
         } catch {
             Log.app.error("Couldn’t save run state: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    // MARK: Unconfirmed pointer change
+
+    func loadPointerTrial() -> PointerTrialJournalEntry {
+        let data: Data
+        do {
+            data = try Data(contentsOf: pointerTrialURL)
+        } catch where Self.isMissingFile(error) {
+            return .empty
+        } catch {
+            return .unreadable
+        }
+        guard let record = try? JSONDecoder().decode(PointerTrialRecord.self, from: data),
+              record.version == PointerTrialRecord.currentVersion
+        else { return .unreadable }
+        return .record(record)
+    }
+
+    /// Complete on disk when it returns: written to a temporary file, then moved over the old one.
+    func savePointerTrial(_ record: PointerTrialRecord) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(record).write(to: pointerTrialURL, options: .atomic)
+    }
+
+    func clearPointerTrial() throws {
+        guard FileManager.default.fileExists(atPath: pointerTrialURL.path) else { return }
+        try FileManager.default.removeItem(at: pointerTrialURL)
     }
 
     nonisolated static func isMissingFile(_ error: Error) -> Bool {
