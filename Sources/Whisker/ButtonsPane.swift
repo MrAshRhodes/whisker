@@ -44,12 +44,8 @@ final class ButtonRecorder: ObservableObject {
         case .otherMouseDown: return .button(event.buttonNumber)
         case .scrollWheel:
             guard let cgEvent = event.cgEvent,
-                  cgEvent.getIntegerValueField(.scrollWheelEventIsContinuous) == 0 else { return nil }
-            let vertical = cgEvent.getIntegerValueField(.scrollWheelEventDeltaAxis1)
-            let horizontal = cgEvent.getIntegerValueField(.scrollWheelEventDeltaAxis2)
-            if vertical != 0 { return .wheel(vertical > 0 ? .up : .down) }
-            if horizontal != 0 { return .wheel(horizontal > 0 ? .left : .right) }
-            return nil
+                  case .notch(let direction) = EventEngine.readSample(cgEvent).classification else { return nil }
+            return .wheel(direction)
         default: return nil
         }
     }
@@ -62,6 +58,7 @@ struct ButtonsPane: View {
     @ObservedObject var store: SettingsStore
     @StateObject private var recorder = ButtonRecorder()
     @StateObject private var messages = MessageState()
+    @StateObject private var tilt = TiltSheetState()
 
     var body: some View {
         let profileID = store.settings.profile(id: model.selectedProfileID)?.id ?? Profile.defaultID
@@ -80,6 +77,7 @@ struct ButtonsPane: View {
                 ForEach(profile.wrappedValue.mappings.indices, id: \.self) { index in
                     MappingRow(
                         mapping: mappingBinding(profile, index),
+                        settings: store.settings,
                         allowPrimary: store.settings.general.allowPrimaryButtonRemap,
                         onDelete: { profile.wrappedValue.mappings.remove(at: index) }
                     )
@@ -109,6 +107,7 @@ struct ButtonsPane: View {
                             }
                         }
                         .fixedSize()
+                        Button("Identify tilt-wheel controls…") { messages.text = nil; tilt.isPresented = true }
                         Spacer()
                     }
                 }
@@ -121,13 +120,25 @@ struct ButtonsPane: View {
                 Text("Hold modifier keys while recording to map a combination, like ⌥ + Button 4.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
+            if let deviceID = Self.mouseID(of: profile.wrappedValue) {
+                Section("Primary and Secondary Buttons") {
+                    ButtonSwapControls(
+                        store: store, devices: model.devices, id: deviceID,
+                        name: store.settings.devices[deviceID]?.name ?? profile.wrappedValue.name
+                    )
+                }
+            }
+            ChordSection(store: store, devices: model.devices, profile: profile, resolved: resolved.chords)
             if !inherited.isEmpty {
                 Section("Inherited") {
                     ForEach(inherited, id: \.mapping.key) { item in
                         HStack {
                             TriggerLabel(mapping: item.mapping)
                             Spacer()
-                            Label(item.mapping.action.summary, systemImage: item.mapping.action.symbolName)
+                            Label(
+                                item.mapping.gestures == nil ? store.settings.summary(of: item.mapping.action) : item.mapping.summary,
+                                systemImage: item.mapping.symbolName
+                            )
                                 .foregroundStyle(.secondary)
                             Text("from \(store.settings.profile(id: item.sourceProfileID)?.name ?? item.sourceProfileID)")
                                 .font(.footnote).foregroundStyle(.tertiary)
@@ -138,7 +149,21 @@ struct ButtonsPane: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $tilt.isPresented) {
+            TiltIdentifySheet(store: store, profileID: profileID) { note in
+                tilt.isPresented = false
+                messages.text = note
+            }
+            .environmentObject(model)
+        }
         .onDisappear { recorder.stop() }
+    }
+
+    /// The mouse a profile is for, when it is for one particular mouse in every app: the swap belongs to a mouse, not to a profile.
+    private static func mouseID(of profile: Profile) -> String? {
+        guard !profile.isDefault, profile.match.apps == [ProfileMatch.any],
+              profile.match.devices.count == 1, let id = profile.match.devices.first, id != ProfileMatch.any else { return nil }
+        return id
     }
 
     private func mappingBinding(_ profile: Binding<Profile>, _ index: Int) -> Binding<Mapping> {
@@ -186,6 +211,7 @@ struct TriggerLabel: View {
 
 struct MappingRow: View {
     @Binding var mapping: Mapping
+    let settings: WhiskerSettings
     let allowPrimary: Bool
     let onDelete: () -> Void
 
@@ -210,9 +236,44 @@ struct MappingRow: View {
                 .buttonStyle(.borderless)
                 .help("Remove this mapping")
             }
-            ActionEditor(action: $mapping.action)
+            if case .button = mapping.trigger {
+                Toggle("Gestures", isOn: Binding(
+                    get: { mapping.gestures != nil },
+                    set: { on in
+                        guard on != (mapping.gestures != nil) else { return }
+                        var updated = mapping
+                        updated.gestures = on ? ButtonGestures() : nil
+                        // The button's own action isn't used while it has gestures; older versions of Whisker leave it alone.
+                        if on { updated.action = .passthrough }
+                        mapping = updated
+                    }
+                ))
+                .help("Hold the button, move the mouse up, down, left or right and let go to run an action for each direction; letting go without moving can run one too. Not yet verified on hardware.")
+            }
+            if mapping.gestures != nil {
+                GestureEditor(gestures: Binding(
+                    get: { mapping.gestures ?? ButtonGestures() },
+                    set: { mapping.gestures = $0 }
+                ), settings: settings)
+            } else {
+                ActionEditor(action: $mapping.action, settings: settings, trigger: mapping.trigger)
+            }
             if case .wheel = mapping.trigger {
                 Toggle("Repeat for every notch", isOn: $mapping.repeatPerNotch)
+            }
+            if mapping.trigger == .wheel(.left) || mapping.trigger == .wheel(.right) {
+                Toggle("Also act on smooth scrolling from this mouse", isOn: Binding(
+                    get: { mapping.continuousInput != nil },
+                    set: { mapping.continuousInput = $0 ? ContinuousWheelInput() : nil }
+                ))
+                .help("Runs the action once per sideways swipe of a mouse that scrolls smoothly. Vertical scrolling at the same time carries on. Needs a mouse Whisker can identify; not yet verified on hardware.")
+                if let continuous = mapping.continuousInput {
+                    Stepper("Activate after \(Int(continuous.effectiveDistance)) pixels", value: Binding(
+                        get: { continuous.effectiveDistance },
+                        set: { mapping.continuousInput = ContinuousWheelInput(distance: $0) }
+                    ), in: ContinuousWheelInput.distanceRange, step: 10)
+                    .padding(.leading, 20)
+                }
             }
             if let problem = WhiskerSettings.problem(with: mapping, allowPrimary: allowPrimary) {
                 Label(problem, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
@@ -236,16 +297,48 @@ struct MappingRow: View {
 // MARK: - Action editor
 
 struct ActionEditor: View {
+    @EnvironmentObject private var model: AppModel
     @Binding var action: Action
+    let settings: WhiskerSettings
+    var trigger: Trigger? = nil
+    /// Gesture actions: only actions a gesture can run are offered, and none of them repeats while held.
+    var inGesture = false
+    /// Chord actions: a click, or anything a gesture can run.
+    var inChord = false
+    /// A gesture slot picks its kind itself (it can also be left empty), so it asks for the details alone.
+    var showsKindPicker = true
 
+    /// Pointer speed presets are offered once there is a preset to switch to, and Click Lock once it is switched on
+    /// in General. A mapping that already has either keeps showing it.
+    private var kinds: [ActionKind] {
+        ActionKind.allCases.filter { kind in
+            guard !inGesture || kind.defaultAction.allowedInGestures else { return false }
+            guard !inChord || kind.defaultAction.allowedInChords else { return false }
+            if let trigger, case .wheel = trigger, kind == .holdToScroll { return false }
+            switch kind {
+            case .pointerPreset: return action.kind == .pointerPreset || settings.firstPointerPreset() != nil
+            case .clickLock: return action.kind == .clickLock || settings.general.experimentalClickLock
+            default: return true
+            }
+        }
+    }
+
+    private func newAction(for kind: ActionKind) -> Action {
+        if kind == .pointerPreset, let first = settings.firstPointerPreset() {
+            return .pointerPreset(deviceID: first.deviceID, presetID: first.presetID)
+        }
+        return kind.defaultAction
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Picker("Action", selection: Binding(
-                get: { action.kind },
-                set: { kind in if kind != action.kind { action = kind.defaultAction } }
-            )) {
-                ForEach(ActionKind.allCases) { kind in
-                    Label(kind.title, systemImage: kind.symbolName).tag(kind)
+            if showsKindPicker {
+                Picker("Action", selection: Binding(
+                    get: { action.kind },
+                    set: { kind in if kind != action.kind { action = newAction(for: kind) } }
+                )) {
+                    ForEach(kinds) { kind in
+                        Label(kind.title, systemImage: kind.symbolName).tag(kind)
+                    }
                 }
             }
             details
@@ -276,15 +369,33 @@ struct ActionEditor: View {
                 get: { modifiers },
                 set: { action = .doubleClick(modifiers: $0) }
             ))
+        case .tripleClick(let modifiers):
+            ModifierToggles(modifiers: Binding(
+                get: { modifiers },
+                set: { action = .tripleClick(modifiers: $0) }
+            ))
+            Text("Three left clicks in a row at the pointer. What an app does with them is up to the app.")
+                .font(.footnote).foregroundStyle(.secondary)
+        case .clickLock:
+            Text("Experimental. Press once to hold the primary button down, so moving the pointer drags. Press again, or press the primary button, to let go. Not yet verified on hardware; if the button ever seems stuck, press and release the primary button yourself.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if !settings.general.experimentalClickLock {
+                Label("Turned off in General, so this does nothing for now.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
         case let .shortcut(shortcut, repeats):
             ShortcutField(shortcut: Binding(
                 get: { shortcut },
                 set: { action = .shortcut($0, repeatWhileHeld: repeats) }
             ))
-            Toggle("Repeat while held", isOn: Binding(
-                get: { repeats },
-                set: { action = .shortcut(shortcut, repeatWhileHeld: $0) }
-            ))
+            if !inGesture && !inChord {
+                Toggle("Repeat while held", isOn: Binding(
+                    get: { repeats },
+                    set: { action = .shortcut(shortcut, repeatWhileHeld: $0) }
+                ))
+            }
+        case .shortcutSequence(let steps):
+            SequenceEditor(steps: Binding(get: { steps }, set: { action = .shortcutSequence($0) }))
         case .navigate(let direction):
             Picker("Direction", selection: Binding(get: { direction }, set: { action = .navigate($0) })) {
                 ForEach(NavigationDirection.allCases, id: \.self) { Label($0.title, systemImage: $0.symbolName).tag($0) }
@@ -321,8 +432,141 @@ struct ActionEditor: View {
                 get: { lines },
                 set: { action = .scroll(direction: direction, lines: $0) }
             ), in: ScrollMath.linesRange)
+        case let .pointerPreset(deviceID, presetID):
+            PointerPresetPicker(action: $action, settings: settings, deviceID: deviceID, presetID: presetID)
+        case .slowPointer(let factor):
+            HStack {
+                Text("Speed factor")
+                Slider(value: Binding(get: { factor }, set: { action = .slowPointer(factor: $0) }), in: SlowPointer.factorRange, step: 0.1)
+                    .accessibilityLabel("Held pointer speed factor")
+                Text(String(format: "%.1f×", factor)).monospacedDigit()
+            }
+            Text("Slows only the mouse you press, while held. Needs Input Monitoring, a supported mouse and an enabled custom pointer baseline. Otherwise the button keeps its normal behaviour. Overlapping holds use the slowest factor, not their product. Cancel from Pointer settings. This changes macOS pointer response, not sensor DPI; hardware and game compatibility are not yet verified.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !model.devices.canIdentifyDevices {
+                Label("Input Monitoring is off; Whisker cannot safely identify the held mouse.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+        case let .holdToScroll(config):
+            Picker("Scroll", selection: Binding(
+                get: { config.axes },
+                set: { var updated = config; updated.axes = $0; action = .holdToScroll(updated) }
+            )) {
+                ForEach(HoldScrollAxes.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                Text("Sensitivity")
+                Slider(value: Binding(
+                    get: { config.sensitivity },
+                    set: { var updated = config; updated.sensitivity = $0; action = .holdToScroll(updated) }
+                ), in: HoldScroll.sensitivityRange)
+                Text(String(format: "%.1f×", config.sensitivity)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            if config.axes == .automatic {
+                Text("Each hold picks vertical or horizontal from its first movement and keeps it until you let go; a diagonal counts as vertical. The threshold is provisional and not yet verified on hardware, including thumb and finger trackballs.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if config.axes != .horizontal {
+                Toggle("Reverse vertical direction", isOn: Binding(
+                    get: { config.invertVertical },
+                    set: { var updated = config; updated.invertVertical = $0; action = .holdToScroll(updated) }
+                ))
+            }
+            if config.axes != .vertical {
+                Toggle("Reverse horizontal direction", isOn: Binding(
+                    get: { config.invertHorizontal },
+                    set: { var updated = config; updated.invertHorizontal = $0; action = .holdToScroll(updated) }
+                ))
+            }
+            Text("Experimental. While the button is held, moving the ball scrolls and the pointer stays put; the page follows the ball. Keeping the pointer still has not yet been verified on hardware, and Whisker falls back to normal movement if it cannot. Only the mouse you pressed scrolls, which needs Input Monitoring.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if !model.devices.canIdentifyDevices {
+                Label("Input Monitoring is off, so Hold to Scroll cannot tell which mouse you pressed and the button keeps its normal behaviour.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+            if let note = model.holdToScrollNote {
+                Label(note, systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
+            }
+        case let .autoScroll(config):
+            Picker("Scroll", selection: Binding(
+                get: { config.axes },
+                set: { var updated = config; updated.axes = $0; action = .autoScroll(updated) }
+            )) {
+                ForEach(AutoScrollAxes.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                Text("Dead zone")
+                Slider(value: Binding(
+                    get: { config.deadZone },
+                    set: { var updated = config; updated.deadZone = $0; action = .autoScroll(updated) }
+                ), in: AutoScroll.deadZoneRange)
+                Text(String(format: "%.0f pt", config.deadZone)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Top speed")
+                Slider(value: Binding(
+                    get: { config.maxSpeed },
+                    set: { var updated = config; updated.maxSpeed = $0; action = .autoScroll(updated) }
+                ), in: AutoScroll.maxSpeedRange)
+                Text(String(format: "%.0f px/s", config.maxSpeed)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            Text("Experimental. Press the button to anchor the pointer, then move it away from that spot: the further it goes, the faster the window under it scrolls, and inside the dead zone nothing moves. Press the button again, click, or scroll to stop; a change of app or profile, of connected mice, or going to sleep stops it too. There is no marker at the pointer, but the menu bar icon shows while it runs. The speeds are provisional, and TextEdit, nested scrolling in Safari, several displays, mixed pointing devices and which pane receives the scrolling have not yet been verified on hardware.")
+                .font(.footnote).foregroundStyle(.secondary)
         case .open(let url):
             OpenField(url: Binding(get: { url }, set: { action = .open(url: $0) }))
+        }
+    }
+}
+
+/// Picks the mouse and the saved speed a button switches to.
+struct PointerPresetPicker: View {
+    @Binding var action: Action
+    let settings: WhiskerSettings
+    let deviceID: String
+    let presetID: String
+
+    private struct MouseChoice: Identifiable {
+        let id: String
+        let name: String
+    }
+
+    /// Mice with presets, and the one this mapping points at even when it has none left. Mice that share a
+    /// name are told apart by their id.
+    private var choices: [MouseChoice] {
+        let listed = settings.devices
+            .filter { !$0.value.pointerPresets.isEmpty || $0.key == deviceID }
+            .sorted { ($0.value.name, $0.key) < ($1.value.name, $1.key) }
+        let names = listed.map { $0.value.name.isEmpty ? $0.key : $0.value.name }
+        return zip(listed, names).map { entry, name in
+            MouseChoice(id: entry.key, name: names.filter { $0 == name }.count > 1 ? "\(name) (\(entry.key))" : name)
+        }
+    }
+
+    var body: some View {
+        let device = settings.devices[deviceID]
+        let preset = device?.pointerPreset(id: presetID)
+        Picker("Mouse", selection: Binding(
+            get: { deviceID },
+            set: { id in action = .pointerPreset(deviceID: id, presetID: settings.devices[id]?.pointerPresets.first?.id ?? "") }
+        )) {
+            ForEach(choices) { Text($0.name).tag($0.id) }
+            if device == nil { Text("Unknown mouse").tag(deviceID) }
+        }
+        Picker("Preset", selection: Binding(
+            get: { presetID },
+            set: { action = .pointerPreset(deviceID: deviceID, presetID: $0) }
+        )) {
+            ForEach(device?.pointerPresets ?? []) { Text($0.label).tag($0.id) }
+            if preset == nil { Text("No preset").tag(presetID) }
+        }
+        if preset == nil {
+            Label("That preset no longer exists. Choose another, or remove this mapping.", systemImage: "exclamationmark.triangle")
+                .font(.footnote).foregroundStyle(.orange)
+        } else {
+            Text("Switches this mouse to the preset’s speed. A big increase has to be kept within a few seconds, or it goes back.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -371,6 +615,86 @@ struct ShortcutField: View {
                 Text("Sends \(shortcut.displayString)").font(.footnote).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// An ordered list of shortcuts, each with the wait before the next. The limits are the ones settings files are held to.
+final class RowIdentities: ObservableObject {
+    var ids: [UUID] = []
+}
+
+struct SequenceEditor: View {
+    @Binding var steps: [SequenceStep]
+    /// Gives each row a stable identity so moving or removing a row doesn't leave another's half-typed text behind.
+    @StateObject private var identities = RowIdentities()
+
+    private var limits: ShortcutSequenceLimits.Type { ShortcutSequenceLimits.self }
+
+    var body: some View {
+        syncRowIDs()
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(steps.indices), id: \.self) { index in
+                row(index)
+                    .id(identities.ids[index])
+            }
+            HStack {
+                Button {
+                    steps.append(SequenceStep(shortcut: steps.last?.shortcut ?? KeyShortcut(keyCode: 0x08, modifiers: .command)))
+                } label: {
+                    Label("Add Shortcut", systemImage: "plus")
+                }
+                .disabled(steps.count >= limits.stepCount.upperBound)
+                Text("\(steps.count) of \(limits.stepCount.lowerBound)–\(limits.stepCount.upperBound) shortcuts, \(String(format: "%g", Double(limits.totalDelayMs(of: steps)) / 1000)) of \(limits.totalDelayMs / 1000) s waiting")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let problem = limits.problem(with: steps) {
+                Label(problem, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
+            }
+            Text("Runs once per press, not while held. Using the same button again, switching app or turning Whisker off stops it. Delays can't make an app ready in time.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    private func syncRowIDs() {
+        if identities.ids.count > steps.count { identities.ids.removeLast(identities.ids.count - steps.count) }
+        while identities.ids.count < steps.count { identities.ids.append(UUID()) }
+    }
+
+    @ViewBuilder private func row(_ index: Int) -> some View {
+        HStack(alignment: .top) {
+            Text("\(index + 1).").monospacedDigit().frame(width: 24, alignment: .trailing)
+            ShortcutField(shortcut: Binding(
+                get: { index < steps.count ? steps[index].shortcut : KeyShortcut(keyCode: 0) },
+                set: { if index < steps.count { steps[index].shortcut = $0 } }
+            ))
+            if index < steps.count - 1 {
+                Stepper("then wait \(steps[index].delayAfterMs) ms", value: Binding(
+                    get: { index < steps.count ? steps[index].delayAfterMs : 0 },
+                    set: { if index < steps.count { steps[index].delayAfterMs = min(max($0, limits.delayMs.lowerBound), limits.delayMs.upperBound) } }
+                ), in: limits.delayMs, step: 50)
+                .fixedSize()
+            }
+            Button { move(index, by: -1) } label: { Image(systemName: "arrow.up") }
+                .disabled(index == 0).help("Move up")
+            Button { move(index, by: 1) } label: { Image(systemName: "arrow.down") }
+                .disabled(index >= steps.count - 1).help("Move down")
+            Button(role: .destructive) { remove(index) } label: { Image(systemName: "minus.circle") }
+                .disabled(steps.count <= limits.stepCount.lowerBound).help("Remove this shortcut")
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func move(_ index: Int, by offset: Int) {
+        let target = index + offset
+        guard steps.indices.contains(index), steps.indices.contains(target) else { return }
+        steps.swapAt(index, target)
+        if identities.ids.count == steps.count { identities.ids.swapAt(index, target) }
+    }
+
+    private func remove(_ index: Int) {
+        guard steps.indices.contains(index), steps.count > limits.stepCount.lowerBound else { return }
+        steps.remove(at: index)
+        if identities.ids.indices.contains(index) { identities.ids.remove(at: index) }
     }
 }
 

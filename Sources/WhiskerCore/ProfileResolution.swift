@@ -21,12 +21,15 @@ public struct ResolvedProfile: Equatable, Sendable {
     public var name: String
     public var mappings: [MappingKey: ResolvedMapping]
     public var scroll: ScrollSettings
+    public var chords: [ButtonChord]
 
-    public init(profileID: String, name: String, mappings: [MappingKey: ResolvedMapping], scroll: ScrollSettings) {
+    public init(profileID: String, name: String, mappings: [MappingKey: ResolvedMapping], scroll: ScrollSettings,
+                chords: [ButtonChord] = []) {
         self.profileID = profileID
         self.name = name
         self.mappings = mappings
         self.scroll = scroll
+        self.chords = chords
     }
 
     public func mapping(_ trigger: Trigger, modifiers: ModifierSet) -> Mapping? {
@@ -44,6 +47,23 @@ public struct ResolvedProfile: Equatable, Sendable {
 }
 
 extension WhiskerSettings {
+    /// Whether an enabled mapping in any profile needs pointer movement (hold to scroll, button gestures).
+    public var usesMotionActions: Bool {
+        general.enabled && profiles.contains { $0.mappings.contains { $0.usesMotion } }
+    }
+
+    /// Whether Click Lock is switched on and a mapping could start it, so the app prepares the movement it needs.
+    /// A mapping on the primary button or the wheel, or one that carries gestures, never starts one.
+    public var usesClickLock: Bool {
+        guard general.enabled, general.experimentalClickLock else { return false }
+        return profiles.contains { profile in
+            profile.mappings.contains { mapping in
+                guard mapping.action == .clickLock, mapping.gestures == nil, case .button(let button) = mapping.trigger else { return false }
+                return button != 0
+            }
+        }
+    }
+
     /// The profile that applies to a device in an app.
     ///
     /// Most specific wins: device and app, then app on any device, then device in any app, then default.
@@ -87,13 +107,15 @@ extension WhiskerSettings {
         let leaf = chain[chain.count - 1]
         var mappings: [MappingKey: ResolvedMapping] = [:]
         var scroll = ScrollSettings.system
+        var chords: [ButtonChord] = []
         for profile in chain {
             for mapping in profile.mappings {
                 mappings[mapping.key] = ResolvedMapping(mapping: mapping, sourceProfileID: profile.id, inherited: profile.id != leaf.id)
             }
             if let own = profile.scroll { scroll = own }
+            if let own = profile.chords { chords = own }
         }
-        return ResolvedProfile(profileID: leaf.id, name: leaf.name, mappings: mappings, scroll: scroll)
+        return ResolvedProfile(profileID: leaf.id, name: leaf.name, mappings: mappings, scroll: scroll, chords: chords)
     }
 
     public func resolvedProfile(device: String?, app: String?) -> ResolvedProfile {
@@ -106,6 +128,14 @@ extension WhiskerSettings {
 public final class CompiledSettings: @unchecked Sendable {
     public let settings: WhiskerSettings
     private let resolvedByID: [String: ResolvedProfile]
+    private let bypassApps: Set<String>
+    public let nativeWheelActive: Set<String>
+    /// Mice whose primary and secondary buttons are swapped, so a press can tell at once whether it is any concern.
+    public let swappedDevices: Set<String>
+    /// Whether any mapping needs pointer movement. When false, nothing in the app reads movement at all.
+    public let needsMotion: Bool
+    /// Whether Click Lock is on and mapped, so the movement conversion it needs is worth preparing.
+    public let needsClickLock: Bool
     private var cache: [CacheKey: String] = [:]
     private let lock = NSLock()
 
@@ -114,8 +144,9 @@ public final class CompiledSettings: @unchecked Sendable {
         var app: String?
     }
 
-    public init(_ settings: WhiskerSettings) {
+    public init(_ settings: WhiskerSettings, nativeWheelActive: Set<String> = []) {
         self.settings = settings
+        self.nativeWheelActive = nativeWheelActive
         var resolved: [String: ResolvedProfile] = [:]
         for profile in settings.profiles {
             resolved[profile.id] = settings.resolvedProfile(id: profile.id)
@@ -124,9 +155,19 @@ public final class CompiledSettings: @unchecked Sendable {
             resolved[Profile.defaultID] = settings.resolvedProfile(id: Profile.defaultID)
         }
         resolvedByID = resolved
+        bypassApps = Set(settings.general.bypassApps)
+        swappedDevices = Set(settings.devices.filter { $0.value.swapPrimarySecondary }.keys)
+        needsMotion = settings.usesMotionActions
+        needsClickLock = settings.usesClickLock
     }
 
     public var general: GeneralSettings { settings.general }
+
+    /// Same answer as `WhiskerSettings.isBypassed(app:)`, as a set lookup for the event tap.
+    public func isBypassed(app: String?) -> Bool {
+        guard let app else { return false }
+        return bypassApps.contains(app)
+    }
 
     public func profile(device: String?, app: String?) -> ResolvedProfile {
         let key = CacheKey(device: device, app: app)
@@ -136,6 +177,14 @@ public final class CompiledSettings: @unchecked Sendable {
         let id = settings.matchingProfile(device: device, app: app).id
         cache[key] = id
         return resolvedByID[id] ?? resolvedByID[Profile.defaultID]!
+    }
+
+    /// How the wheel is being changed for an event from `device` in `app`.
+    public func scrollMode(device: String?, app: String?) -> ScrollMode {
+        ScrollModeResolver.mode(
+            scroll: profile(device: device, app: app).scroll,
+            nativeActive: device.map { nativeWheelActive.contains($0) } ?? false
+        )
     }
 
     public func device(_ id: String?) -> DeviceSettings? {

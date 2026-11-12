@@ -133,15 +133,32 @@ public enum Action: Hashable, Sendable {
     /// Press a mouse button for as long as the trigger is held.
     case click(button: Int, modifiers: ModifierSet)
     case doubleClick(modifiers: ModifierSet)
+    /// Three left clicks in a row at the pointer, counted 1, 2 and 3. What an app does with them (some
+    /// select a line or paragraph) is up to the app.
+    case tripleClick(modifiers: ModifierSet)
+    /// Experimental. One press holds the primary button down on the user's behalf and releasing the trigger does not
+    /// end it; the next press of an assigned button lets go. See `ClickLock`.
+    case clickLock
     case shortcut(KeyShortcut, repeatWhileHeld: Bool)
+    /// Several shortcuts one after another, run once per activation within `ShortcutSequenceLimits`.
+    case shortcutSequence([SequenceStep])
     case scroll(direction: WheelDirection, lines: Int)
     case media(MediaKey)
     case navigate(NavigationDirection)
     case missionControl(MissionControlTarget)
     case space(SpaceDirection)
     case appSwitch(AppSwitchDirection)
+    /// While the button is held, movement of the device that pressed it scrolls instead of moving the pointer.
+    case holdToScroll(HoldScroll)
+    /// Anchors the pointer where the button was pressed, then scrolls at a speed set by how far the pointer is
+    /// from that spot until the trigger or any click, wheel turn or app change ends it.
+    case autoScroll(AutoScroll)
+    case slowPointer(factor: Double)
     /// An app, file or web address.
     case open(url: String)
+    /// Switch one device's pointer speed to a saved preset. Both ids are explicit, so the mapping keeps
+    /// working when presets are renamed or reordered and never lands on another device.
+    case pointerPreset(deviceID: String, presetID: String)
 
     public var kind: ActionKind {
         switch self {
@@ -149,14 +166,37 @@ public enum Action: Hashable, Sendable {
         case .none: return .none
         case .click: return .click
         case .doubleClick: return .doubleClick
+        case .tripleClick: return .tripleClick
+        case .clickLock: return .clickLock
         case .shortcut: return .shortcut
+        case .shortcutSequence: return .shortcutSequence
         case .scroll: return .scroll
         case .media: return .media
         case .navigate: return .navigate
         case .missionControl: return .missionControl
         case .space: return .space
         case .appSwitch: return .appSwitch
+        case .holdToScroll: return .holdToScroll
+        case .autoScroll: return .autoScroll
+        case .slowPointer: return .slowPointer
         case .open: return .open
+        case .pointerPreset: return .pointerPreset
+        }
+    }
+
+    /// Whether the action needs to see pointer movement, not just buttons and the wheel. Auto-scroll doesn't:
+    /// it reads where the pointer is on a timer of its own, away from the event tap.
+    public var usesMotion: Bool {
+        if case .holdToScroll = self { return true }
+        return false
+    }
+
+    /// Whether the action clicks the primary button, which a held Click Lock already has down.
+    public var clicksPrimaryButton: Bool {
+        switch self {
+        case .click(let button, _): return button == 0
+        case .doubleClick, .tripleClick: return true
+        default: return false
         }
     }
 
@@ -164,6 +204,7 @@ public enum Action: Hashable, Sendable {
     public var followsTrigger: Bool {
         switch self {
         case .click: return true
+        case .slowPointer: return true
         case .shortcut(_, let repeats): return repeats
         case .media(let key): return key.repeats
         default: return false
@@ -210,14 +251,21 @@ public enum Action: Hashable, Sendable {
             }
             return modifiers.isEmpty ? name : "\(modifiers.symbols) \(name)"
         case .doubleClick(let modifiers): return modifiers.isEmpty ? "Double Click" : "\(modifiers.symbols) Double Click"
+        case .tripleClick(let modifiers): return modifiers.isEmpty ? "Triple Click" : "\(modifiers.symbols) Triple Click"
+        case .clickLock: return "Click Lock"
         case let .shortcut(shortcut, _): return "Keyboard Shortcut \(shortcut.displayString)"
+        case .shortcutSequence(let steps): return "Shortcut Sequence \(steps.map(\.shortcut.displayString).joined(separator: " → "))"
         case let .scroll(direction, lines): return "\(direction.title) \(lines) \(lines == 1 ? "Line" : "Lines")"
         case .media(let key): return key.title
         case .navigate(let direction): return direction.title
         case .missionControl(let target): return target.title
         case .space(let direction): return "Move to \(direction.title)"
         case .appSwitch(let direction): return "Switch to \(direction.title)"
+        case .holdToScroll(let config): return config.summary
+        case .autoScroll(let config): return config.summary
+        case .slowPointer: return "Slow pointer while held"
         case .open(let url): return "Open \(Self.openTitle(url))"
+        case .pointerPreset: return "Pointer Speed Preset"
         }
     }
 
@@ -256,7 +304,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, shortcut, navigate, media, missionControl, space, appSwitch, scroll, open
+    case passthrough, none, click, doubleClick, tripleClick, clickLock, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, autoScroll, slowPointer, pointerPreset, open
 
     public var id: String { rawValue }
 
@@ -266,13 +314,20 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .none: return "Do Nothing"
         case .click: return "Click"
         case .doubleClick: return "Double Click"
+        case .tripleClick: return "Triple Click"
+        case .clickLock: return "Click Lock (Experimental)"
         case .shortcut: return "Keyboard Shortcut"
+        case .shortcutSequence: return "Keyboard Shortcut Sequence"
         case .navigate: return "Back or Forward"
         case .media: return "Media Key"
         case .missionControl: return "Mission Control"
         case .space: return "Switch Space"
         case .appSwitch: return "Switch App"
         case .scroll: return "Scroll"
+        case .holdToScroll: return "Hold to Scroll (Experimental)"
+        case .autoScroll: return "Auto-scroll (Experimental)"
+        case .slowPointer: return "Slow pointer while held"
+        case .pointerPreset: return "Pointer Speed Preset"
         case .open: return "Open App, File or Website"
         }
     }
@@ -283,31 +338,50 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .none: return "nosign"
         case .click: return "cursorarrow.click"
         case .doubleClick: return "cursorarrow.click.2"
+        case .tripleClick: return "cursorarrow.motionlines.click"
+        case .clickLock: return "lock"
         case .shortcut: return "keyboard"
+        case .shortcutSequence: return "list.number"
         case .navigate: return "arrow.left.arrow.right"
         case .media: return "playpause"
         case .missionControl: return "rectangle.3.group"
         case .space: return "square.split.2x1"
         case .appSwitch: return "rectangle.stack"
         case .scroll: return "arrow.up.and.down"
+        case .holdToScroll: return "arrow.up.and.down.and.arrow.left.and.right"
+        case .autoScroll: return "arrow.up.and.down.circle"
+        case .slowPointer: return "tortoise"
+        case .pointerPreset: return "cursorarrow.motionlines"
         case .open: return "arrow.up.forward.app"
         }
     }
 
-    /// The action a new mapping of this kind starts with.
+    /// The action a new mapping of this kind starts with. A pointer speed preset starts without a mouse or
+    /// preset, which validation rejects: pick them (`WhiskerSettings.firstPointerPreset`) before saving.
     public var defaultAction: Action {
         switch self {
         case .passthrough: return .passthrough
         case .none: return .none
         case .click: return .click(button: 2, modifiers: [])
         case .doubleClick: return .doubleClick(modifiers: [])
+        case .tripleClick: return .tripleClick(modifiers: [])
+        case .clickLock: return .clickLock
         case .shortcut: return .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: false)
+        case .shortcutSequence:
+            return .shortcutSequence([
+                SequenceStep(shortcut: KeyShortcut(keyCode: 0x00, modifiers: .command)),
+                SequenceStep(shortcut: KeyShortcut(keyCode: 0x08, modifiers: .command)),
+            ])
         case .navigate: return .navigate(.back)
         case .media: return .media(.playPause)
         case .missionControl: return .missionControl(.missionControl)
         case .space: return .space(.left)
         case .appSwitch: return .appSwitch(.next)
         case .scroll: return .scroll(direction: .down, lines: 3)
+        case .holdToScroll: return .holdToScroll(HoldScroll())
+        case .autoScroll: return .autoScroll(AutoScroll())
+        case .slowPointer: return .slowPointer(factor: 0.5)
+        case .pointerPreset: return .pointerPreset(deviceID: "", presetID: "")
         case .open: return .open(url: "")
         }
     }
@@ -315,7 +389,8 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
 
 extension Action: Codable {
     private enum CodingKeys: String, CodingKey {
-        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url
+        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, steps, axes, sensitivity, invertVertical, invertHorizontal, deadZone, maxSpeed
+        case device, preset, factor
     }
 
     public init(from decoder: Decoder) throws {
@@ -326,14 +401,23 @@ extension Action: Codable {
         }
         switch kind {
         case "passthrough": self = .passthrough
+        case "slowPointer":
+            let factor = try container.decode(Double.self, forKey: .factor)
+            guard SlowPointer.isValid(factor) else {
+                throw DecodingError.dataCorruptedError(forKey: .factor, in: container, debugDescription: "Slow pointer factor must be 0.1 to 0.9.")
+            }
+            self = .slowPointer(factor: factor)
         case "none": self = .none
         case "click": self = .click(button: try container.decode(Int.self, forKey: .button), modifiers: try modifiers())
         case "doubleClick": self = .doubleClick(modifiers: try modifiers())
+        case "tripleClick": self = .tripleClick(modifiers: try modifiers())
+        case "clickLock": self = .clickLock
         case "shortcut":
             self = .shortcut(
                 KeyShortcut(keyCode: try container.decode(UInt16.self, forKey: .keyCode), modifiers: try modifiers()),
                 repeatWhileHeld: try container.decodeIfPresent(Bool.self, forKey: .repeatWhileHeld) ?? false
             )
+        case "shortcutSequence": self = .shortcutSequence(try container.decode([SequenceStep].self, forKey: .steps))
         case "scroll":
             self = .scroll(
                 direction: try container.decode(WheelDirection.self, forKey: .direction),
@@ -344,7 +428,26 @@ extension Action: Codable {
         case "missionControl": self = .missionControl(try container.decode(MissionControlTarget.self, forKey: .target))
         case "space": self = .space(try container.decode(SpaceDirection.self, forKey: .direction))
         case "appSwitch": self = .appSwitch(try container.decode(AppSwitchDirection.self, forKey: .direction))
+        case "holdToScroll":
+            self = .holdToScroll(HoldScroll(
+                axes: try container.decodeIfPresent(HoldScrollAxes.self, forKey: .axes) ?? .vertical,
+                sensitivity: try container.decodeIfPresent(Double.self, forKey: .sensitivity) ?? 1,
+                invertVertical: try container.decodeIfPresent(Bool.self, forKey: .invertVertical) ?? false,
+                invertHorizontal: try container.decodeIfPresent(Bool.self, forKey: .invertHorizontal) ?? false
+            ))
+        case "autoScroll":
+            let defaults = AutoScroll()
+            self = .autoScroll(AutoScroll(
+                axes: try container.decodeIfPresent(AutoScrollAxes.self, forKey: .axes) ?? defaults.axes,
+                deadZone: try container.decodeIfPresent(Double.self, forKey: .deadZone) ?? defaults.deadZone,
+                maxSpeed: try container.decodeIfPresent(Double.self, forKey: .maxSpeed) ?? defaults.maxSpeed
+            ))
         case "open": self = .open(url: try container.decode(String.self, forKey: .url))
+        case "pointerPreset":
+            self = .pointerPreset(
+                deviceID: try container.decode(String.self, forKey: .device),
+                presetID: try container.decode(String.self, forKey: .preset)
+            )
         default:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "Unknown action “\(kind)”.")
         }
@@ -354,6 +457,9 @@ extension Action: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .passthrough: try container.encode("passthrough", forKey: .kind)
+        case .slowPointer(let factor):
+            try container.encode("slowPointer", forKey: .kind)
+            try container.encode(factor, forKey: .factor)
         case .none: try container.encode("none", forKey: .kind)
         case let .click(button, modifiers):
             try container.encode("click", forKey: .kind)
@@ -362,11 +468,18 @@ extension Action: Codable {
         case .doubleClick(let modifiers):
             try container.encode("doubleClick", forKey: .kind)
             try container.encode(modifiers, forKey: .modifiers)
+        case .tripleClick(let modifiers):
+            try container.encode("tripleClick", forKey: .kind)
+            try container.encode(modifiers, forKey: .modifiers)
+        case .clickLock: try container.encode("clickLock", forKey: .kind)
         case let .shortcut(shortcut, repeats):
             try container.encode("shortcut", forKey: .kind)
             try container.encode(shortcut.keyCode, forKey: .keyCode)
             try container.encode(shortcut.modifiers, forKey: .modifiers)
             try container.encode(repeats, forKey: .repeatWhileHeld)
+        case .shortcutSequence(let steps):
+            try container.encode("shortcutSequence", forKey: .kind)
+            try container.encode(steps, forKey: .steps)
         case let .scroll(direction, lines):
             try container.encode("scroll", forKey: .kind)
             try container.encode(direction, forKey: .direction)
@@ -386,9 +499,24 @@ extension Action: Codable {
         case .appSwitch(let direction):
             try container.encode("appSwitch", forKey: .kind)
             try container.encode(direction, forKey: .direction)
+        case .holdToScroll(let config):
+            try container.encode("holdToScroll", forKey: .kind)
+            try container.encode(config.axes, forKey: .axes)
+            try container.encode(config.sensitivity, forKey: .sensitivity)
+            try container.encode(config.invertVertical, forKey: .invertVertical)
+            try container.encode(config.invertHorizontal, forKey: .invertHorizontal)
+        case .autoScroll(let config):
+            try container.encode("autoScroll", forKey: .kind)
+            try container.encode(config.axes, forKey: .axes)
+            try container.encode(config.deadZone, forKey: .deadZone)
+            try container.encode(config.maxSpeed, forKey: .maxSpeed)
         case .open(let url):
             try container.encode("open", forKey: .kind)
             try container.encode(url, forKey: .url)
+        case let .pointerPreset(deviceID, presetID):
+            try container.encode("pointerPreset", forKey: .kind)
+            try container.encode(deviceID, forKey: .device)
+            try container.encode(presetID, forKey: .preset)
         }
     }
 }

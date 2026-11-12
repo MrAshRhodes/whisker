@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = UpdateController.shared
         NSApp.mainMenu = makeMainMenu()
         model.onStatusChange = { [weak self] in self?.refreshStatusItem() }
+        model.pointer.onAttention = { [weak self] in self?.showPointerSettings() }
         model.start()
         refreshStatusItem()
         if !model.permission.isTrusted {
@@ -80,7 +81,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Status item
 
     private func refreshStatusItem() {
-        guard model.store.settings.general.showMenuBarIcon else {
+        // A held Click Lock or a running auto-scroll is shown even when the icon is switched off, so neither goes unseen.
+        let lockHeld = model.clickLockActive
+        let scrolling = model.autoScrollActive
+        guard model.store.settings.general.showMenuBarIcon || lockHeld || scrolling else {
             if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
             statusItem = nil
             return
@@ -93,29 +97,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem = item
         }
         guard let button = statusItem?.button else { return }
-        let image = NSImage(systemSymbolName: "computermouse", accessibilityDescription: "Whisker")
+        // The lock holds a button down, so it takes the icon when both are on.
+        let image = NSImage(
+            systemSymbolName: lockHeld ? "lock.fill" : scrolling ? ActionKind.autoScroll.symbolName : "computermouse",
+            accessibilityDescription: lockHeld ? "Whisker: Click Lock is on" : scrolling ? "Whisker, auto-scroll on" : "Whisker"
+        )
         image?.isTemplate = true
         button.image = image
         let active = model.isEnabled && model.engineRunning
-        button.appearsDisabled = !active
-        button.toolTip = active ? "Whisker" : model.engineRunning ? "Whisker (off)" : "Whisker needs Accessibility access"
+        button.appearsDisabled = !active && !lockHeld
+        var tip = active ? "Whisker" : model.engineRunning ? "Whisker (off)" : "Whisker needs Accessibility access"
+        if active, let app = model.bypassedAppName { tip = "Whisker (bypassed for \(app))" }
+        if scrolling { tip = "Whisker: auto-scroll is on. Click or scroll to stop it." }
+        if lockHeld { tip += "\nClick Lock is on: press the primary button to let go" }
+        if !model.pointer.restoreFailures.isEmpty { tip += "\nPointer settings couldn’t be restored" }
+        if !model.wheel.restoreFailures.isEmpty { tip += "\nWheel settings couldn’t be restored" }
+        button.toolTip = tip
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        if model.clickLockActive {
+            let release = NSMenuItem(title: "Release Click Lock", action: #selector(releaseClickLock), keyEquivalent: "")
+            release.target = self
+            menu.addItem(release)
+            menu.addItem(.separator())
+        }
         let enabled = NSMenuItem(title: "Enabled", action: #selector(toggleEnabled(_:)), keyEquivalent: "")
         enabled.target = self
         enabled.state = model.isEnabled ? .on : .off
         menu.addItem(enabled)
-        if model.permission.isTrusted {
+        if let app = model.bypassedAppName {
+            let bypassed = NSMenuItem(title: "Bypassed for \(app)", action: nil, keyEquivalent: "")
+            bypassed.isEnabled = false
+            menu.addItem(bypassed)
+        } else if model.permission.isTrusted {
             let profile = NSMenuItem(title: "Profile: \(model.activeProfileName)", action: nil, keyEquivalent: "")
             profile.isEnabled = false
             menu.addItem(profile)
-        } else {
+        }
+        if !model.permission.isTrusted {
             let grant = NSMenuItem(title: "Grant Accessibility Access…", action: #selector(showOnboarding), keyEquivalent: "")
             grant.target = self
             menu.addItem(grant)
         }
+        addPointerItems(to: menu)
+        if !model.pointer.restoreFailures.isEmpty {
+            let warning = NSMenuItem(title: "Pointer settings couldn’t be restored…", action: #selector(showPointerSettings), keyEquivalent: "")
+            warning.target = self
+            menu.addItem(warning)
+        }
+        if !model.wheel.restoreFailures.isEmpty {
+            let warning = NSMenuItem(title: "Wheel settings couldn’t be restored…", action: #selector(showWheelSettings), keyEquivalent: "")
+            warning.target = self
+            menu.addItem(warning)
+        }
+        let cancel = NSMenuItem(title: "Cancel Sequence", action: model.isSequenceRunning ? #selector(cancelSequence) : nil, keyEquivalent: "")
+        cancel.target = self
+        menu.addItem(cancel)
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
         settings.target = self
@@ -130,6 +169,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit Whisker", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
+    /// What a pointer speed menu item stands for.
+    private struct PointerChoice {
+        var deviceID: String
+        var presetID: String?
+    }
+
+    /// A speed change waiting to be kept or reverted, and a submenu for each mouse that has saved speed presets.
+    private func addPointerItems(to menu: NSMenu) {
+        let pointer = model.pointer
+        let settings = model.store.settings
+        var items: [NSMenuItem] = []
+        if let pending = pointer.pending {
+            let mouse = settings.devices[pending.deviceID]?.name ?? ""
+            let speed = pending.proposed.pointer.map { PointerMath.speedLabel($0.speed) } ?? "the system speed"
+            items.append(NSMenuItem(title: "\(mouse.isEmpty ? "This mouse" : mouse) is at \(speed). Keep it?", action: nil, keyEquivalent: ""))
+            items.append(pointerItem("Keep Pointer Speed", #selector(keepPointerSpeed)))
+            items.append(pointerItem("Revert Pointer Speed", #selector(revertPointerSpeed)))
+            items.append(pointerItem("Use System Settings", #selector(useSystemPointerSpeed(_:)), choice: PointerChoice(deviceID: pending.deviceID)))
+        }
+        var seen = Set<String>()
+        for device in model.devices.devices where !device.isExcluded && seen.insert(device.id).inserted {
+            guard var saved = settings.devices[device.id], !saved.pointerPresets.isEmpty else { continue }
+            saved.pointerSelection = pointer.selection(on: device.id)
+            items.append(pointerSubmenuItem(for: device, saved: saved))
+        }
+        guard !items.isEmpty else { return }
+        menu.addItem(.separator())
+        items.forEach(menu.addItem)
+    }
+
+    private func pointerItem(_ title: String, _ action: Selector, choice: PointerChoice? = nil) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = choice
+        return item
+    }
+
+    /// "Pointer Speed — MX Master", with a row per preset, "Custom" while the speed matches none of them, and
+    /// Use System Settings. A row that can't be used right now is greyed out and says why in its tooltip.
+    private func pointerSubmenuItem(for device: ConnectedDevice, saved: DeviceSettings) -> NSMenuItem {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for preset in saved.pointerPresets {
+            let refusal = model.pointer.refusal(forPreset: preset.id, on: device.id)
+            let row = pointerItem(preset.label, #selector(selectPointerPreset(_:)), choice: PointerChoice(deviceID: device.id, presetID: preset.id))
+            row.state = saved.activePointerPreset?.id == preset.id ? .on : .off
+            row.isEnabled = refusal == nil
+            row.toolTip = refusal?.message(device: device.name)
+            submenu.addItem(row)
+        }
+        if saved.pointer != nil, saved.activePointerPreset == nil {
+            let custom = NSMenuItem(title: "Custom", action: nil, keyEquivalent: "")
+            custom.state = .on
+            custom.isEnabled = false
+            submenu.addItem(custom)
+        }
+        submenu.addItem(.separator())
+        let system = pointerItem("Use System Settings", #selector(useSystemPointerSpeed(_:)), choice: PointerChoice(deviceID: device.id))
+        system.state = saved.pointer == nil ? .on : .off
+        system.isEnabled = saved.pointer != nil
+        submenu.addItem(system)
+
+        let item = NSMenuItem(title: "Pointer Speed — \(device.name)", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func selectPointerPreset(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? PointerChoice, let presetID = choice.presetID else { return }
+        if case .rejected = model.pointer.selectPreset(presetID, on: choice.deviceID) { NSSound.beep() }
+    }
+
+    @objc private func useSystemPointerSpeed(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? PointerChoice else { return }
+        model.pointer.useSystemSettings(on: choice.deviceID)
+    }
+
+    @objc private func keepPointerSpeed() {
+        model.pointer.confirmPending()
+    }
+
+    @objc private func revertPointerSpeed() {
+        model.pointer.revertPending()
+    }
+
+    @objc private func cancelSequence() {
+        model.cancelSequence()
+    }
+
+    @objc private func releaseClickLock() {
+        model.releaseClickLock()
+    }
+
     @objc private func toggleEnabled(_ sender: Any?) {
         model.setEnabled(!model.isEnabled)
     }
@@ -140,6 +272,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showAbout() {
         model.selectedPane = .about
+        settingsWindow.show()
+    }
+
+    @objc private func showPointerSettings() {
+        model.selectedPane = .pointer
+        settingsWindow.show()
+    }
+
+    @objc private func showWheelSettings() {
+        model.selectedPane = .scrolling
         settingsWindow.show()
     }
 

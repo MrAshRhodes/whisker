@@ -2,16 +2,18 @@ import Foundation
 
 /// The whole settings file (`~/Library/Application Support/Whisker/settings.json`).
 public struct WhiskerSettings: Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var general: GeneralSettings
     /// Per-device settings keyed by `DeviceIdentity.id`.
-    public var devices: [String: DeviceSettings]
+    public var devices: [String: DeviceSettings] { didSet { pruneNestedUnknownFields() } }
     /// The first profile with id `default` is the global profile; the rest are per app or per device.
-    public var profiles: [Profile]
+    public var profiles: [Profile] { didSet { pruneNestedUnknownFields() } }
     /// Top-level keys this version doesn't know, kept so a newer file survives a round trip.
     public var unknownKeys: [String: JSONValue]
+    /// Unmodelled nested fields, owned and reapplied by SettingsCodec only where their objects survive.
+    var nestedUnknownFields: SettingsCodec.SettingsUnknownFields?
 
     public init(
         schemaVersion: Int = WhiskerSettings.currentSchemaVersion,
@@ -28,6 +30,23 @@ public struct WhiskerSettings: Equatable, Sendable {
     }
 
     public static let `default` = WhiskerSettings()
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.schemaVersion == rhs.schemaVersion, lhs.general == rhs.general, lhs.devices == rhs.devices,
+              lhs.profiles == rhs.profiles, lhs.unknownKeys == rhs.unknownKeys else { return false }
+        if lhs.nestedUnknownFields == rhs.nestedUnknownFields { return true }
+        // Preserved fields can differ in form, e.g. one copy still tracks a field edits made inert, while the file
+        // both copies write is the same; compare that.
+        guard let left = try? SettingsCodec.encode(lhs), let right = try? SettingsCodec.encode(rhs) else { return false }
+        return left == right
+    }
+
+    /// Forgets preserved fields of deleted objects as soon as they go, so a later object with the same identity
+    /// doesn't inherit them. Only does work for files that had unknown nested fields.
+    mutating func pruneNestedUnknownFields() {
+        guard nestedUnknownFields != nil else { return }
+        nestedUnknownFields = SettingsCodec.unknownFieldsInUse(by: self)
+    }
 
     public var defaultProfile: Profile {
         profiles.first { $0.id == Profile.defaultID } ?? .makeDefault()
@@ -74,11 +93,23 @@ public struct GeneralSettings: Equatable, Sendable {
     public var showMenuBarIcon: Bool
     /// The primary button without modifiers can't be remapped unless this is on, so a bad mapping can't lock you out.
     public var allowPrimaryButtonRemap: Bool
+    /// Bundle identifiers of apps Whisker stands aside for. While one is in front, button mappings, wheel
+    /// actions, scroll changes and pointer overrides all switch off as if Whisker were off. It never turns
+    /// Whisker on: the master switch still wins.
+    public var bypassApps: [String]
+    /// Experimental opt-in for the Click Lock action. While off, Click Lock mappings stay in the file but do
+    /// nothing and the picker doesn't offer the action.
+    public var experimentalClickLock: Bool
 
-    public init(enabled: Bool = true, showMenuBarIcon: Bool = true, allowPrimaryButtonRemap: Bool = false) {
+    public init(
+        enabled: Bool = true, showMenuBarIcon: Bool = true, allowPrimaryButtonRemap: Bool = false, bypassApps: [String] = [],
+        experimentalClickLock: Bool = false
+    ) {
         self.enabled = enabled
         self.showMenuBarIcon = showMenuBarIcon
         self.allowPrimaryButtonRemap = allowPrimaryButtonRemap
+        self.bypassApps = bypassApps
+        self.experimentalClickLock = experimentalClickLock
     }
 }
 
@@ -90,12 +121,42 @@ public struct DeviceSettings: Equatable, Sendable {
     /// `nil` keeps the system pointer speed.
     public var pointer: PointerSettings?
     public var wheel: WheelSettings
+    /// Confirmed names for this device's controls, such as "Wheel tilt left". Metadata only.
+    public var controlLabels: [ControlLabel]
+    /// Opt-in filter for very short duplicate clicks; `nil` leaves clicks alone.
+    public var clickDebounce: ClickDebounceSettings?
+    /// Named speeds saved for this device, in the order they are listed. See `PointerPreset`.
+    public var pointerPresets: [PointerPreset]
+    /// The preset the current custom speed was switched to. Nil for a speed set by hand or no custom speed.
+    public var activePointerPresetID: String?
+    /// Reserved orientation correction, independent of custom speed. Dormant: global rotation is not supported.
+    public var rotationDegrees: Double
+    /// Opt-in: this mouse's primary and secondary buttons trade places, as one pair (see `ButtonSwap`). It only acts
+    /// while "Allow remapping the primary button" is on.
+    public var swapPrimarySecondary: Bool
+    public var extraButtons: ExtraButtonSettings
+    /// Reserved, opaque namespaced mapping records. No adapter is approved and these are never executed.
+    public var extraButtonMappings: [String: JSONValue]
 
-    public init(name: String = "", enabled: Bool = true, pointer: PointerSettings? = nil, wheel: WheelSettings = WheelSettings()) {
+    public init(
+        name: String = "", enabled: Bool = true, pointer: PointerSettings? = nil, wheel: WheelSettings = WheelSettings(),
+        clickDebounce: ClickDebounceSettings? = nil, controlLabels: [ControlLabel] = [],
+        pointerPresets: [PointerPreset] = [], activePointerPresetID: String? = nil, rotationDegrees: Double = 0,
+        swapPrimarySecondary: Bool = false, extraButtons: ExtraButtonSettings = ExtraButtonSettings(),
+        extraButtonMappings: [String: JSONValue] = [:]
+    ) {
         self.name = name
         self.enabled = enabled
         self.pointer = pointer
         self.wheel = wheel
+        self.clickDebounce = clickDebounce
+        self.controlLabels = controlLabels
+        self.pointerPresets = pointerPresets
+        self.activePointerPresetID = activePointerPresetID
+        self.rotationDegrees = PointerOrientationMath.normalisedDegrees(rotationDegrees) ?? rotationDegrees
+        self.swapPrimarySecondary = swapPrimarySecondary
+        self.extraButtons = extraButtons
+        self.extraButtonMappings = extraButtonMappings
     }
 }
 
@@ -117,10 +178,13 @@ public struct PointerSettings: Equatable, Sendable {
 public struct WheelSettings: Equatable, Sendable {
     public var invertVertical: Bool
     public var invertHorizontal: Bool
+    /// Opt-in change of the mouse's own wheel speed and acceleration. `nil` keeps the system behaviour.
+    public var native: NativeWheelSettings?
 
-    public init(invertVertical: Bool = false, invertHorizontal: Bool = false) {
+    public init(invertVertical: Bool = false, invertHorizontal: Bool = false, native: NativeWheelSettings? = nil) {
         self.invertVertical = invertVertical
         self.invertHorizontal = invertHorizontal
+        self.native = native
     }
 }
 
@@ -132,14 +196,75 @@ public struct ScrollSettings: Equatable, Sendable {
     public var acceleration: Double
     /// Holding these turns vertical wheel movement into horizontal scrolling. Empty = off.
     public var horizontalModifier: ModifierSet
+    /// Scales the distance while modifiers are held. Nil = off.
+    public var modifierScaling: ModifierScaling?
+    /// Spreads each wheel notch's distance over `smoothDuration` milliseconds. Off unless saved as on.
+    public var smoothScrolling: Bool
+    /// Milliseconds a notch's distance is spread over, `ScrollMath.smoothDurationRange`.
+    public var smoothDuration: Int
 
-    public init(linesPerNotch: Int? = nil, acceleration: Double = 0, horizontalModifier: ModifierSet = []) {
+    public init(
+        linesPerNotch: Int? = nil,
+        acceleration: Double = 0,
+        horizontalModifier: ModifierSet = [],
+        modifierScaling: ModifierScaling? = nil,
+        smoothScrolling: Bool = false,
+        smoothDuration: Int = ScrollMath.defaultSmoothDuration
+    ) {
+        self.smoothScrolling = smoothScrolling
+        self.smoothDuration = smoothDuration
         self.linesPerNotch = linesPerNotch
         self.acceleration = acceleration
         self.horizontalModifier = horizontalModifier
+        self.modifierScaling = modifierScaling
     }
 
     public static let system = ScrollSettings()
+
+    /// `modifierScaling` when it can be used, otherwise nil: the wheel then behaves as if scaling were off.
+    var usableModifierScaling: ModifierScaling? {
+        guard let scaling = modifierScaling, scaling.problem(horizontalModifier: horizontalModifier) == nil else { return nil }
+        return scaling
+    }
+}
+
+/// Which wheel directions a `ModifierScaling` changes. Directions are those the app receives, after the
+/// sideways modifier has turned up and down into left and right.
+public enum ScalingAxes: String, Equatable, Sendable, Codable, CaseIterable {
+    case both
+    case vertical
+    case horizontal
+
+    public var includesVertical: Bool { self != .horizontal }
+    public var includesHorizontal: Bool { self != .vertical }
+}
+
+/// Makes the wheel scroll further or less far while modifiers are held, e.g. half the distance for fine control.
+/// Pointer speed and clicking are not affected.
+public struct ModifierScaling: Equatable, Sendable {
+    /// Holding these scales the wheel. Must not be empty, nor the same as the sideways modifier.
+    public var modifiers: ModifierSet
+    /// Multiplier of the distance, `ScrollMath.multiplierRange`: below 1 slows the wheel, above 1 speeds it up.
+    public var multiplier: Double
+    public var axes: ScalingAxes
+
+    public init(modifiers: ModifierSet = [], multiplier: Double = 2, axes: ScalingAxes = .both) {
+        self.modifiers = modifiers
+        self.multiplier = multiplier
+        self.axes = axes
+    }
+
+    /// Why this can't be used next to the sideways modifier, or nil when it is fine. Shared by validation, the
+    /// settings window and the event processor, which leaves scaling with a problem switched off.
+    public func problem(horizontalModifier: ModifierSet) -> String? {
+        let held = modifiers.withoutFunction
+        if held.isEmpty { return "Choose at least one modifier key to hold." }
+        if held == horizontalModifier.withoutFunction {
+            return "\(held.symbols) already scrolls sideways. Choose a different modifier for the speed."
+        }
+        if !multiplier.isFinite || multiplier <= 0 { return "The speed must be more than zero." }
+        return nil
+    }
 }
 
 public struct ProfileMatch: Equatable, Sendable, Codable {
@@ -167,6 +292,8 @@ public struct Profile: Equatable, Sendable, Identifiable {
     /// Nil inherits the parent's scroll settings.
     public var scroll: ScrollSettings?
     public var mappings: [Mapping]
+    /// Nil inherits; an explicit empty list disables inherited chords.
+    public var chords: [ButtonChord]?
 
     public init(
         id: String = UUID().uuidString.lowercased(),
@@ -174,7 +301,8 @@ public struct Profile: Equatable, Sendable, Identifiable {
         match: ProfileMatch = ProfileMatch(),
         inherits: String? = Profile.defaultID,
         scroll: ScrollSettings? = nil,
-        mappings: [Mapping] = []
+        mappings: [Mapping] = [],
+        chords: [ButtonChord]? = nil
     ) {
         self.id = id
         self.name = name
@@ -182,6 +310,7 @@ public struct Profile: Equatable, Sendable, Identifiable {
         self.inherits = id == Profile.defaultID ? nil : inherits
         self.scroll = scroll
         self.mappings = mappings
+        self.chords = chords
     }
 
     public var isDefault: Bool { id == Self.defaultID }
@@ -232,21 +361,40 @@ public struct Mapping: Equatable, Sendable {
     public var action: Action
     /// Wheel triggers only: fire on every notch instead of once per burst of notches.
     public var repeatPerNotch: Bool
+    /// Scroll Left/Right only: nil acts on discrete notches alone; otherwise a mouse's smooth horizontal
+    /// scrolling also fires the action once per burst, leaving any vertical movement alone.
+    public var continuousInput: ContinuousWheelInput?
+    /// Button triggers only: opt-in directional gestures. When set the button is a gesture button and `action` is
+    /// not used (the Buttons pane stores Default there).
+    public var gestures: ButtonGestures?
 
-    public init(trigger: Trigger, modifiers: ModifierSet = [], action: Action, repeatPerNotch: Bool = false) {
+    public init(
+        trigger: Trigger, modifiers: ModifierSet = [], action: Action, repeatPerNotch: Bool = false,
+        continuousInput: ContinuousWheelInput? = nil, gestures: ButtonGestures? = nil
+    ) {
         self.trigger = trigger
         self.modifiers = modifiers
         self.action = action
         self.repeatPerNotch = repeatPerNotch
+        self.continuousInput = continuousInput
+        self.gestures = gestures
     }
 
     public var key: MappingKey { MappingKey(trigger, modifiers) }
+
+    /// Whether the mapping needs to see pointer movement, not just buttons and the wheel.
+    public var usesMotion: Bool { gestures != nil || action.usesMotion }
+
+    /// One line describing what the mapping does, for lists.
+    public var summary: String { gestures?.summary ?? action.summary }
+
+    public var symbolName: String { gestures == nil ? action.symbolName : "arrow.up.and.down.and.arrow.left.and.right" }
 }
 
 // MARK: - Coding
 
 extension GeneralSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case enabled, showMenuBarIcon, allowPrimaryButtonRemap }
+    private enum CodingKeys: String, CodingKey { case enabled, showMenuBarIcon, allowPrimaryButtonRemap, bypassApps, experimentalClickLock }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -254,11 +402,17 @@ extension GeneralSettings: Codable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? defaults.enabled
         showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? defaults.showMenuBarIcon
         allowPrimaryButtonRemap = try c.decodeIfPresent(Bool.self, forKey: .allowPrimaryButtonRemap) ?? defaults.allowPrimaryButtonRemap
+        bypassApps = try c.decodeIfPresent([String].self, forKey: .bypassApps) ?? defaults.bypassApps
+        experimentalClickLock = try c.decodeIfPresent(Bool.self, forKey: .experimentalClickLock) ?? defaults.experimentalClickLock
     }
 }
 
 extension DeviceSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel }
+    private enum CodingKeys: String, CodingKey {
+        case name, enabled, pointer, wheel, clickDebounce, controlLabels, pointerPresets, activePointerPresetID, rotationDegrees
+        case swapPrimarySecondary
+        case extraButtons, extraButtonMappings
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -266,6 +420,18 @@ extension DeviceSettings: Codable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         pointer = try c.decodeIfPresent(PointerSettings.self, forKey: .pointer)
         wheel = try c.decodeIfPresent(WheelSettings.self, forKey: .wheel) ?? WheelSettings()
+        clickDebounce = try c.decodeIfPresent(ClickDebounceSettings.self, forKey: .clickDebounce)
+        controlLabels = try c.decodeIfPresent([ControlLabel].self, forKey: .controlLabels) ?? []
+        pointerPresets = try c.decodeIfPresent([PointerPreset].self, forKey: .pointerPresets) ?? []
+        activePointerPresetID = try c.decodeIfPresent(String.self, forKey: .activePointerPresetID)
+        let angle = try c.decodeIfPresent(Double.self, forKey: .rotationDegrees) ?? 0
+        guard let normalised = PointerOrientationMath.normalisedDegrees(angle) else {
+            throw DecodingError.dataCorruptedError(forKey: .rotationDegrees, in: c, debugDescription: "Rotation must be a finite angle.")
+        }
+        rotationDegrees = normalised
+        swapPrimarySecondary = try c.decodeIfPresent(Bool.self, forKey: .swapPrimarySecondary) ?? false
+        extraButtons = try c.decodeIfPresent(ExtraButtonSettings.self, forKey: .extraButtons) ?? ExtraButtonSettings()
+        extraButtonMappings = try c.decodeIfPresent([String: JSONValue].self, forKey: .extraButtonMappings) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -274,6 +440,33 @@ extension DeviceSettings: Codable {
         try c.encode(enabled, forKey: .enabled)
         try c.encodeIfPresent(pointer, forKey: .pointer)
         try c.encode(wheel, forKey: .wheel)
+        try c.encodeIfPresent(clickDebounce, forKey: .clickDebounce)
+        if !controlLabels.isEmpty { try c.encode(controlLabels, forKey: .controlLabels) }
+        if !pointerPresets.isEmpty { try c.encode(pointerPresets, forKey: .pointerPresets) }
+        try c.encodeIfPresent(activePointerPresetID, forKey: .activePointerPresetID)
+        guard let angle = PointerOrientationMath.normalisedDegrees(rotationDegrees) else {
+            throw EncodingError.invalidValue(rotationDegrees, .init(codingPath: c.codingPath + [CodingKeys.rotationDegrees], debugDescription: "Rotation must be a finite angle."))
+        }
+        if angle != 0 { try c.encode(angle, forKey: .rotationDegrees) }
+        if swapPrimarySecondary { try c.encode(true, forKey: .swapPrimarySecondary) }
+        if extraButtons.discoveryEnabled { try c.encode(extraButtons, forKey: .extraButtons) }
+        if !extraButtonMappings.isEmpty { try c.encode(extraButtonMappings, forKey: .extraButtonMappings) }
+    }
+}
+
+extension ClickDebounceSettings: Codable {
+    private enum CodingKeys: String, CodingKey { case buttons, interval }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        buttons = try c.decodeIfPresent([Int].self, forKey: .buttons) ?? []
+        interval = try c.decodeIfPresent(Double.self, forKey: .interval) ?? Self.defaultInterval
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(buttons, forKey: .buttons)
+        try c.encode(interval, forKey: .interval)
     }
 }
 
@@ -290,35 +483,87 @@ extension PointerSettings: Codable {
 }
 
 extension WheelSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case invertVertical, invertHorizontal }
+    private enum CodingKeys: String, CodingKey { case invertVertical, invertHorizontal, native }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         invertVertical = try c.decodeIfPresent(Bool.self, forKey: .invertVertical) ?? false
         invertHorizontal = try c.decodeIfPresent(Bool.self, forKey: .invertHorizontal) ?? false
+        native = try c.decodeIfPresent(NativeWheelSettings.self, forKey: .native)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(invertVertical, forKey: .invertVertical)
+        try c.encode(invertHorizontal, forKey: .invertHorizontal)
+        try c.encodeIfPresent(native, forKey: .native)
+    }
+}
+
+extension NativeWheelSettings: Codable {
+    private enum CodingKeys: String, CodingKey { case enabled, speed, acceleration }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        speed = try c.decodeIfPresent(Double.self, forKey: .speed)
+        acceleration = try c.decodeIfPresent(Double.self, forKey: .acceleration)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(speed, forKey: .speed)
+        try c.encodeIfPresent(acceleration, forKey: .acceleration)
     }
 }
 
 extension ScrollSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case linesPerNotch, acceleration, horizontalModifier }
+    private enum CodingKeys: String, CodingKey { case linesPerNotch, acceleration, horizontalModifier, modifierScaling, smoothScrolling, smoothDuration }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         linesPerNotch = try c.decodeIfPresent(Int.self, forKey: .linesPerNotch)
         acceleration = try c.decodeIfPresent(Double.self, forKey: .acceleration) ?? 0
         horizontalModifier = try c.decodeIfPresent(ModifierSet.self, forKey: .horizontalModifier) ?? []
+        modifierScaling = try c.decodeIfPresent(ModifierScaling.self, forKey: .modifierScaling)
+        smoothScrolling = try c.decodeIfPresent(Bool.self, forKey: .smoothScrolling) ?? false
+        smoothDuration = try c.decodeIfPresent(Int.self, forKey: .smoothDuration) ?? ScrollMath.defaultSmoothDuration
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        // Only written when set, so a file that never used smoothing stays as it was.
+        if smoothScrolling { try c.encode(true, forKey: .smoothScrolling) }
+        if smoothDuration != ScrollMath.defaultSmoothDuration { try c.encode(smoothDuration, forKey: .smoothDuration) }
         try c.encodeIfPresent(linesPerNotch, forKey: .linesPerNotch)
         try c.encode(acceleration, forKey: .acceleration)
         try c.encode(horizontalModifier, forKey: .horizontalModifier)
+        try c.encodeIfPresent(modifierScaling, forKey: .modifierScaling)
+    }
+}
+
+extension ModifierScaling: Codable {
+    private enum CodingKeys: String, CodingKey { case modifiers, multiplier, axes }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = ModifierScaling()
+        modifiers = try c.decodeIfPresent(ModifierSet.self, forKey: .modifiers) ?? defaults.modifiers
+        multiplier = try c.decodeIfPresent(Double.self, forKey: .multiplier) ?? defaults.multiplier
+        axes = try c.decodeIfPresent(ScalingAxes.self, forKey: .axes) ?? defaults.axes
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(modifiers, forKey: .modifiers)
+        try c.encode(multiplier, forKey: .multiplier)
+        try c.encode(axes, forKey: .axes)
     }
 }
 
 extension Profile: Codable {
-    private enum CodingKeys: String, CodingKey { case id, name, match, inherits, scroll, mappings }
+    private enum CodingKeys: String, CodingKey { case id, name, match, inherits, scroll, mappings, chords }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -335,6 +580,7 @@ extension Profile: Codable {
         }
         scroll = try c.decodeIfPresent(ScrollSettings.self, forKey: .scroll)
         mappings = try c.decodeIfPresent([Mapping].self, forKey: .mappings) ?? []
+        chords = try c.decodeIfPresent([ButtonChord].self, forKey: .chords)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -347,11 +593,12 @@ extension Profile: Codable {
         }
         if let scroll { try c.encode(scroll, forKey: .scroll) } else { try c.encodeNil(forKey: .scroll) }
         try c.encode(mappings, forKey: .mappings)
+        try c.encodeIfPresent(chords, forKey: .chords)
     }
 }
 
 extension Mapping: Codable {
-    private enum CodingKeys: String, CodingKey { case trigger, modifiers, action, repeatPerNotch }
+    private enum CodingKeys: String, CodingKey { case trigger, modifiers, action, repeatPerNotch, continuousInput, gestures }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -359,6 +606,8 @@ extension Mapping: Codable {
         modifiers = try c.decodeIfPresent(ModifierSet.self, forKey: .modifiers) ?? []
         action = try c.decode(Action.self, forKey: .action)
         repeatPerNotch = try c.decodeIfPresent(Bool.self, forKey: .repeatPerNotch) ?? false
+        continuousInput = try c.decodeIfPresent(ContinuousWheelInput.self, forKey: .continuousInput)
+        gestures = try c.decodeIfPresent(ButtonGestures.self, forKey: .gestures)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -367,6 +616,22 @@ extension Mapping: Codable {
         try c.encode(modifiers, forKey: .modifiers)
         try c.encode(action, forKey: .action)
         if repeatPerNotch { try c.encode(true, forKey: .repeatPerNotch) }
+        if let continuousInput { try c.encode(continuousInput, forKey: .continuousInput) }
+        if let gestures { try c.encode(gestures, forKey: .gestures) }
+    }
+}
+
+extension ContinuousWheelInput: Codable {
+    private enum CodingKeys: String, CodingKey { case distance }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        distance = try c.decodeIfPresent(Double.self, forKey: .distance) ?? Self.defaultDistance
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(distance, forKey: .distance)
     }
 }
 
@@ -407,7 +672,7 @@ extension WhiskerSettings: Codable {
 }
 
 /// Any JSON value, for keys Whisker passes through without understanding.
-public enum JSONValue: Equatable, Sendable, Codable {
+public enum JSONValue: Hashable, Sendable, Codable {
     case null
     case bool(Bool)
     case number(Double)

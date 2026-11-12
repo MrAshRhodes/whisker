@@ -40,11 +40,14 @@ public struct ScrollSample: Equatable, Sendable {
     public var horizontal: ScrollAxis
     /// Smooth scrolling from a trackpad or free-spinning wheel rather than wheel notches.
     public var isContinuous: Bool
+    /// Coasting after the fingers or wheel let go. Also counts as continuous, but never starts anything.
+    public var isMomentum: Bool
 
-    public init(vertical: ScrollAxis = .zero, horizontal: ScrollAxis = .zero, isContinuous: Bool = false) {
+    public init(vertical: ScrollAxis = .zero, horizontal: ScrollAxis = .zero, isContinuous: Bool = false, isMomentum: Bool = false) {
         self.vertical = vertical
         self.horizontal = horizontal
-        self.isContinuous = isContinuous
+        self.isContinuous = isContinuous || isMomentum
+        self.isMomentum = isMomentum
     }
 
     /// The single wheel direction of a notch, or nil when there's no movement.
@@ -54,6 +57,8 @@ public struct ScrollSample: Equatable, Sendable {
         if h != 0 { return h > 0 ? .left : .right }
         return nil
     }
+
+    public var isZero: Bool { vertical.isZero && horizontal.isZero }
 }
 
 public enum InputKind: Equatable, Sendable {
@@ -72,13 +77,30 @@ public struct InputEvent: Equatable, Sendable {
     public var device: DeviceAttribution?
     /// Bundle identifier of the frontmost app.
     public var app: String?
+    /// Where the pointer is, when the event carries a position.
+    public var location: PointerPoint?
+    /// Relative movement. Only read while a hold needs it, so most events leave it nil.
+    public var motion: PointerMotion?
+    /// The device the movement came from. Unlike `device` it is never inferred from there being one mouse: it is
+    /// nil unless the movement was attributed to exactly one non-excluded device.
+    public var motionDevice: DeviceAttribution?
+    /// The click count the system gave a button event (`mouseEventClickState`).
+    public var clickCount: Int64
 
-    public init(_ kind: InputKind, modifiers: ModifierSet = [], timestamp: TimeInterval = 0, device: DeviceAttribution? = nil, app: String? = nil) {
+    public init(
+        _ kind: InputKind, modifiers: ModifierSet = [], timestamp: TimeInterval = 0, device: DeviceAttribution? = nil, app: String? = nil,
+        location: PointerPoint? = nil, motion: PointerMotion? = nil, motionDevice: DeviceAttribution? = nil,
+        clickCount: Int64 = 1
+    ) {
         self.kind = kind
         self.modifiers = modifiers
         self.timestamp = timestamp
         self.device = device
         self.app = app
+        self.location = location
+        self.motion = motion
+        self.motionDevice = motionDevice
+        self.clickCount = clickCount
     }
 }
 
@@ -99,54 +121,294 @@ public enum EventPlan: Equatable, Sendable {
     case swallow
     /// Drop the event and perform the action.
     case perform(Action, ActionPhase)
+    /// Perform the action first, then let the event through unchanged. A press of the primary button ends a Click
+    /// Lock this way: the app sees the lock's release ahead of the press that ended it.
+    case performThenPassThrough(Action, ActionPhase)
     /// Rewrite a drag so it carries the button (and modifiers) the held button is mapped to.
     case dragAs(button: Int, modifiers: ModifierSet)
     /// Rewrite a drag as plain pointer movement, so the pointer still moves while a mapped button is held.
     case dragAsMove
     /// Rewrite the scroll distances, removing modifier flags that only served to change the axis.
     case scroll(ScrollSample, removing: ModifierSet)
+    /// Drop the movement, scroll by these pixels and put the pointer back on `anchor`.
+    case holdScroll(ScrollPixels, anchor: PointerPoint)
+    /// Perform the action and let the rest of the scroll event through: the mapped axis is already taken out
+    /// of the sample. A zero sample means nothing is left to deliver.
+    case performWithScroll(Action, ActionPhase, remaining: ScrollSample)
+    /// Deliver the (already transformed) distance spread over time instead of at once. The caller hands it to the
+    /// smoother and drops the event; if the smoother refuses, `request.unsmoothed` is the plan to follow instead.
+    case smooth(SmoothRequest)
+}
+
+/// A wheel notch whose distance smoothing may spread over time.
+public struct SmoothRequest: Equatable, Sendable {
+    /// The distance after wheel mappings, direction, sideways, distance and scaling.
+    public var sample: ScrollSample
+    /// Modifier flags the transformation used up; the generated events leave them out.
+    public var removing: ModifierSet
+    public var device: String
+    public var profile: String
+    public var app: String?
+    /// Milliseconds, within `ScrollMath.smoothDurationRange`.
+    public var duration: Int
+    /// Whether smoothing off would have rewritten the event.
+    public var changed: Bool
+
+    /// What happens to the event when nothing is smoothed.
+    public var unsmoothed: EventPlan {
+        changed ? .scroll(sample, removing: removing) : .passThrough
+    }
 }
 
 /// Decides, for each mouse event, whether to pass it, drop it or turn it into an action.
 ///
 /// Holds the little state needed across events: which buttons are held as what, when the wheel last fired
-/// a mapping (so a spin of the wheel counts as one press), and recent notch times for acceleration.
+/// a mapping (so a spin of the wheel counts as one press), recent notch times for acceleration, and the
+/// distance left over from scaling the wheel.
 public struct EventProcessor: Sendable {
     /// Notches closer together than this belong to the same burst and fire a wheel mapping once.
     public static let wheelBurstGap: TimeInterval = 0.13
 
-    private var held: [Int: Action] = [:]
+    private struct Press: Hashable, Sendable {
+        var button: Int
+        var device: String?
+
+        init(_ button: Int, _ device: DeviceAttribution?) {
+            self.button = button
+            self.device = device.flatMap { $0.exact ? $0.id : nil }
+        }
+
+        var attribution: DeviceAttribution? { device.map { DeviceAttribution(id: $0, exact: true) } }
+    }
+
+    private var held: [Press: Action] = [:]
+    /// Buttons still physically down whose press Whisker swallowed before it stood aside for an app. The
+    /// app never saw them go down, so it mustn't see them go up or drag either.
+    private var orphaned: Set<Press> = []
+    /// Presses delivered as the other button (primary and secondary swapped), until their release.
+    private var swaps = SwappedPresses()
     private var lastWheelEvent: [MappingKey: TimeInterval] = [:]
     private var notchTimes: [TimeInterval] = []
+    private var scaler = ScrollScaler()
+    private var hold: HoldScrollSession?
+    private var idleHoldStatus: HoldScrollStatus = .idle
+    private var gesture: GestureSession?
+    private var horizontalStream = HorizontalStream()
+    private var clickLock = ClickLock()
+    /// Buttons whose press went through to the app and are still down. A Click Lock never starts while one is.
+    private var passedDown: Set<Press> = []
+    private var autoScroll: AutoScrollSession?
+    private var autoScrollGeneration = 0
+    private var slowPointer = SlowPointerHolds()
+
+    public var slowPointerCommand: SlowPointerCommand { slowPointer.command }
+
+    public mutating func cancelSlowPointer(unlessAvailable available: Set<String> = []) {
+        slowPointer.cancel(unlessAvailable: available)
+    }
+
+    public mutating func slowPointerDevicesChanged(connected: Set<String>) {
+        slowPointer.devicesChanged(connected: connected)
+    }
 
     public init() {}
 
     /// Buttons currently held as a mapped action.
-    public var heldButtons: [Int: Action] { held }
+    public var heldButtons: [Int: Action] {
+        Dictionary(held.map { ($0.key.button, $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
 
-    public mutating func process(_ event: InputEvent, settings: CompiledSettings) -> EventPlan {
+    /// Whether a hold-to-scroll is in progress and wants the movement details of drag events.
+    public var isHolding: Bool { hold != nil }
+
+    /// Whether a button gesture is still waiting for enough movement to pick a direction.
+    public var isRecognisingGesture: Bool { gesture?.state == .undecided }
+
+    /// Whether drag events need their movement details read: a hold is under way or a gesture is waiting for movement.
+    public var wantsMotion: Bool { hold != nil || isRecognisingGesture }
+
+    /// The auto-scroll in progress. The processor only decides when one starts and ends; whoever reads this
+    /// runs it, and must stop it as soon as the session is gone or is no longer the one it was running.
+    public var autoScrollSession: AutoScrollSession? { autoScroll }
+
+    /// Whether a Click Lock is holding the primary button down.
+    public var isClickLockActive: Bool { clickLock.isActive }
+
+    /// No press, hold, gesture, lock, slowed pointer or auto-scroll is under way, so a chord may own the output.
+    public var ownsNoOutput: Bool {
+        held.isEmpty && orphaned.isEmpty && swaps.isEmpty && passedDown.isEmpty && hold == nil && gesture == nil
+            && !clickLock.isActive && autoScroll == nil && slowPointer.command.factors.isEmpty
+    }
+
+    public var clickLockOwner: ClickLock.Owner? { clickLock.owner }
+
+    /// Why the most recent Click Lock ended, for diagnostics.
+    public var lastClickLockEnd: ClickLockEnd? { clickLock.lastEnd }
+
+    /// Ends the Click Lock. True means there was one and the caller must post its one release; it is false when
+    /// nothing is held, so a second call can never ask for a second release.
+    @discardableResult
+    public mutating func cancelClickLock(_ reason: ClickLockEnd) -> Bool {
+        clickLock.end(reason) != nil
+    }
+
+    /// Ends the Click Lock unless the mouse that began it is still among `connected`. A lock begun by a press the tap
+    /// could not attribute to one mouse ends on any change. True means the caller must post the release.
+    @discardableResult
+    public mutating func cancelClickLock(unlessConnected connected: Set<String>) -> Bool {
+        guard let owner = clickLock.owner else { return false }
+        if let device = owner.device, device.exact, connected.contains(device.id) { return false }
+        return clickLock.end(.deviceDisconnected) != nil
+    }
+
+    /// Ends the Click Lock when what it began under has gone: Whisker or Click Lock is off, the app in front is
+    /// not the one it began in, or the profile or trigger mapping it began with no longer applies. True means the
+    /// caller must post the release, before it handles the event it is about to process.
+    @discardableResult
+    public mutating func releaseStaleClickLock(app: String?, settings: CompiledSettings) -> Bool {
+        guard let owner = clickLock.owner else { return false }
+        let reason: ClickLockEnd
+        if !settings.general.enabled || !settings.general.experimentalClickLock {
+            reason = .disabled
+        } else if owner.app != app || settings.isBypassed(app: app) {
+            reason = .applicationChanged
+        } else {
+            let profile = settings.profile(device: owner.device?.id, app: app)
+            if profile.profileID != owner.profile {
+                reason = .profileChanged
+            } else if profile.mappings.values.contains(where: { $0.mapping.trigger == .button(owner.trigger) && $0.mapping.action == .clickLock }) {
+                return false
+            } else {
+                reason = .settingsChanged
+            }
+        }
+        return clickLock.end(reason) != nil
+    }
+
+    /// How the latest hold-to-scroll went, for diagnostics. A fall-back is kept until the next press.
+    public var holdStatus: HoldScrollStatus {
+        guard let hold else { return idleHoldStatus }
+        return hold.fallback.map { .fellBack($0) } ?? .scrolling
+    }
+
+    /// `startsClickLock` is false for a press the tap held back and is only now handling: it may still end a lock
+    /// that is on, but a lock must begin on a press the user is making now, never on one replayed later.
+    /// `primaryEscape` preserves a physical escape even if an earlier queued press ended the lock first.
+    public mutating func process(
+        _ event: InputEvent, settings: CompiledSettings, slowPointerDevices: Set<String> = [], startsClickLock: Bool = true,
+        primaryEscape: Bool = false
+    ) -> EventPlan {
         switch event.kind {
-        case .buttonDown(let button): return buttonDown(button, event, settings)
-        case .buttonUp(let button): return buttonUp(button)
-        case .buttonDragged(let button): return dragged(button)
-        case .scroll(let sample): return scroll(sample, event, settings)
+        case .buttonDown(let button):
+            return buttonDown(button, event, settings, slowPointerDevices: slowPointerDevices, startsClickLock: startsClickLock, primaryEscape: primaryEscape)
+        case .buttonUp(let button):
+            if slowPointer.end(button: button, device: event.device) { return .swallow }
+            return buttonUp(button, event, settings)
+        case .buttonDragged(let button): return dragged(button, event, settings)
+        case .scroll(let sample): return releasingClickLockForPrimaryClick(scroll(sample, event, settings))
         }
     }
 
     /// Lets go of everything held, returning the actions to finish (e.g. release a synthetic click).
-    /// Called when Whisker is turned off, the Mac sleeps or the app quits.
-    public mutating func releaseAll() -> [(button: Int, action: Action)] {
-        let released = held.sorted { $0.key < $1.key }.filter { $0.value.followsTrigger }.map { (button: $0.key, action: $0.value) }
+    /// Called when Whisker is turned off, the Mac sleeps or the app quits. A Click Lock ends too, ending with
+    /// its one release among the actions returned.
+    public mutating func releaseAll(because reason: ClickLockEnd = .quit) -> [(button: Int, action: Action)] {
+        slowPointer.cancel()
+        var released = held.sorted {
+            ($0.key.button, $0.key.device ?? "") < ($1.key.button, $1.key.device ?? "")
+        }.filter { $0.value.followsTrigger }.map { (button: $0.key.button, action: $0.value) }
+        if let owner = clickLock.end(reason) { released.append((button: owner.trigger, action: .clickLock)) }
         held.removeAll()
+        orphaned.removeAll()
+        passedDown.removeAll()
+        // A swapped button that is still down has had its release delivered, so the real one is swallowed.
+        let swapped = swaps.removeAll()
+        released += swapped.map { (button: $0.button, action: Action.click(button: $0.target, modifiers: [])) }
+        orphaned.formUnion(swapped.map { Press($0.button, DeviceAttribution(id: $0.device, exact: true)) })
+        endHold(cancelled: true)
+        endGesture(cancelled: true)
+        autoScroll = nil
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
+        scaler.reset()
+        horizontalStream.reset()
         return released
+    }
+
+    /// Forgets partly recognised wheel movement, e.g. when settings change.
+    public mutating func resetScrollRecognition() {
+        horizontalStream.reset()
+    }
+
+    /// Like `releaseAll()`, for the moment Whisker stands aside for an app. Buttons still down keep being
+    /// swallowed (and their drags become plain movement) until they come up, so the app only ever sees
+    /// button events whose press it saw.
+    public mutating func releaseAllForBypass() -> [(button: Int, action: Action)] {
+        let buttons = orphaned.union(held.keys).union(swaps.presses.map { Press($0.button, DeviceAttribution(id: $0.device, exact: true)) })
+        let stillDown = passedDown
+        let released = releaseAll(because: .applicationChanged)
+        orphaned = buttons
+        passedDown = stillDown
+        return released
+    }
+
+    /// Releases the swapped presses of mice that are no longer among `connected`: a mouse that has gone can't send
+    /// the release itself. It sends nothing more either, so nothing is left swallowed.
+    public mutating func releaseSwaps(unlessConnected connected: Set<String>) -> [(button: Int, action: Action)] {
+        swaps.remove(unlessConnected: connected).map { (button: $0.button, action: Action.click(button: $0.target, modifiers: [])) }
+    }
+
+    /// Ends an in-progress hold-to-scroll without waiting for its button (the app in front changed, the mouse
+    /// went away…). The button is still down, so it stays swallowed and its movement stays plain pointer movement
+    /// until it comes up.
+    public mutating func cancelHold() {
+        endHold(cancelled: false)
+    }
+
+    /// Cancels the hold when the device that started it is no longer among `connected`.
+    public mutating func cancelHold(unlessConnected connected: Set<String>) {
+        guard let hold, !connected.contains(hold.device) else { return }
+        endHold(cancelled: false)
+    }
+
+    /// Ends the auto-scroll in progress, whatever caused it (settings changed, the app in front changed, a
+    /// device came or went…). The trigger button may still be down; it stays swallowed until it comes up.
+    public mutating func cancelAutoScroll() {
+        autoScroll = nil
+    }
+
+    private mutating func endHold(cancelled releaseButton: Bool) {
+        guard let session = hold else { return }
+        hold = nil
+        idleHoldStatus = session.fallback.map { .fellBack($0) } ?? .idle
+        // After a full release nothing is held any more, but the physical button may still be down.
+        if releaseButton { orphaned.insert(Press(session.button, DeviceAttribution(id: session.device, exact: true))) }
+    }
+
+    /// Calls off a gesture that is being recognised, without waiting for its button: nothing is performed, now or
+    /// when the button comes up (the app in front changed, the settings were replaced, the mouse went away…). The
+    /// button is still down, so it stays swallowed and its movement stays plain pointer movement until it comes up.
+    public mutating func cancelGesture() {
+        endGesture(cancelled: false)
+    }
+
+    /// Calls off the gesture when the device that started it is no longer among `connected`.
+    public mutating func cancelGesture(unlessConnected connected: Set<String>) {
+        guard let gesture, !connected.contains(gesture.device) else { return }
+        endGesture(cancelled: false)
+    }
+
+    private mutating func endGesture(cancelled releaseButton: Bool) {
+        guard let session = gesture else { return }
+        gesture = nil
+        // After a full release nothing is held any more, but the physical button may still be down.
+        if releaseButton { orphaned.insert(Press(session.button, DeviceAttribution(id: session.device, exact: true))) }
     }
 
     // MARK: Buttons
 
     private func isActive(_ event: InputEvent, _ settings: CompiledSettings) -> Bool {
-        guard settings.general.enabled else { return false }
+        guard settings.general.enabled, !settings.isBypassed(app: event.app) else { return false }
         if let id = event.device?.id, settings.settings.devices[id]?.enabled == false { return false }
         return true
     }
@@ -159,46 +421,253 @@ public struct EventProcessor: Sendable {
         return nil
     }
 
-    private mutating func buttonDown(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+    private mutating func buttonDown(
+        _ button: Int, _ event: InputEvent, _ settings: CompiledSettings, slowPointerDevices: Set<String>, startsClickLock: Bool,
+        primaryEscape: Bool
+    ) -> EventPlan {
+        // Any press ends an auto-scroll, and goes on to be handled as if none had been running, so a click
+        // used to stop it still reaches what is under the pointer.
+        let running = autoScroll
+        autoScroll = nil
         // A down without an up (missed event): finish the old one first by treating it as released.
-        held[button] = nil
+        let press = Press(button, event.device)
+        held[press] = nil
+        orphaned.remove(press)
+        passedDown.remove(press)
+        swaps.forget(button, from: event.device)
+        slowPointer.preparePress(button: button, device: event.device)
+        if hold?.button == button, hold?.device == press.device { endHold(cancelled: false) }
+        if gesture?.button == button, gesture?.device == press.device { gesture = nil }
+        // While a Click Lock is on, the primary button is the way out, from any mouse and whatever it is mapped to,
+        // slowing the pointer included. The lock lets go first and then the press reaches the app unchanged.
+        if button == 0, clickLock.isActive || primaryEscape {
+            let ended = clickLock.end(.physicalPrimaryPress) != nil
+            passedDown.insert(press)
+            return ended ? .performThenPassThrough(.clickLock, .up) : .passThrough
+        }
+        if slowPointer.owns(button: button, device: event.device) { return .swallow }
+        let plan = slowPointerPress(button, event, settings, devices: slowPointerDevices)
+            ?? mappedPress(button, event, settings, startsClickLock: startsClickLock, running: running)
+        if plan == .passThrough { passedDown.insert(press) }
+        return plan
+    }
+
+    /// The plan for a press mapped to slowing the pointer, or nil when the button is not mapped to it.
+    private mutating func slowPointerPress(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings, devices: Set<String>) -> EventPlan? {
+        guard isActive(event, settings),
+              let mapping = lookup(.button(button), event, settings, exactOnly: false),
+              mapping.gestures == nil,
+              case .slowPointer(let factor) = mapping.action
+        else { return nil }
+        if button == 0, mapping.modifiers.isEmpty, !settings.general.allowPrimaryButtonRemap { return .passThrough }
+        return slowPointer.begin(button: button, device: event.device, factor: factor, available: devices) ? .swallow : .passThrough
+    }
+
+    private mutating func mappedPress(
+        _ button: Int, _ event: InputEvent, _ settings: CompiledSettings, startsClickLock: Bool, running: AutoScrollSession?
+    ) -> EventPlan {
         guard isActive(event, settings) else { return .passThrough }
+        if let device = event.device, let target = ButtonSwap.target(of: button, in: event, settings: settings) {
+            // A press that acts as the primary button lets go of the lock instead of pressing twice, like a click
+            // mapped to the primary button does.
+            if target == 0, clickLock.end(.mappedPrimaryClick) != nil {
+                held[Press(button, event.device)] = Action.none
+                return .perform(.clickLock, .up)
+            }
+            swaps.began(button, as: target, from: device.id)
+            return .perform(.click(button: target, modifiers: []), .down)
+        }
         guard let mapping = lookup(.button(button), event, settings, exactOnly: false) else { return .passThrough }
         // The primary button with no modifiers is the way back if a mapping goes wrong.
         if button == 0, mapping.modifiers.isEmpty, !settings.general.allowPrimaryButtonRemap { return .passThrough }
+        if let gestures = mapping.gestures { return beginGesture(button, gestures, event, settings) }
         let action = mapping.action
         if action == .passthrough { return .passThrough }
-        held[button] = action
+        if case .holdToScroll(let config) = action { return beginHold(button, config, event) }
+        if case .autoScroll(let config) = action { return toggleAutoScroll(button, mapping.key, config, event, running: running) }
+        if action == .clickLock { return pressClickLock(button, event, settings, startsClickLock: startsClickLock) }
+        if action.clicksPrimaryButton, clickLock.end(.mappedPrimaryClick) != nil {
+            held[Press(button, event.device)] = Action.none
+            return .perform(.clickLock, .up)
+        }
+        held[Press(button, event.device)] = action
         if action == .none { return .swallow }
         return .perform(action, action.followsTrigger ? .down : .once)
     }
 
-    private mutating func buttonUp(_ button: Int) -> EventPlan {
-        guard let action = held.removeValue(forKey: button) else { return .passThrough }
+    /// One assigned press holds the primary button and the next assigned press lets go; letting go of the trigger
+    /// itself does nothing. Click Lock is experimental: it does nothing unless opted in, and the primary button
+    /// can never be its trigger because that button is how the user gets out.
+    private mutating func pressClickLock(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings, startsClickLock: Bool) -> EventPlan {
+        guard settings.general.experimentalClickLock, button != 0 else { return .passThrough }
+        if clickLock.isActive {
+            clickLock.end(.assignedPress)
+            held[Press(button, event.device)] = .clickLock
+            return .perform(.clickLock, .up)
+        }
+        // Starting needs a quiet moment: no other button down, no hold or gesture under way and a press the user is making now.
+        let profile = settings.profile(device: event.device?.id, app: event.app).profileID
+        guard startsClickLock, held.isEmpty, orphaned.isEmpty, passedDown.isEmpty, swaps.isEmpty, hold == nil, gesture == nil,
+              clickLock.begin(device: event.device, trigger: button, app: event.app, profile: profile) != nil
+        else {
+            // Refused: the press and its release are ignored rather than let the button do something else.
+            held[Press(button, event.device)] = Action.none
+            return .swallow
+        }
+        held[Press(button, event.device)] = .clickLock
+        return .perform(.clickLock, .down)
+    }
+
+    /// The press of an auto-scroll trigger. Pressed while its own auto-scroll runs, it stops it and does nothing
+    /// else; otherwise it starts one anchored where the pointer is.
+    private mutating func toggleAutoScroll(_ button: Int, _ key: MappingKey, _ config: AutoScroll, _ event: InputEvent, running: AutoScrollSession?) -> EventPlan {
+        if running?.key == key || hold != nil || gesture != nil || clickLock.isActive {
+            // A hold, a gesture or a Click Lock owns the pointer, so an auto-scroll can't start until it ends.
+            held[Press(button, event.device)] = .autoScroll(config)
+            return .swallow
+        }
+        guard let anchor = event.location, config.isValid else { return .passThrough }
+        held[Press(button, event.device)] = .autoScroll(config)
+        autoScrollGeneration += 1
+        autoScroll = AutoScrollSession(generation: autoScrollGeneration, key: key, anchor: anchor, config: config)
+        return .swallow
+    }
+
+    private mutating func beginHold(_ button: Int, _ config: HoldScroll, _ event: InputEvent) -> EventPlan {
+        // Attribution has to be exact and the position known, or the hold can't be kept to one device.
+        guard let device = event.device, device.exact, let anchor = event.location, config.isValid else {
+            idleHoldStatus = .unavailable
+            return .passThrough
+        }
+        held[Press(button, event.device)] = .holdToScroll(config)
+        // One hold at a time, and not while a gesture is being recognised: another hold button is swallowed and does nothing.
+        if hold == nil, gesture == nil {
+            hold = HoldScrollSession(button: button, device: device.id, app: event.app, anchor: anchor, config: config)
+            idleHoldStatus = .idle
+        }
+        return .swallow
+    }
+
+    private mutating func beginGesture(_ button: Int, _ config: ButtonGestures, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+        // Movement can only be kept to the pressing device when the device is known for certain, and there has to be
+        // something to perform. Otherwise the button keeps doing what it normally does.
+        guard let device = event.device, device.exact, !config.isEmpty else { return .passThrough }
+        held[Press(button, event.device)] = Action.none
+        // One gesture at a time, and not during a hold or a Click Lock, which own the pointer's movement: another
+        // gesture button is swallowed and does nothing.
+        if gesture == nil, hold == nil, !clickLock.isActive {
+            let profile = settings.profile(device: device.id, app: event.app).profileID
+            gesture = GestureSession(button: button, device: device.id, app: event.app, profile: profile, config: config)
+        }
+        return .swallow
+    }
+
+    private mutating func buttonUp(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+        guard let press = resolvePress(button, from: event.device) else {
+            // Contradictory attribution cancels recognition, but leaves the owner's swallowed release owed.
+            if gesture?.button == button {
+                gesture = nil
+                return .swallow
+            }
+            return .passThrough
+        }
+        passedDown.remove(press)
+        if hold?.button == button, hold?.device == press.device { endHold(cancelled: false) }
+        var outcome = GestureOutcome.nothing
+        if let session = gesture, session.button == button, session.device == press.device {
+            gesture = nil
+            // Only a gesture that nothing has changed under can finish: Whisker still on and the same app in front.
+            if isActive(event, settings), session.app == event.app { outcome = session.release(from: event.device) }
+        }
+        guard let action = held.removeValue(forKey: press) else {
+            if let target = swaps.end(button, from: press.attribution) { return .perform(.click(button: target, modifiers: []), .up) }
+            return orphaned.remove(press) != nil ? .swallow : .passThrough
+        }
+        if case .perform(let gestureAction) = outcome { return .perform(gestureAction, .once) }
         return action.followsTrigger ? .perform(action, .up) : .swallow
     }
 
-    private func dragged(_ button: Int) -> EventPlan {
-        guard let action = held[button] else { return .passThrough }
+    private mutating func dragged(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+        if slowPointer.owns(button: button, device: event.device) { return movementWhileHeld }
+        guard let press = resolvePress(button, from: event.device) else { return .passThrough }
+        guard let action = held[press] else {
+            if let target = swaps.target(of: button, from: press.attribution) { return .dragAs(button: target, modifiers: []) }
+            return orphaned.contains(press) ? .dragAsMove : .passThrough
+        }
+        if gesture?.button == button, gesture?.device == press.device {
+            guard isActive(event, settings), gesture?.app == event.app else {
+                gesture = nil
+                return .dragAsMove
+            }
+            if let motion = event.motion { gesture?.move(motion, from: event.motionDevice) }
+            if gesture?.state == .cancelled { gesture = nil }
+            return .dragAsMove
+        }
+        if hold?.button == button, hold?.device == press.device {
+            guard isActive(event, settings), hold?.app == event.app else {
+                endHold(cancelled: false)
+                return .dragAsMove
+            }
+            return hold!.motion(event)
+        }
         if case let .click(target, modifiers) = action { return .dragAs(button: target, modifiers: modifiers) }
-        return .dragAsMove
+        return movementWhileHeld
+    }
+
+    /// Resolve ownership across all outcomes before choosing mapped, swapped or pass-through handling.
+    /// An exact event never releases another mouse's press; delayed unattributed tails need one candidate.
+    private func resolvePress(_ button: Int, from device: DeviceAttribution?) -> Press? {
+        let candidates = Set(held.keys).union(orphaned).union(passedDown)
+            .union(swaps.presses.map { Press($0.button, DeviceAttribution(id: $0.device, exact: true)) })
+            .filter { $0.button == button }
+        if let device, device.exact {
+            let exact = Press(button, device)
+            if candidates.contains(exact) { return exact }
+            let unknown = Press(button, nil)
+            return candidates.count == 1 && candidates.contains(unknown) ? unknown : nil
+        }
+        return candidates.count == 1 ? candidates.first : nil
+    }
+
+    /// Movement of a button Whisker keeps from the app. While a Click Lock is on it is a drag of the primary button,
+    /// whichever button is still down; otherwise it is plain pointer movement.
+    private var movementWhileHeld: EventPlan {
+        clickLock.isActive ? .dragAs(button: 0, modifiers: []) : .dragAsMove
     }
 
     // MARK: Wheel
 
     private mutating func scroll(_ sample: ScrollSample, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+        // A real turn of the wheel or a trackpad swipe ends an auto-scroll, even where Whisker has no mapping.
+        // Momentum is only the tail of an earlier gesture and an empty event moves nothing, so neither does.
+        if autoScroll != nil, !sample.isMomentum, !sample.isZero { autoScroll = nil }
         guard isActive(event, settings) else { return .passThrough }
         let isNotch = !sample.isContinuous
+        var sample = sample
+        var fired: Action?
+        var consumed = false
 
+        // The mapped horizontal part of smooth scrolling goes first; what's left carries on below.
+        if sample.isContinuous, !sample.isMomentum, !sample.horizontal.isZero {
+            switch continuousHorizontal(sample.horizontal, event, settings) {
+            case .passThrough: break
+            case .consume(let action):
+                fired = action
+                consumed = true
+                sample.horizontal = .zero
+            }
+        }
+
+        // Click Lock needs a button to press and release, so a wheel direction mapped to it does nothing.
         if isNotch, let direction = sample.direction,
            let mapping = lookup(.wheel(direction), event, settings, exactOnly: true),
-           mapping.action != .passthrough {
+           mapping.action != .passthrough, mapping.action != .clickLock {
             return wheelMapping(mapping, at: event.timestamp)
         }
 
         var rewritten = sample
         var removing: ModifierSet = []
-        var changed = false
+        var changed = consumed
 
         // Inverting needs to know the device, so it only applies when the event is clearly from a mouse.
         if let attribution = event.device, attribution.exact || isNotch {
@@ -213,9 +682,10 @@ public struct EventProcessor: Sendable {
             }
         }
 
-        guard isNotch else { return changed ? .scroll(rewritten, removing: []) : .passThrough }
+        guard isNotch else { return finish(rewritten, changed: changed, fired: fired, removing: []) }
 
-        let scroll = settings.profile(device: event.device?.id, app: event.app).scroll
+        let resolved = settings.profile(device: event.device?.id, app: event.app)
+        let scroll = resolved.scroll
         let horizontalModifier = scroll.horizontalModifier.withoutFunction
         if !horizontalModifier.isEmpty, event.modifiers.isSuperset(of: horizontalModifier), !rewritten.vertical.isZero {
             rewritten.horizontal = rewritten.vertical
@@ -224,7 +694,10 @@ public struct EventProcessor: Sendable {
             changed = true
         }
 
-        if let base = scroll.linesPerNotch {
+        // Native mode owns distance and acceleration for this mouse; the saved software values are kept, not used.
+        let nativeActive = event.device.map { settings.nativeWheelActive.contains($0.id) } ?? false
+        let softwareLines = ScrollModeResolver.mode(scroll: scroll, nativeActive: nativeActive) == .native ? nil : scroll.linesPerNotch
+        if let base = softwareLines {
             notchTimes.append(event.timestamp)
             notchTimes.removeAll { event.timestamp - $0 > ScrollMath.rateWindow }
             let rate = ScrollMath.notchRate(times: notchTimes, now: event.timestamp)
@@ -234,7 +707,64 @@ public struct EventProcessor: Sendable {
             changed = true
         }
 
-        return changed ? .scroll(rewritten, removing: removing) : .passThrough
+        // Scaling comes last, on the distance and direction the app would otherwise receive. Only the modifiers
+        // it used up are removed, so a held key that did nothing here still reaches the app.
+        let device = event.device?.id
+        let scaling = scroll.usableModifierScaling
+        if let scaled = scaler.scale(rewritten, by: scaling, held: event.modifiers, device: device, profile: resolved.profileID, at: event.timestamp),
+           let scaling {
+            if scaled.isZero { return .swallow }
+            rewritten = scaled
+            removing.formUnion(scaling.modifiers.withoutFunction)
+            changed = true
+        }
+
+        // Only a notch from a mouse the tap is sure of is smoothed. The sideways-stream path keeps its own
+        // delivery: it is continuous input, which returned above, and it is never smoothed.
+        if scroll.smoothScrolling, hold == nil, fired == nil, !rewritten.isZero, let attribution = event.device, attribution.exact {
+            return .smooth(SmoothRequest(
+                sample: rewritten, removing: removing, device: attribution.id, profile: resolved.profileID, app: event.app,
+                duration: ScrollMath.smoothDurationRange.clamp(scroll.smoothDuration), changed: changed
+            ))
+        }
+
+        return finish(rewritten, changed: changed, fired: fired, removing: removing)
+    }
+
+    private func finish(_ sample: ScrollSample, changed: Bool, fired: Action?, removing: ModifierSet) -> EventPlan {
+        if let fired { return .performWithScroll(fired, .once, remaining: sample) }
+        guard changed else { return .passThrough }
+        return sample.isZero ? .swallow : .scroll(sample, removing: removing)
+    }
+
+    private enum ContinuousOutcome {
+        case passThrough
+        /// The horizontal movement is taken; `Action` is set when it fires now.
+        case consume(Action?)
+    }
+
+    /// Smooth horizontal scrolling for a Scroll Left/Right mapping that opted in. Only an exactly attributed
+    /// device qualifies, so ambiguous input and anything that might not be a mouse is left alone.
+    private mutating func continuousHorizontal(_ axis: ScrollAxis, _ event: InputEvent, _ settings: CompiledSettings) -> ContinuousOutcome {
+        guard let device = event.device, device.exact else {
+            horizontalStream.reset()
+            return .passThrough
+        }
+        let profile = settings.profile(device: device.id, app: event.app).profileID
+        // Pixels are the only unit used, so a sample without them can't be measured and is left alone.
+        guard axis.points != 0 else { return .passThrough }
+        let direction: WheelDirection = axis.points > 0 ? .left : .right
+        guard let mapping = lookup(.wheel(direction), event, settings, exactOnly: true),
+              mapping.action != .passthrough, mapping.action != .clickLock, let continuous = mapping.continuousInput else {
+            horizontalStream.cancel(device: device.id, profile: profile)
+            return .passThrough
+        }
+        let outcome = horizontalStream.feed(
+            points: axis.points, direction: direction, modifiers: event.modifiers.withoutFunction,
+            distance: continuous.effectiveDistance, device: device.id, profile: profile, at: event.timestamp
+        )
+        guard outcome == .fire, mapping.action != .none else { return .consume(nil) }
+        return .consume(mapping.action)
     }
 
     private mutating func wheelMapping(_ mapping: Mapping, at time: TimeInterval) -> EventPlan {
@@ -246,5 +776,18 @@ public struct EventProcessor: Sendable {
         lastWheelEvent[key] = time
         if let last, time - last >= 0, time - last < Self.wheelBurstGap { return .swallow }
         return .perform(mapping.action, .once)
+    }
+
+    /// A wheel mapping that clicks the primary button would press on top of the one a Click Lock holds, so the lock
+    /// lets go instead and the notch is used up doing it.
+    private mutating func releasingClickLockForPrimaryClick(_ plan: EventPlan) -> EventPlan {
+        switch plan {
+        case let .perform(action, _) where action.clicksPrimaryButton:
+            return clickLock.end(.mappedPrimaryClick) != nil ? .perform(.clickLock, .up) : plan
+        case let .performWithScroll(action, _, remaining) where action.clicksPrimaryButton:
+            return clickLock.end(.mappedPrimaryClick) != nil ? .performWithScroll(.clickLock, .up, remaining: remaining) : plan
+        default:
+            return plan
+        }
     }
 }

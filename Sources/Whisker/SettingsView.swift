@@ -28,7 +28,7 @@ struct SettingsView: View {
         case .buttons: ButtonsPane(store: model.store)
         case .scrolling: ScrollingPane(store: model.store)
         case .pointer: PointerPane(store: model.store, devices: model.devices, pointer: model.pointer)
-        case .applications: ApplicationsPane(store: model.store)
+        case .applications: ApplicationsPane(store: model.store, pointer: model.pointer)
         case .devices: DevicesPane(store: model.store, devices: model.devices)
         case .updates: Form { Section { UpdatesSection() } }.formStyle(.grouped)
         case .about: AboutPane()
@@ -93,6 +93,11 @@ struct GeneralPane: View {
             Section("Safety") {
                 Toggle("Allow remapping the primary button", isOn: $store.settings.general.allowPrimaryButtonRemap)
                 Text("When off, the primary button always clicks unless you hold a modifier key, so a mapping can never leave you without a working click.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Experimental") {
+                Toggle("Enable Click Lock", isOn: $store.settings.general.experimentalClickLock)
+                Text("Lets a button hold the primary button down for you until you press again. It has not yet been verified on hardware. If the button ever seems stuck, press and release the primary button yourself, or choose Release Click Lock in the menu bar.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Settings File") {
@@ -237,18 +242,103 @@ struct ScrollingPane: View {
                         ForEach(Self.modifierChoices, id: \.1.rawValue) { Text($0.0).tag($0.1) }
                     }
                 }
+                speedSection(scroll)
+                smoothSection(scroll)
                 if !profile.wrappedValue.isDefault {
                     Section {
                         Button("Use Inherited Settings") { profile.wrappedValue.scroll = nil }
                     }
                 }
             }
+            NativeWheelSection(store: store, devices: model.devices, wheel: model.wheel)
             Section {
                 Text("Reverse the wheel direction for a single mouse in Devices. Trackpads are never changed.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: Smooth scrolling
+
+    @ViewBuilder private func smoothSection(_ scroll: Binding<ScrollSettings>) -> some View {
+        Section("Smooth notched scrolling") {
+            Toggle("Smooth notched scrolling", isOn: scroll.smoothScrolling)
+            if scroll.wrappedValue.smoothScrolling {
+                LabeledContent("Duration") {
+                    Slider(value: Binding(
+                        get: { Double(scroll.wrappedValue.smoothDuration) },
+                        set: { scroll.wrappedValue.smoothDuration = Int($0.rounded()) }
+                    ), in: Double(ScrollMath.smoothDurationRange.lowerBound)...Double(ScrollMath.smoothDurationRange.upperBound), step: 10) {
+                        EmptyView()
+                    } minimumValueLabel: { Text("Short") } maximumValueLabel: { Text("Long") }
+                }
+                Text("\(scroll.wrappedValue.smoothDuration) ms. Reduce Motion in System Settings switches smoothing off.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Text("Spreads the distance a wheel notch already scrolls over a short time. It adds no distance and no coasting. Trackpads, smooth-scrolling mice, touch mice and mice Whisker can't identify with certainty are left alone. Not yet verified in real apps.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Speed while holding keys
+
+    private static let speedPresets: [Double] = [0.25, 0.5, 2, 3, 4, 5, 8]
+
+    /// The presets, plus the saved speed when it isn't one of them, so the picker always has a selection.
+    private static func speedChoices(including current: Double) -> [Double] {
+        speedPresets.contains(current) ? speedPresets : (speedPresets + [current]).sorted()
+    }
+
+    private static func speedTitle(_ speed: Double) -> String {
+        "×" + speed.formatted()
+    }
+
+    private static func axesTitle(_ axes: ScalingAxes) -> String {
+        switch axes {
+        case .both: "Both directions"
+        case .vertical: "Up and down only"
+        case .horizontal: "Left and right only"
+        }
+    }
+
+    /// Half speed on a key the sideways setting isn't using.
+    private static func startingScaling(avoiding sideways: ModifierSet) -> ModifierScaling {
+        let key = [ModifierSet.option, .control, .shift, .command].first { $0 != sideways.withoutFunction } ?? .option
+        return ModifierScaling(modifiers: key, multiplier: 0.5)
+    }
+
+    @ViewBuilder private func speedSection(_ scroll: Binding<ScrollSettings>) -> some View {
+        let scaling = scroll.wrappedValue.modifierScaling
+        Section("Speed while holding keys") {
+            Toggle("Scroll faster or slower while holding keys", isOn: Binding(
+                get: { scroll.wrappedValue.modifierScaling != nil },
+                set: { scroll.wrappedValue.modifierScaling = $0 ? Self.startingScaling(avoiding: scroll.wrappedValue.horizontalModifier) : nil }
+            ))
+            if let scaling {
+                ModifierToggles(modifiers: Binding(
+                    get: { scaling.modifiers },
+                    set: { scroll.wrappedValue.modifierScaling?.modifiers = $0 }
+                ))
+                Picker("Speed", selection: Binding(
+                    get: { scaling.multiplier },
+                    set: { scroll.wrappedValue.modifierScaling?.multiplier = $0 }
+                )) {
+                    ForEach(Self.speedChoices(including: scaling.multiplier), id: \.self) { Text(Self.speedTitle($0)).tag($0) }
+                }
+                Picker("Applies to", selection: Binding(
+                    get: { scaling.axes },
+                    set: { scroll.wrappedValue.modifierScaling?.axes = $0 }
+                )) {
+                    ForEach(ScalingAxes.allCases, id: \.self) { Text(Self.axesTitle($0)).tag($0) }
+                }
+                if let problem = scaling.problem(horizontalModifier: scroll.wrappedValue.horizontalModifier) {
+                    Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                }
+            }
+            Text("Hold the keys while turning the wheel. ×0.5 scrolls half as far and ×2 twice as far. Wheel mappings on the same keys take priority, and trackpads and smooth scrolling are left alone.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -264,13 +354,19 @@ struct PointerPane: View {
         Form {
             if let pending = pointer.pending {
                 Section {
-                    HStack {
-                        Label("Keep this pointer speed? It changes back in a few seconds otherwise.", systemImage: "exclamationmark.triangle")
+                    PendingSpeedBanner(store: store, pointer: pointer, pending: pending)
+                        .id(pending.deadline)
+                }
+            }
+            if let notice = pointer.notice {
+                Section {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label(notice.message, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
-                        Button("Revert") { pointer.revertPending() }
-                        Button("Keep") { pointer.confirmPending() }.keyboardShortcut(.defaultAction)
+                        Button("Dismiss") { pointer.dismissNotice() }
                     }
-                    .id(pending.deadline)
                 }
             }
             let mice = devices.devices.filter { !$0.isExcluded }
@@ -278,43 +374,137 @@ struct PointerPane: View {
                 Section { Text("No mouse is connected.").foregroundStyle(.secondary) }
             }
             ForEach(mice) { device in
-                Section(device.name) { deviceSettings(device) }
+                Section(device.name) {
+                    PointerDeviceControls(store: store, devices: devices, pointer: pointer, device: device)
+                }
             }
             Section {
-                Text("Pointer settings apply while Whisker is running and go back to the system’s when it quits. Trackpads keep their own settings.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Speed here is a software multiplier on what the mouse reports. It isn’t the mouse’s own DPI, which only its maker’s software can change. Pointer settings apply while Whisker is running and go back to the system’s when it quits, or while an app you’ve bypassed is in front. Trackpads keep their own settings.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
+        .onDisappear { pointer.endSpeedEdit() }
     }
+}
 
-    @ViewBuilder private func deviceSettings(_ device: ConnectedDevice) -> some View {
-        let binding = model.deviceBinding(device.id, name: device.name)
-        Toggle("Custom pointer speed", isOn: Binding(
-            get: { binding.wrappedValue.pointer != nil },
-            set: { binding.wrappedValue.pointer = $0 ? PointerSettings() : nil }
-        ))
-        if let current = binding.wrappedValue.pointer {
-            LabeledContent("Speed") {
-                Slider(value: Binding(
-                    get: { current.speed },
-                    set: { binding.wrappedValue.pointer?.speed = $0 }
-                ), in: PointerMath.speedRange) {
-                    EmptyView()
-                } minimumValueLabel: { Text("Slow") } maximumValueLabel: { Text("Fast") } onEditingChanged: { editing in
-                    if editing {
-                        startSpeed[device.id] = binding.wrappedValue.pointer
-                    } else if let before = startSpeed.removeValue(forKey: device.id),
-                              let after = binding.wrappedValue.pointer,
-                              PointerMath.needsConfirmation(confirmed: before?.speed ?? 1, new: after.speed) {
-                        pointer.beginConfirmation(deviceID: device.id, previous: before)
-                    }
+/// Keep, Revert or Use System Settings for a big speed increase, which goes back by itself otherwise.
+struct PendingSpeedBanner: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var pointer: PointerController
+    let pending: PointerController.PendingChange
+
+    var body: some View {
+        let name = store.settings.devices[pending.deviceID]?.name ?? ""
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Keep this pointer speed?", systemImage: "exclamationmark.triangle").font(.headline)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let seconds = max(0, Int(pending.deadline.timeIntervalSince(context.date).rounded(.up)))
+                    Text("\(name.isEmpty ? "This mouse" : name) is now at \(Self.speedText(pending.proposed)). \(seconds > 0 ? "In \(seconds) \(seconds == 1 ? "second" : "seconds") it" : "It") goes back to \(Self.speedText(pending.previous)) unless you keep it.")
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            HStack {
+                Spacer()
+                Button("Use System Settings") { pointer.useSystemSettings(on: pending.deviceID) }
+                Button("Revert") { pointer.revertPending() }.keyboardShortcut(.cancelAction)
+                Button("Keep") { pointer.confirmPending() }.keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private static func speedText(_ selection: PointerSelection) -> String {
+        selection.pointer.map { PointerMath.speedLabel($0.speed) } ?? "the system’s speed"
+    }
+}
+
+/// What is being typed while a preset is renamed or a new one is named. SwiftUI's `@State` isn't available in
+/// this build setup, so a small object holds it.
+final class PresetEditState: ObservableObject {
+    @Published var renamingID: String?
+    @Published var isSaving = false
+    @Published var text = ""
+
+    func startRenaming(_ preset: PointerPreset) {
+        isSaving = false
+        renamingID = preset.id
+        text = preset.name
+    }
+
+    func startSaving() {
+        renamingID = nil
+        isSaving = true
+        text = ""
+    }
+
+    func finish() {
+        renamingID = nil
+        isSaving = false
+        text = ""
+    }
+}
+
+/// One mouse's speed, acceleration and saved speed presets.
+struct PointerDeviceControls: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var devices: DeviceMonitor
+    @ObservedObject var pointer: PointerController
+    let device: ConnectedDevice
+    @StateObject private var edit = PresetEditState()
+
+    private var displayedSettings: DeviceSettings {
+        var saved = store.settings.device(device.id)
+        saved.pointerSelection = pointer.selection(on: device.id)
+        return saved
+    }
+
+    var body: some View {
+        let binding = model.deviceBinding(device.id, name: device.name)
+        let saved = displayedSettings
+        // While a change waits to be kept, nothing else may change the speed.
+        let waiting = pointer.pending != nil
+        if let factor = pointer.slowPointerFactors[device.id], let baseline = saved.pointer {
+            LabeledContent("Temporary slowdown") {
+                Text("\(PointerMath.speedLabel(SlowPointer.applying(factor, to: baseline).speed)) (baseline \(PointerMath.speedLabel(baseline.speed)))")
+            }
+            Button("Cancel pointer slowdown") { model.cancelSlowPointer() }
+                .accessibilityHint("Restores the latest baseline. Let go of the held button before starting again.")
+        } else if let reason = pointer.slowPointerUnavailable(on: device.id) {
+            Text("Slow pointer while held is unavailable: \(reason)")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        Toggle("Custom pointer speed", isOn: Binding(
+            get: { saved.pointer != nil },
+            set: { on in
+                if on { binding.wrappedValue.pointer = PointerSettings() } else { pointer.useSystemSettings(on: device.id) }
+            }
+        ))
+        .disabled(waiting && saved.pointer == nil)
+        if let current = saved.pointer {
+            LabeledContent("Speed") {
+                HStack {
+                    Slider(value: Binding(
+                        get: { current.speed },
+                        set: { pointer.setSpeed($0, on: device.id) }
+                    ), in: PointerMath.speedRange) {
+                        EmptyView()
+                    } minimumValueLabel: { Text("Slow") } maximumValueLabel: { Text("Fast") } onEditingChanged: { editing in
+                        if editing { pointer.beginSpeedEdit(on: device.id) } else { pointer.endSpeedEdit() }
+                    }
+                    .accessibilityLabel("Pointer speed")
+                    .accessibilityValue(PointerMath.speedLabel(current.speed))
+                    Text(PointerMath.speedLabel(current.speed)).monospacedDigit().frame(minWidth: 44, alignment: .trailing)
+                }
+            }
+            .disabled(waiting)
+            LabeledContent("Current") { Text(saved.pointerSpeedLabel ?? "Custom").foregroundStyle(.secondary) }
             Toggle("Linear (no acceleration)", isOn: Binding(
                 get: { current.linear },
                 set: { binding.wrappedValue.pointer?.linear = $0 }
             ))
+            .disabled(waiting)
             if !current.linear {
                 LabeledContent("Acceleration") {
                     Slider(value: Binding(
@@ -324,29 +514,118 @@ struct PointerPane: View {
                         EmptyView()
                     } minimumValueLabel: { Text("Less") } maximumValueLabel: { Text("More") }
                 }
+                .disabled(waiting)
             }
             if pointer.unsupported.contains(device.id) {
                 Text("macOS didn’t accept a pointer change for this mouse.").font(.footnote).foregroundStyle(.orange)
             }
         }
+        if pointer.restoreFailures.contains(device.id) {
+            Text("Whisker couldn’t put this mouse’s own pointer settings back, so its speed and acceleration may still be in use. It keeps trying, and tries again when it next starts.")
+                .font(.footnote).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+        }
+        ForEach(saved.pointerPresets) { preset in
+            presetRow(preset, saved: saved)
+        }
+        if saved.pointer != nil { saveRow(saved) }
+        if let reason = dormantReason(saved) {
+            Text(reason).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
-    // Speeds at the start of a slider drag, to compare against when the drag ends.
-    private var startSpeed: SpeedMemo { SpeedMemo.shared }
-}
+    // MARK: Presets
 
-/// Holds the value a slider started from; SwiftUI's `@State` isn't available in this build setup.
-final class SpeedMemo {
-    @MainActor static let shared = SpeedMemo()
-    private var values: [String: PointerSettings?] = [:]
-
-    subscript(id: String) -> PointerSettings?? {
-        get { values[id] }
-        set { values[id] = newValue }
+    @ViewBuilder private func presetRow(_ preset: PointerPreset, saved: DeviceSettings) -> some View {
+        let active = saved.activePointerPreset?.id == preset.id
+        let refusal = pointer.refusal(forPreset: preset.id, on: device.id)
+        HStack {
+            Image(systemName: "checkmark")
+                .opacity(active ? 1 : 0)
+                .accessibilityHidden(true)
+            if edit.renamingID == preset.id {
+                TextField("Preset name", text: $edit.text)
+                    .onSubmit { commitRename(preset) }
+                Button("Save") { commitRename(preset) }
+                    .disabled(PointerPreset.cleanedName(edit.text).isEmpty)
+                Button("Cancel") { edit.finish() }
+            } else {
+                Text(preset.label)
+                Spacer()
+                if active {
+                    Text("In use").foregroundStyle(.secondary)
+                } else {
+                    Button("Use") { pointer.selectPreset(preset.id, on: device.id) }
+                        .disabled(refusal != nil)
+                        .help(refusal?.message(device: device.name) ?? "Switch \(device.name) to \(preset.label)")
+                        .accessibilityLabel("Use \(preset.name)")
+                }
+                Button { edit.startRenaming(preset) } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Rename this preset")
+                    .accessibilityLabel("Rename \(preset.name)")
+                Button { delete(preset) } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Delete this preset")
+                    .accessibilityLabel("Delete \(preset.name)")
+            }
+        }
     }
 
-    func removeValue(forKey id: String) -> PointerSettings?? {
-        values.removeValue(forKey: id)
+    @ViewBuilder private func saveRow(_ saved: DeviceSettings) -> some View {
+        if edit.isSaving {
+            HStack {
+                TextField("Preset name", text: $edit.text)
+                    .onSubmit { commitSave() }
+                Button("Save") { commitSave() }
+                Button("Cancel") { edit.finish() }
+            }
+        } else if saved.pointerPresets.count < PointerPreset.maxPerDevice {
+            Button("Save Current Speed as Preset…") { edit.startSaving() }
+                .disabled(pointer.isBusy)
+        } else {
+            Text("A mouse can have \(PointerPreset.maxPerDevice) presets. Delete one to save another.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Why switching presets does nothing for now, when that is down to settings rather than the mouse.
+    private func dormantReason(_ saved: DeviceSettings) -> String? {
+        guard let first = saved.pointerPresets.first,
+              let refusal = store.settings.pointerPresetRefusal(deviceID: device.id, presetID: first.id, connected: devices.devices),
+              [PointerPresetRefusal.whiskerOff, .deviceOff, .customSpeedOff].contains(refusal)
+        else { return nil }
+        return refusal.message(device: device.name)
+    }
+
+    private func commitSave() {
+        var settings = store.settings
+        guard settings.devices[device.id]?.savePointerPreset(named: edit.text) != nil else { return }
+        store.settings = settings
+        edit.finish()
+    }
+
+    private func commitRename(_ preset: PointerPreset) {
+        var settings = store.settings
+        guard settings.devices[device.id]?.renamePointerPreset(id: preset.id, to: edit.text) == true else { return }
+        store.settings = settings
+        edit.finish()
+    }
+
+    private func delete(_ preset: PointerPreset) {
+        let uses = store.settings.mappingCount(usingPointerPreset: preset.id, on: device.id)
+        if uses > 0 {
+            let alert = NSAlert()
+            alert.messageText = "Delete “\(preset.name)”?"
+            alert.informativeText = uses == 1
+                ? "A button mapping switches to this preset. It is removed too."
+                : "\(uses) button mappings switch to this preset. They are removed too."
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            alert.buttons.first?.hasDestructiveAction = true
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        store.settings.deletePointerPreset(id: preset.id, on: device.id)
+        if edit.renamingID == preset.id { edit.finish() }
     }
 }
 
@@ -355,6 +634,7 @@ final class SpeedMemo {
 struct ApplicationsPane: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var store: SettingsStore
+    @ObservedObject var pointer: PointerController
 
     private var appProfiles: [Profile] {
         store.settings.profiles.filter { !$0.isDefault && !$0.match.apps.contains(ProfileMatch.any) }
@@ -376,6 +656,8 @@ struct ApplicationsPane: View {
                         VStack(alignment: .leading) {
                             Text(profile.name)
                             Text(subtitle(profile)).font(.caption).foregroundStyle(.secondary)
+                            Toggle("Bypass Whisker in this application", isOn: bypassBinding(profile))
+                                .toggleStyle(.checkbox).font(.caption)
                         }
                         Spacer()
                         Button("Edit Buttons") {
@@ -405,15 +687,94 @@ struct ApplicationsPane: View {
                     Button("Choose App…") { chooseApp() }
                 }
             }
+            Section("Application Bypass") {
+                Text("While one of these apps is in front, Whisker leaves your buttons, wheel, scrolling and pointer speed alone, and puts them back when you switch to another app. Your profiles and the Enabled switch don’t change, and this works with or without Input Monitoring.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if bypassedApps.isEmpty {
+                    Text("No apps are bypassed.").foregroundStyle(.secondary)
+                }
+                ForEach(bypassedApps, id: \.self) { id in
+                    HStack {
+                        AppIcon(bundleID: id)
+                        VStack(alignment: .leading) {
+                            Text(model.appName(forBundleID: id))
+                            Text(id).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            model.setBypass(id, false)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Stop bypassing this app")
+                    }
+                }
+                HStack {
+                    Menu("Bypass Running App") {
+                        ForEach(bypassCandidates, id: \.bundleIdentifier) { app in
+                            Button(app.localizedName ?? app.bundleIdentifier ?? "App") {
+                                if let id = app.bundleIdentifier { model.setBypass(id, true) }
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    Button("Choose App to Bypass…") { chooseBypassedApp() }
+                }
+                if !pointer.restoreFailures.isEmpty {
+                    Label("Whisker couldn’t put the pointer settings back for some mice, so its speed and acceleration may still be in use. It keeps trying, and tries again when it next starts.", systemImage: "exclamationmark.triangle")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
+                Text("Whisker can see which app is in front, not what a game does with its input. This isn’t raw-input mode, it doesn’t change Game Mode, and it can’t promise anti-cheat compatibility. A launcher and the game it starts can be separate apps, and which one is in front hasn’t been verified for particular games. Opening a Whisker window brings Whisker to the front, which ends the bypass until you switch back.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private var bypassedApps: [String] {
+        store.settings.general.bypassApps
+            .sorted { model.appName(forBundleID: $0).localizedStandardCompare(model.appName(forBundleID: $1)) == .orderedAscending }
+    }
+
+    private var bypassCandidates: [NSRunningApplication] {
+        let listed = Set(store.settings.general.bypassApps)
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && !listed.contains($0.bundleIdentifier!) && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .sorted { ($0.localizedName ?? "").localizedStandardCompare($1.localizedName ?? "") == .orderedAscending }
+    }
+
+    /// True when every app the profile covers is on the bypass list.
+    private func isBypassed(_ profile: Profile) -> Bool {
+        let apps = profile.match.apps
+        return !apps.isEmpty && apps.allSatisfy { store.settings.general.bypassApps.contains($0) }
+    }
+
+    private func bypassBinding(_ profile: Profile) -> Binding<Bool> {
+        Binding(
+            get: { isBypassed(profile) },
+            set: { [model] on in
+                for app in profile.match.apps { model.setBypass(app, on) }
+            }
+        )
+    }
+
+    private func chooseBypassedApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK, let url = panel.url, let id = Bundle(url: url)?.bundleIdentifier,
+              id != Bundle.main.bundleIdentifier
+        else { return }
+        model.setBypass(id, true)
     }
 
     private func subtitle(_ profile: Profile) -> String {
         let count = profile.mappings.count
         let parent = profile.inherits.flatMap { store.settings.profile(id: $0)?.name } ?? "nothing"
         let devices = profile.match.devices.contains(ProfileMatch.any) ? "" : " · one mouse"
-        return "\(profile.match.apps.joined(separator: ", ")) · \(count) \(count == 1 ? "mapping" : "mappings") · inherits \(parent)\(devices)"
+        let bypassed = isBypassed(profile) ? " · bypassed" : ""
+        return "\(profile.match.apps.joined(separator: ", ")) · \(count) \(count == 1 ? "mapping" : "mappings") · inherits \(parent)\(devices)\(bypassed)"
     }
 
     private var runningApps: [NSRunningApplication] {
@@ -465,6 +826,8 @@ struct DevicesPane: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var store: SettingsStore
     @ObservedObject var devices: DeviceMonitor
+    @StateObject private var timingSheet = InputTimingSheetState()
+    @StateObject private var discoverySheet = InputTimingSheetState()
 
     private var remembered: [(id: String, settings: DeviceSettings)] {
         let connected = Set(devices.devices.map(\.id))
@@ -472,54 +835,84 @@ struct DevicesPane: View {
     }
 
     var body: some View {
+        let connected = devices.connectedDetails
         Form {
             Section("Connected") {
-                if devices.devices.isEmpty {
+                if connected.isEmpty {
                     Text("No mouse is connected.").foregroundStyle(.secondary)
                 }
-                ForEach(devices.devices) { device in
-                    if device.isExcluded {
-                        LabeledContent(device.name) { Text(device.excludedKind?.listLabel ?? "Left alone").foregroundStyle(.secondary) }
+                ForEach(connected) { details in
+                    if let kind = details.excludedKind {
+                        VStack(alignment: .leading, spacing: 6) {
+                            LabeledContent(details.name) { Text(kind.listLabel).foregroundStyle(.secondary) }
+                            DeviceDetailsDisclosure(details: details, onOpen: { devices.refreshControls() })
+                        }
                     } else {
-                        deviceRow(id: device.id, name: device.name)
+                        deviceRow(
+                            details, name: details.name, onOpen: { devices.refreshControls() },
+                            onTiming: { timingSheet.present(deviceID: details.id, name: details.name) },
+                            onDiscovery: { discoverySheet.present(deviceID: details.id, name: details.name) }
+                        )
                     }
                 }
             }
             if !remembered.isEmpty {
                 Section("Not Connected") {
                     ForEach(remembered, id: \.id) { entry in
-                        HStack {
-                            deviceRow(id: entry.id, name: entry.settings.name.isEmpty ? entry.id : entry.settings.name)
-                            Button {
-                                store.settings.devices[entry.id] = nil
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Forget this mouse")
-                        }
+                        deviceRow(
+                            devices.rememberedDetails(id: entry.id, name: entry.settings.name),
+                            name: entry.settings.name.isEmpty ? entry.id : entry.settings.name,
+                            forget: { store.settings.forgetDevice(id: entry.id) }
+                        )
                     }
                 }
             }
             Section("Telling Mice Apart") {
-                if devices.canIdentifyDevices {
-                    Label("Whisker can tell which mouse each click comes from.", systemImage: "checkmark.circle")
-                } else {
-                    Text("With one mouse, Whisker knows every click is from it. To use different settings for several mice at once, allow Input Monitoring so Whisker can see which one sent each click.")
-                        .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("Allow Input Monitoring…") { devices.requestIdentification() }
+                LabeledContent("Input Monitoring") { Text(devices.identification.title) }
+                Text(devices.identification.explanation)
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                switch devices.identification {
+                case .listening: EmptyView()
+                case .notAllowed: Button("Allow Input Monitoring…") { devices.requestIdentification() }
+                case .couldNotListen: Button("Try Again") { devices.requestIdentification() }
                 }
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $timingSheet.isPresented, onDismiss: { model.inputTiming.sheetClosed() }) {
+            InputTimingSheet(
+                timing: model.inputTiming, deviceID: timingSheet.deviceID, deviceName: timingSheet.deviceName,
+                onClose: { timingSheet.isPresented = false }
+            )
+        }
+        .sheet(isPresented: $discoverySheet.isPresented, onDismiss: { model.extraButtonDiscovery.stop() }) {
+            ExtraButtonDiscoverySheet(
+                discovery: model.extraButtonDiscovery,
+                settings: model.deviceBinding(discoverySheet.deviceID, name: discoverySheet.deviceName),
+                deviceID: discoverySheet.deviceID, deviceName: discoverySheet.deviceName,
+                requestPermission: { devices.requestIdentification() },
+                onClose: { discoverySheet.isPresented = false }
+            )
+        }
     }
 
-    @ViewBuilder private func deviceRow(id: String, name: String) -> some View {
+    /// `name` is what a new profile or first saved setting for the mouse is called; the row shows `details.name`.
+    /// `onTiming` is only given for a connected mouse Whisker doesn't leave alone: it opens the opt-in Input Timing sheet.
+    @ViewBuilder private func deviceRow(
+        _ details: DeviceDetails, name: String, onOpen: @escaping () -> Void = {}, onTiming: (() -> Void)? = nil,
+        onDiscovery: (() -> Void)? = nil, forget: (() -> Void)? = nil
+    ) -> some View {
+        let id = details.id
         let binding = model.deviceBinding(id, name: name)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Toggle(isOn: binding.enabled) {
                     VStack(alignment: .leading) {
-                        Text(name)
-                        Text(id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Text(details.name)
+                        Text(details.summaryText).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        if let battery = details.battery.inlineText(time: DeviceDetailsRows.time) {
+                            Text(battery).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Spacer()
@@ -533,12 +926,127 @@ struct DevicesPane: View {
                     }
                     model.selectedPane = .buttons
                 }
+                if let onTiming {
+                    Button("Input Timing…", action: onTiming)
+                        .help("Counts how often this mouse's reports reach Whisker over a short sample. A diagnostic, not a speed test.")
+                }
+                if let forget {
+                    Button(action: forget) { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                        .help("Forget this mouse")
+                        .accessibilityLabel("Forget \(details.name)")
+                }
             }
             if binding.wrappedValue.enabled {
+                if let onDiscovery {
+                    Button("Extra Button Discovery…", action: onDiscovery)
+                        .help("Opt-in read-only metadata and filtered value diagnostics. No vendor remapping.")
+                }
                 Toggle("Reverse vertical scrolling", isOn: binding.wheel.invertVertical)
                 Toggle("Reverse horizontal scrolling", isOn: binding.wheel.invertHorizontal)
+                ButtonSwapControls(store: store, devices: devices, id: id, name: name)
+                ClickFilterControls(id: id, name: name, settings: binding.wrappedValue.clickDebounce)
+            }
+            DeviceDetailsDisclosure(details: details, onOpen: onOpen)
+        }
+    }
+}
+
+/// Advanced, off by default: drops a very short repeat click on the chosen buttons of one mouse.
+struct ClickFilterControls: View {
+    @EnvironmentObject var model: AppModel
+    let id: String
+    let name: String
+    let settings: ClickDebounceSettings?
+
+    private static let buttons: [(number: Int, title: String)] = [(0, "Left"), (1, "Right"), (2, "Middle")]
+
+    private var buttons: [Int] { settings?.buttons ?? [] }
+    private var interval: Double { settings?.interval ?? ClickDebounceSettings.defaultInterval }
+
+    var body: some View {
+        DisclosureGroup("Duplicate clicks (advanced)") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Ignores a click that follows another within a very short time. A fast, deliberate double-click can be ignored too, because timing alone can't tell them apart. This is separate from the double-click speed in System Settings, and it hasn't been verified on real faulty hardware.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                ForEach(Self.buttons, id: \.number) { button in
+                    Toggle("Filter the \(button.title.lowercased()) button", isOn: Binding(
+                        get: { buttons.contains(button.number) },
+                        set: { on in update(on ? (buttons + [button.number]) : buttons.filter { $0 != button.number }, interval) }
+                    ))
+                }
+                if !buttons.isEmpty {
+                    LabeledContent("Ignore repeats within") {
+                        Stepper(
+                            "\(Int((interval * 1000).rounded())) ms",
+                            value: Binding(get: { interval }, set: { update(buttons, $0) }),
+                            in: ClickDebounceSettings.intervalRange, step: 0.01
+                        )
+                    }
+                    if buttons.contains(0) {
+                        Text("The left button without a modifier key is only filtered while “Allow remapping the primary button” is on in General.")
+                            .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let deadline = model.clickFilterTrials[id] {
+                        HStack {
+                            Text("On trial: switches itself off \(deadline, style: .relative) from now unless you keep it.")
+                                .font(.footnote).fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Keep") { model.confirmClickFilter(device: id) }
+                        }
+                    }
+                    Button("Turn Off Filter") { model.revertClickFilter(device: id) }
+                        .accessibilityHint("Stops ignoring repeated clicks from \(name)")
+                    ClickFilterTestControls(id: id, name: name, titles: Dictionary(uniqueKeysWithValues: Self.buttons.map { ($0.number, $0.title) }))
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func update(_ buttons: [Int], _ interval: Double) {
+        model.setClickFilter(device: id, name: name, buttons: buttons, interval: interval)
+    }
+}
+
+/// The local test: counts what the filter does with this mouse's presses so its effect can be checked by hand.
+/// Counts only, in memory, for as long as the test is on.
+struct ClickFilterTestControls: View {
+    @EnvironmentObject var model: AppModel
+    let id: String
+    let name: String
+    let titles: [Int: String]
+
+    private var test: ClickFilterTally? { model.clickFilterTest?.device == id ? model.clickFilterTest : nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Count accepted and filtered clicks", isOn: Binding(
+                get: { test != nil },
+                set: { on in on ? model.startClickFilterTest(device: id) : model.stopClickFilterTest() }
+            ))
+            .accessibilityHint("Counts how many presses of \(name)'s filtered buttons get through and how many are ignored")
+            Text("Only counts are kept, in memory and never saved or logged. They start again from zero when the filter settings change, and the test stops when the mouse disconnects, the Mac sleeps or you leave this page.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let test {
+                Text("Click here to try it")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityHidden(true)
+                ForEach(test.buttons.keys.sorted(), id: \.self) { button in
+                    let counts = test[button] ?? ClickFilterTally.Counts()
+                    LabeledContent("\(titles[button] ?? "Button \(button + 1)") button") {
+                        Text("\(counts.accepted) accepted, \(counts.filtered) filtered").monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Button("Reset Counts") { model.resetClickFilterTest() }
+                    .disabled(test.isEmpty)
+                    .accessibilityHint("Sets the counts for \(name) back to zero")
             }
         }
+        .onDisappear { if test != nil { model.stopClickFilterTest() } }
     }
 }
 
