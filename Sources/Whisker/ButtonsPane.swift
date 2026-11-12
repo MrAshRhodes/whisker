@@ -361,6 +361,10 @@ struct ActionEditor: View {
                 ), in: HoldScroll.sensitivityRange)
                 Text(String(format: "%.1f×", config.sensitivity)).monospacedDigit().foregroundStyle(.secondary)
             }
+            if config.axes == .automatic {
+                Text("Each hold picks vertical or horizontal from its first movement and keeps it until you let go; a diagonal counts as vertical. The threshold is provisional and not yet verified on hardware, including thumb and finger trackballs.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             if config.axes != .horizontal {
                 Toggle("Reverse vertical direction", isOn: Binding(
                     get: { config.invertVertical },

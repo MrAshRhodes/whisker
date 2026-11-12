@@ -44,12 +44,15 @@ public struct ScrollPixels: Hashable, Sendable {
 
 public enum HoldScrollAxes: String, Codable, CaseIterable, Sendable {
     case vertical, horizontal, free
+    /// Each hold picks vertical or horizontal from its first movement and keeps it until release.
+    case automatic
 
     public var title: String {
         switch self {
         case .vertical: return "Vertical"
         case .horizontal: return "Horizontal"
         case .free: return "Both Directions"
+        case .automatic: return "Automatic Axis Lock"
         }
     }
 }
@@ -76,18 +79,65 @@ public struct HoldScroll: Hashable, Sendable {
     public var summary: String { "Hold to Scroll, \(axes.title)" }
 }
 
+/// Chooses the scroll axis of one hold from the direction of its first movement, then keeps it until the hold ends.
+///
+/// Works on raw movement counts, before sensitivity, reversal or rounding, so changing the scroll speed never
+/// changes which axis is picked. It knows nothing about pointer orientation. State lives in the value, so a new
+/// hold starts undecided with nothing carried over.
+public struct AxisLockSelector: Sendable, Equatable {
+    public enum State: Sendable, Equatable { case undecided, vertical, horizontal }
+
+    /// Movement counts along the stronger axis needed before an axis is picked. Provisional: this is not an
+    /// ergonomic measurement and has not been tried on thumb or finger trackballs.
+    public static let selectionThreshold = 8
+
+    public private(set) var state: State = .undecided
+    private var sumX = 0
+    private var sumY = 0
+
+    public init() {}
+
+    /// Returns the movement to use: nothing while undecided, the whole selected-axis movement so far once the
+    /// threshold is crossed (so initial movement counts exactly once), then only the selected axis.
+    /// The perpendicular part is dropped and never returned later. A balanced diagonal selects vertical.
+    public mutating func filter(_ motion: PointerMotion) -> PointerMotion {
+        switch state {
+        case .vertical: return PointerMotion(dx: 0, dy: motion.dy)
+        case .horizontal: return PointerMotion(dx: motion.dx, dy: 0)
+        case .undecided:
+            sumX += motion.dx
+            sumY += motion.dy
+            let x = abs(sumX), y = abs(sumY)
+            guard max(x, y) >= Self.selectionThreshold else { return PointerMotion(dx: 0, dy: 0) }
+            let initial: PointerMotion
+            if y >= x {
+                state = .vertical
+                initial = PointerMotion(dx: 0, dy: sumY)
+            } else {
+                state = .horizontal
+                initial = PointerMotion(dx: sumX, dy: 0)
+            }
+            sumX = 0
+            sumY = 0
+            return initial
+        }
+    }
+}
+
 /// Turns pointer displacement into whole scroll pixels, carrying the fraction that doesn't fit forward so slow
 /// movement and low sensitivity still add up instead of rounding away.
 public struct DisplacementScroller: Sendable {
     public let config: HoldScroll
     private var verticalResidue = 0.0
     private var horizontalResidue = 0.0
+    private var axisLock = AxisLockSelector()
 
     public init(_ config: HoldScroll) {
         self.config = config
     }
 
-    public mutating func add(_ motion: PointerMotion) -> ScrollPixels {
+    public mutating func add(_ rawMotion: PointerMotion) -> ScrollPixels {
+        let motion = config.axes == .automatic ? axisLock.filter(rawMotion) : rawMotion
         // Only the axes in use accumulate, so movement on a locked-out axis can't build up and leak later.
         var vertical = 0.0, horizontal = 0.0
         let sensitivity = HoldScroll.sensitivityRange.clamp(config.sensitivity)
@@ -106,6 +156,7 @@ public struct DisplacementScroller: Sendable {
     public mutating func reset() {
         verticalResidue = 0
         horizontalResidue = 0
+        axisLock = AxisLockSelector()
     }
 
     private static func take(_ residue: inout Double, adding amount: Double) -> Int {

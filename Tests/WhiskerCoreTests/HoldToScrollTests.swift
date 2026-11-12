@@ -292,6 +292,110 @@ struct HoldToScrollTests {
         #expect(processor.process(move(0, 4), settings: compiled(HoldScroll(sensitivity: 3))) == scrolled(4))
     }
 
+    // MARK: Automatic axis lock
+
+    private static let lock = AxisLockSelector.selectionThreshold
+
+    @Test func selectorPicksTheDominantAxisInEverySign() {
+        let n = Self.lock
+        for (dx, dy, state, out) in [
+            (1, n, AxisLockSelector.State.vertical, PointerMotion(dx: 0, dy: n)),
+            (-1, -n, .vertical, PointerMotion(dx: 0, dy: -n)),
+            (n, 1, .horizontal, PointerMotion(dx: n, dy: 0)),
+            (-n, -1, .horizontal, PointerMotion(dx: -n, dy: 0)),
+        ] {
+            var selector = AxisLockSelector()
+            #expect(selector.filter(PointerMotion(dx: dx, dy: dy)) == out)
+            #expect(selector.state == state)
+        }
+    }
+
+    @Test func jitterBelowTheThresholdStaysUndecidedAndSmallMovesAccumulate() {
+        var selector = AxisLockSelector()
+        #expect(selector.filter(PointerMotion(dx: 2, dy: -1)) == PointerMotion(dx: 0, dy: 0))
+        #expect(selector.filter(PointerMotion(dx: -2, dy: 1)) == PointerMotion(dx: 0, dy: 0))
+        #expect(selector.state == .undecided)
+        var slow = AxisLockSelector()
+        var total = PointerMotion(dx: 0, dy: 0)
+        for _ in 0..<Self.lock {
+            let out = slow.filter(PointerMotion(dx: 0, dy: 1))
+            total.dy += out.dy
+        }
+        #expect(slow.state == .vertical)
+        #expect(total.dy == Self.lock)
+    }
+
+    @Test func balancedDiagonalSelectsVertical() {
+        var selector = AxisLockSelector()
+        #expect(selector.filter(PointerMotion(dx: Self.lock, dy: -Self.lock)) == PointerMotion(dx: 0, dy: -Self.lock))
+        #expect(selector.state == .vertical)
+    }
+
+    @Test func lockHoldsThroughReversalsAndDiscardsThePerpendicular() {
+        var selector = AxisLockSelector()
+        _ = selector.filter(PointerMotion(dx: 3, dy: Self.lock))
+        #expect(selector.filter(PointerMotion(dx: 50, dy: -4)) == PointerMotion(dx: 0, dy: -4))
+        #expect(selector.filter(PointerMotion(dx: -50, dy: 0)) == PointerMotion(dx: 0, dy: 0))
+        #expect(selector.filter(PointerMotion(dx: 0, dy: 6)) == PointerMotion(dx: 0, dy: 6))
+    }
+
+    @Test func automaticScrollingSelectsBeforeSensitivityAndKeepsInitialMovementOnce() {
+        var scroller = DisplacementScroller(HoldScroll(axes: .automatic, sensitivity: 0.5, invertHorizontal: true))
+        #expect(scroller.add(PointerMotion(dx: -3, dy: 1)) == ScrollPixels())
+        // Selection uses raw counts: the same movement at any sensitivity picks the same axis.
+        #expect(scroller.add(PointerMotion(dx: -Self.lock, dy: 2)) == ScrollPixels(vertical: 0, horizontal: (3 + Self.lock) / 2))
+        #expect(scroller.add(PointerMotion(dx: 0, dy: 40)) == ScrollPixels())
+    }
+
+    @Test func automaticHoldStartsUndecidedEachTimeAndNothingLeaksAcrossHolds() {
+        var processor = EventProcessor()
+        let settings = compiled(HoldScroll(axes: .automatic))
+        let n = Self.lock
+        _ = processor.process(press(), settings: settings)
+        #expect(processor.process(move(2, 3), settings: settings) == scrolled(0))
+        #expect(processor.process(move(1, n), settings: settings) == scrolled(n + 3))
+        #expect(processor.process(move(9, -2), settings: settings) == scrolled(-2))
+        _ = processor.process(release(), settings: settings)
+        _ = processor.process(press(), settings: settings)
+        #expect(processor.process(move(n, 1), settings: settings) == scrolled(0, n))
+    }
+
+    @Test func interruptionsEndAnAutomaticHoldAndTheNextOneIsFresh() {
+        let settings = compiled(HoldScroll(axes: .automatic))
+        let n = Self.lock
+        var processor = EventProcessor()
+        _ = processor.process(press(), settings: settings)
+        _ = processor.process(move(0, n), settings: settings)
+        _ = processor.process(InputEvent(.buttonDragged(3), device: Self.ball, app: "other.app", location: Self.anchor, motion: PointerMotion(dx: 1, dy: 0), motionDevice: Self.ball), settings: settings)
+        _ = processor.process(release(), settings: settings)
+        _ = processor.process(press(), settings: settings)
+        #expect(processor.process(move(n, 0), settings: settings) == scrolled(0, n))
+    }
+
+    @Test func freeAndFixedModesAreUnchangedByTheLock() {
+        var free = DisplacementScroller(HoldScroll(axes: .free))
+        #expect(free.add(PointerMotion(dx: 1, dy: 1)) == ScrollPixels(vertical: 1, horizontal: 1))
+        var fixed = DisplacementScroller(HoldScroll(axes: .horizontal))
+        #expect(fixed.add(PointerMotion(dx: 1, dy: 50)) == ScrollPixels(horizontal: 1))
+    }
+
+    @Test func automaticAxesRoundTripInheritAndOldFilesDecodeUnchanged() throws {
+        let config = HoldScroll(axes: .automatic, sensitivity: 2)
+        let decoded = try SettingsCodec.decode(SettingsCodec.encode(compiled(config).settings))
+        #expect(decoded.profiles[0].mappings == [Mapping(trigger: .button(3), action: .holdToScroll(config))])
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Action.holdToScroll(config))) as? [String: Any]
+        #expect(json?["axes"] as? String == "automatic")
+        for old in ["vertical", "horizontal", "free"] {
+            let action = try JSONDecoder().decode(Action.self, from: Data(#"{"kind":"holdToScroll","axes":"\#(old)"}"#.utf8))
+            #expect(action == .holdToScroll(HoldScroll(axes: HoldScrollAxes(rawValue: old)!)))
+        }
+        #expect(try JSONDecoder().decode(Action.self, from: Data(#"{"kind":"holdToScroll"}"#.utf8)) == .holdToScroll(HoldScroll()))
+        var settings = WhiskerSettings()
+        settings.profiles[0].mappings = [Mapping(trigger: .button(3), action: .holdToScroll(config))]
+        settings.profiles.append(Profile(id: "app", name: "App", match: ProfileMatch(apps: [Self.app]), inherits: Profile.defaultID))
+        #expect(settings.resolvedProfile(id: "app").mapping(.button(3), modifiers: [])?.action == .holdToScroll(config))
+    }
+
     // MARK: Settings
 
     @Test func settingsRoundTripAndOldFilesDecodeUnchanged() throws {

@@ -55,8 +55,10 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   values, replaces Whisker's lines per notch and acceleration for that mouse, and is not yet
   verified on hardware.
 - **Hold to Scroll (experimental).** Hold a button and roll the ball to scroll instead of moving
-  the pointer, which stays where it was and does not jump when you let go. Choose the axes,
-  speed and direction. It needs Input Monitoring, is not yet verified on hardware, and falls
+  the pointer, which stays where it was and does not jump when you let go. Choose the axes
+  (including Automatic Axis Lock, which picks vertical or horizontal from each hold's first
+  movement, drops sideways drift and treats a diagonal as vertical; its threshold is
+  provisional and not yet verified on thumb or finger trackballs), speed and direction. It needs Input Monitoring, is not yet verified on hardware, and falls
   back to normal pointer movement when Whisker can't tell which mouse you're using.
 - **Profiles.** Give an app, a mouse, or an app on one mouse its own buttons and scrolling.
   Anything a profile does not set comes from the profile it inherits from, ending at the
