@@ -42,8 +42,8 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   reset. Whisker checks it when it starts and tells you about anything it had to fix. If an
   existing file can't be read, Whisker leaves it untouched and doesn't save changes until it is
   fixed, and tells you why.
-- **Updates** through Sparkle for direct downloads, or through Homebrew, once releases are
-  published (see [Install](#install)).
+- **Updates** through Sparkle for direct downloads, or through Homebrew (see
+  [Install](#install)).
 
 ## Requirements
 
@@ -56,20 +56,20 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
 
 ## Install
 
-> **No release has been published yet.** There is no downloadable build or Homebrew cask today.
-> For now, [build Whisker from source](#build-from-source).
-
-Once the first release is out, you will be able to install it with [Homebrew](https://brew.sh):
+Install with [Homebrew](https://brew.sh):
 
 ```sh
 brew install --cask mrashrhodes/tap/whisker
 ```
 
 or download `Whisker-<version>.dmg` or `Whisker-<version>.zip` from the
-[releases page](https://github.com/MrAshRhodes/whisker/releases), check it against the matching
-`.sha256` file as described in the release notes, and move **Whisker.app** to your Applications
-folder. Releases will be signed with Apple Developer ID and notarized by Apple. Gatekeeper stays
-enabled; if macOS refuses to open the app, stop and report it rather than bypassing the warning.
+[latest release](https://github.com/MrAshRhodes/whisker/releases/latest), check it against the
+matching `.sha256` file as described in the release notes, and move **Whisker.app** to your
+Applications folder. Releases are signed with Apple Developer ID and notarized by Apple.
+Gatekeeper stays enabled; if macOS refuses to open the app, stop and report it rather than
+bypassing the warning.
+
+You can also [build Whisker from source](#build-from-source).
 
 ## First run
 
@@ -98,14 +98,14 @@ network requests except update checks, which are off until you turn them on or c
 
 ## Updates
 
-Once releases are published, direct downloads will update in place with [Sparkle](https://sparkle-project.org). Choose
+Direct downloads update in place with [Sparkle](https://sparkle-project.org). Choose
 **Check for Updates…** from the menu bar menu, or pick a schedule under Updates in the settings
 window. Automatic checks are off by default. Whisker asks before downloading and again before
 installing. The update feed and every update archive must carry a valid Whisker update signature,
 which Sparkle checks before unpacking the archive, and Sparkle also checks the new app's code
 signature before installing it.
 
-Homebrew copies will be updated by Homebrew. Quit Whisker, then run:
+Homebrew copies are updated by Homebrew. Quit Whisker, then run:
 
 ```sh
 brew update && brew upgrade --cask whisker

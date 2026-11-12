@@ -58,7 +58,7 @@ def render(font_path):
     draw.text((56 * SCALE, 369 * SCALE), "Mouse & trackball control for macOS",
               font=font(font_path, 22, 500, 100), fill=INK)
     draw.rectangle((56 * SCALE, 467 * SCALE, 360 * SCALE, 522 * SCALE), fill=INK)
-    draw.text((75 * SCALE, 484 * SCALE), "Build from source",
+    draw.text((75 * SCALE, 484 * SCALE), "Download Whisker",
               font=font(font_path, 21, 650, 100), fill=GREEN)
     draw.text((56 * SCALE, 566 * SCALE), "Free. Open source. Yours.",
               font=font(font_path, 20, 500, 100), fill=INK)

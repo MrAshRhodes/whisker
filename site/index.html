@@ -47,7 +47,7 @@
       <span class="nav-purpose">Mouse &amp; trackball control for macOS</span>
       <a href="guide.html">Guide</a>
       <a href="https://github.com/MrAshRhodes/whisker">GitHub <span aria-hidden="true">↗</span></a>
-      <a class="nav-build" href="#source">Build from source <span aria-hidden="true">↗</span></a>
+      <a class="nav-build" href="#install">Download <span aria-hidden="true">↗</span></a>
     </nav>
   </header>
 
@@ -58,10 +58,10 @@
           <h1 id="hero-title">Same mouse.<br>New moves.</h1>
           <p class="lede">Give your mouse new shortcuts, a better scroll and a speed that feels right — in every app.</p>
           <div class="cta">
-            <a class="btn btn-primary" href="#source">Build from source <span aria-hidden="true">↗</span></a>
+            <a class="btn btn-primary" href="#install">Download Whisker <span aria-hidden="true">↗</span></a>
             <a class="text-link" href="guide.html">Meet Whisker <span aria-hidden="true">→</span></a>
           </div>
-          <p class="release-note">Free &amp; open source. Pre-release — no signed download yet.</p>
+          <p class="release-note">Free &amp; open source. Signed and notarised for macOS 14 or later.</p>
         </div>
 
         <div class="object-stage">
@@ -256,7 +256,7 @@
           <div><dt><a href="guide.html#devices">One mouse, or a few <span aria-hidden="true">↗</span></a></dt><dd>Mice and trackballs welcome. Trackpads and touch mice are left alone. Optional Input Monitoring tells multiple mice apart.</dd></div>
           <div><dt><a href="guide.html#menu-bar">There when you need it <span aria-hidden="true">↗</span></a></dt><dd>Switch on or off, see your current profile and open settings from the menu bar. Start at login, or hide the icon altogether.</dd></div>
           <div><dt><a href="guide.html#settings-file">Settings you can take with you <span aria-hidden="true">↗</span></a></dt><dd>Plain JSON to export, import and back up. Whisker never saves over a file it couldn't read.</dd></div>
-          <div><dt><a href="guide.html#updates">Updates on your terms <span aria-hidden="true">↗</span></a></dt><dd>Signed update support, with checks off by default. Source builds are rebuilt by you; future Homebrew installs update through Homebrew.</dd></div>
+          <div><dt><a href="guide.html#updates">Updates on your terms <span aria-hidden="true">↗</span></a></dt><dd>Signed update support, with checks off by default. Downloaded copies update themselves when you ask, Homebrew installs update through Homebrew, and source builds are rebuilt by you.</dd></div>
         </dl>
       </div>
     </section>
@@ -280,25 +280,28 @@
       </div>
     </section>
 
-    <section class="scene source-scene" id="source" aria-labelledby="source-title">
+    <section class="scene source-scene" id="install" aria-labelledby="install-title">
       <div class="scene-inner source-layout">
         <div class="scene-copy">
-          <h2 id="source-title">Make your<br>next move.</h2>
-          <p>Whisker is free, open source and still in pre-release. <strong>No signed download is published yet.</strong> For now, build your own copy.</p>
+          <h2 id="install-title">Make your<br>next move.</h2>
+          <p>Whisker is free and open source. Download the signed, notarised app, install it with Homebrew, or build your own copy.</p>
           <a class="text-link" href="guide.html#getting-started">Your first-run guide <span aria-hidden="true">→</span></a>
         </div>
         <div class="build-instructions">
-          <h3>Build from source</h3>
-          <p>You'll need macOS 14+, Swift 5.9+, and Xcode or the free Command Line Tools: <code class="nowrap">xcode-select --install</code>.</p>
-          <div class="cmd"><pre><code id="build-cmd">git clone https://github.com/MrAshRhodes/whisker.git
+          <h3>Download</h3>
+          <p>The latest release for macOS 14 or later comes as a DMG or a ZIP, each with a checksum file to check it against. It's signed with an Apple Developer ID and notarised by Apple.</p>
+          <p><a class="btn btn-primary" href="https://github.com/MrAshRhodes/whisker/releases/latest">Download the latest release <span aria-hidden="true">↗</span></a></p>
+          <h3>Or use Homebrew</h3>
+          <div class="cmd"><pre><code id="brew-cmd">brew install --cask mrashrhodes/tap/whisker</code></pre><button class="copy" type="button" data-copy="brew-cmd" hidden>Copy</button></div>
+          <p class="note-small">Downloaded copies can update themselves when you ask. Homebrew copies update through Homebrew.</p>
+          <details class="source-details">
+            <summary>Build from source instead</summary>
+            <p>You'll need macOS 14+, Swift 5.9+, and Xcode or the free Command Line Tools: <code class="nowrap">xcode-select --install</code>.</p>
+            <div class="cmd"><pre><code id="build-cmd">git clone https://github.com/MrAshRhodes/whisker.git
 cd whisker
 make app</code></pre><button class="copy" type="button" data-copy="build-cmd" hidden>Copy</button></div>
-          <p>The app lands in <code>dist/Whisker.app</code>. Move it to Applications and open it, or use <code class="nowrap">make run</code> to build and open in one go.</p>
-          <p class="note-small">Your build is signed just for your Mac, so Accessibility access may need resetting after a rebuild. Source builds can't update themselves: pull the latest source and build again.</p>
-          <details class="release-details">
-            <summary>When signed releases arrive</summary>
-            <p>The first signed, notarised build and Homebrew cask come next. Once published, you'll be able to use the <a href="https://github.com/MrAshRhodes/whisker/releases">Releases page</a> or this command:</p>
-            <div class="cmd"><pre><code id="brew-cmd">brew install --cask mrashrhodes/tap/whisker</code></pre><button class="copy" type="button" data-copy="brew-cmd" hidden>Copy</button></div>
+            <p>The app lands in <code>dist/Whisker.app</code>. Move it to Applications and open it, or use <code class="nowrap">make run</code> to build and open in one go.</p>
+            <p class="note-small">Your build is signed just for your Mac, so Accessibility access may need resetting after a rebuild. Source builds can't update themselves: pull the latest source and build again.</p>
           </details>
         </div>
       </div>

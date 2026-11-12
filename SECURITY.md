@@ -2,9 +2,8 @@
 
 ## Supported versions
 
-No binary release has been published yet, so reports should be against a source build of the
-latest `main`. Once releases exist, security fixes will target the latest release; please update
-and check whether the problem still occurs before reporting.
+Security fixes target the latest release; please update and check whether the problem still
+occurs before reporting. If you build from source, report against the latest `main`.
 
 ## Report a vulnerability
 
@@ -61,9 +60,9 @@ Relevant reports include:
 
 ## Update integrity and credentials
 
-No release has been published yet.
-The following describes how releases will be produced. Releases are signed with an Apple
-Developer ID certificate, use the hardened runtime and are notarized by Apple. Gatekeeper stays enabled, and the Homebrew cask does not remove quarantine.
+Releases are signed with an Apple Developer ID certificate, use the hardened runtime and are
+notarized by Apple, with the notarization tickets stapled to the app and DMG. Gatekeeper stays
+enabled, and the Homebrew cask does not remove quarantine.
 Each release publishes a SHA-256 checksum for its ZIP and DMG.
 
 Direct downloads update with Sparkle 2. The update feed is fetched over HTTPS from

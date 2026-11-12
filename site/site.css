@@ -217,14 +217,15 @@ summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .source-scene .note-small { color: var(--brand-muted); }
 .build-instructions { min-width: 0; padding-top: 0.3rem; }
 .build-instructions h3 { font-size: 1.35rem; margin-bottom: 1rem; }
+.build-instructions h3:not(:first-child) { margin-top: 2.2rem; }
 .build-instructions p { font-size: 1rem; max-width: 57ch; }
 .cmd { position: relative; background: var(--brand-ink); color: #edf5e3; margin: 1.5rem 0; }
 .cmd pre { overflow-x: auto; padding: 1.2rem 1.25rem 3rem; margin: 0; }
 .cmd pre code { font-size: 1em; }
 .copy { position: absolute; bottom: 0.45rem; right: 0.6rem; background: none; color: var(--green); border: 0; border-bottom: 1px solid currentColor; font-size: 0.85rem; padding: 0.45rem 0.6rem; min-height: 2.5rem; cursor: pointer; }
 .copy:hover { color: #fff; }
-.release-details { margin-top: 1.6rem; border-top: 1px solid #97ba66; padding-top: 0.4rem; }
-.release-details > p { margin-top: 0.8rem; }
+.source-details { margin-top: 1.6rem; border-top: 1px solid #97ba66; padding-top: 0.4rem; }
+.source-details > p { margin-top: 0.8rem; }
 .site-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 2rem; padding: 2rem var(--gutter); background: var(--paper); color: var(--ink); }
 .site-footer > p { font-size: 0.9rem; margin: 0 auto 0 0; }
 .site-footer nav { display: flex; flex-wrap: wrap; gap: 0.6rem 1.4rem; font-size: 0.86rem; }

@@ -13,13 +13,16 @@ application, not a web application.
 
 The website introduces Whisker to Mac users who want more control over their
 mouse or trackball. It explains the available controls, demonstrates their
-effects, and leads readers to the setup guide and source repository.
+effects, and leads readers to the download, the setup guide and the source
+repository.
 
 ## Capabilities and constraints
 
 - Whisker requires macOS 14 or later.
-- The current installation path is building from source. A signed binary
-  download must not be advertised until a release actually exists.
+- Whisker is installed from a signed, notarised release (a direct download or
+  Homebrew); building from source is also supported. The site must not
+  advertise a download, update or install route that the latest release does
+  not provide.
 - Demonstrations explain behavior; they are not screenshots of the native app
   or measurements of its performance.
 - Planned features must remain distinguishable from implemented features.
