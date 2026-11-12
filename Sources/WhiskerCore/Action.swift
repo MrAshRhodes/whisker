@@ -147,6 +147,7 @@ public enum Action: Hashable, Sendable {
     case appSwitch(AppSwitchDirection)
     /// While the button is held, movement of the device that pressed it scrolls instead of moving the pointer.
     case holdToScroll(HoldScroll)
+    case slowPointer(factor: Double)
     /// An app, file or web address.
     case open(url: String)
     /// Switch one device's pointer speed to a saved preset. Both ids are explicit, so the mapping keeps
@@ -169,6 +170,7 @@ public enum Action: Hashable, Sendable {
         case .space: return .space
         case .appSwitch: return .appSwitch
         case .holdToScroll: return .holdToScroll
+        case .slowPointer: return .slowPointer
         case .open: return .open
         case .pointerPreset: return .pointerPreset
         }
@@ -184,6 +186,7 @@ public enum Action: Hashable, Sendable {
     public var followsTrigger: Bool {
         switch self {
         case .click: return true
+        case .slowPointer: return true
         case .shortcut(_, let repeats): return repeats
         case .media(let key): return key.repeats
         default: return false
@@ -240,6 +243,7 @@ public enum Action: Hashable, Sendable {
         case .space(let direction): return "Move to \(direction.title)"
         case .appSwitch(let direction): return "Switch to \(direction.title)"
         case .holdToScroll(let config): return config.summary
+        case .slowPointer: return "Slow pointer while held"
         case .open(let url): return "Open \(Self.openTitle(url))"
         case .pointerPreset: return "Pointer Speed Preset"
         }
@@ -280,7 +284,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, pointerPreset, open
+    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, slowPointer, pointerPreset, open
 
     public var id: String { rawValue }
 
@@ -300,6 +304,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return "Switch App"
         case .scroll: return "Scroll"
         case .holdToScroll: return "Hold to Scroll (Experimental)"
+        case .slowPointer: return "Slow pointer while held"
         case .pointerPreset: return "Pointer Speed Preset"
         case .open: return "Open App, File or Website"
         }
@@ -321,6 +326,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return "rectangle.stack"
         case .scroll: return "arrow.up.and.down"
         case .holdToScroll: return "arrow.up.and.down.and.arrow.left.and.right"
+        case .slowPointer: return "tortoise"
         case .pointerPreset: return "cursorarrow.motionlines"
         case .open: return "arrow.up.forward.app"
         }
@@ -348,6 +354,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .appSwitch: return .appSwitch(.next)
         case .scroll: return .scroll(direction: .down, lines: 3)
         case .holdToScroll: return .holdToScroll(HoldScroll())
+        case .slowPointer: return .slowPointer(factor: 0.5)
         case .pointerPreset: return .pointerPreset(deviceID: "", presetID: "")
         case .open: return .open(url: "")
         }
@@ -357,7 +364,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
 extension Action: Codable {
     private enum CodingKeys: String, CodingKey {
         case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, steps, axes, sensitivity, invertVertical, invertHorizontal
-        case device, preset
+        case device, preset, factor
     }
 
     public init(from decoder: Decoder) throws {
@@ -368,6 +375,12 @@ extension Action: Codable {
         }
         switch kind {
         case "passthrough": self = .passthrough
+        case "slowPointer":
+            let factor = try container.decode(Double.self, forKey: .factor)
+            guard SlowPointer.isValid(factor) else {
+                throw DecodingError.dataCorruptedError(forKey: .factor, in: container, debugDescription: "Slow pointer factor must be 0.1 to 0.9.")
+            }
+            self = .slowPointer(factor: factor)
         case "none": self = .none
         case "click": self = .click(button: try container.decode(Int.self, forKey: .button), modifiers: try modifiers())
         case "doubleClick": self = .doubleClick(modifiers: try modifiers())
@@ -410,6 +423,9 @@ extension Action: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .passthrough: try container.encode("passthrough", forKey: .kind)
+        case .slowPointer(let factor):
+            try container.encode("slowPointer", forKey: .kind)
+            try container.encode(factor, forKey: .factor)
         case .none: try container.encode("none", forKey: .kind)
         case let .click(button, modifiers):
             try container.encode("click", forKey: .kind)

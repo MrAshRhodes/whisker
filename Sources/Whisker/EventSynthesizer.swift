@@ -130,7 +130,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
             guard phase != .up else { return }
             let switchApp = self.switchApp
             DispatchQueue.main.async { MainActor.assumeIsolated { switchApp(direction) } }
-        case .holdToScroll:
+        case .holdToScroll, .slowPointer:
             // Driven by pointer movement through `holdScroll`, not by the press itself.
             return
         case .open(let string):

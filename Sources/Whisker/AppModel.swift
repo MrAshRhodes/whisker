@@ -112,6 +112,15 @@ final class AppModel: ObservableObject {
         engine.onHoldStatus = { [weak self] status in
             DispatchQueue.main.async { self?.holdToScrollNote = status.message }
         }
+        engine.onSlowPointer = { [weak self] command in
+            guard let self else { return }
+            self.pointer.applySlowPointer(command)
+            self.engine.setSlowPointerDevices(self.pointer.slowPointerDevices)
+        }
+        pointer.onSlowPointerAvailabilityChange = { [weak self] in
+            guard let self else { return }
+            self.engine.setSlowPointerDevices(self.pointer.slowPointerDevices)
+        }
     }
 
     var settings: WhiskerSettings {
@@ -166,6 +175,7 @@ final class AppModel: ObservableObject {
             self.pointer.devicesChanged(connected, bypassed: self.bypassedApp != nil)
             self.wheel.apply(self.store.settings, connected: connected, bypassed: self.bypassedApp != nil)
             self.engine.devicesChanged(connected: Set(connected.filter { !$0.isExcluded }.map(\.id)))
+            self.engine.setSlowPointerDevices(self.pointer.slowPointerDevices)
         }
         devices.start()
         if leftovers {
@@ -219,6 +229,7 @@ final class AppModel: ObservableObject {
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 self?.engine.releaseAll()
+                MainActor.assumeIsolated { self?.cancelSlowPointer() }
             })
         }
         // Read here, never in the tap: smoothing stands aside while Reduce Motion is on, and live when it changes.
@@ -236,6 +247,7 @@ final class AppModel: ObservableObject {
 
     func stopEngine() {
         engine.stop()
+        cancelSlowPointer()
         engineRunning = false
         onStatusChange?()
     }
@@ -246,6 +258,10 @@ final class AppModel: ObservableObject {
     /// Stops a running keyboard shortcut sequence; steps already posted stay posted.
     func cancelSequence() {
         sequences.cancel(.userCancelled)
+    }
+
+    func cancelSlowPointer() {
+        pointer.applySlowPointer(engine.cancelSlowPointer())
     }
 
     func setEnabled(_ enabled: Bool) {
@@ -354,6 +370,7 @@ final class AppModel: ObservableObject {
         for id in Array(swapTrials.keys) { revertSwap(device: id) }
         permission.stopPolling()
         engine.stop()
+        cancelSlowPointer()
         // A speed still waiting to be kept goes back first, so it isn't saved as if it had been.
         pointer.revertPending()
         pointer.restoreAll()
@@ -384,6 +401,7 @@ final class AppModel: ObservableObject {
     private func applyPointers(_ settings: WhiskerSettings, connected: [ConnectedDevice]? = nil) {
         let connected = connected ?? devices.devices
         pointer.apply(settings, connected: connected, bypassed: bypassedApp != nil)
+        engine.setSlowPointerDevices(pointer.slowPointerDevices)
         wheel.apply(settings, connected: connected, bypassed: bypassedApp != nil)
     }
 

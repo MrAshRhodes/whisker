@@ -70,7 +70,9 @@ final class PointerController: ObservableObject {
         var baseline: PointerSelection
     }
 
-    @Published private(set) var pending: PendingChange?
+    @Published private(set) var pending: PendingChange? {
+        didSet { onSlowPointerAvailabilityChange?() }
+    }
     /// Devices whose service refused a write, so the Pointer pane can say speed can't be changed.
     @Published private(set) var unsupported: Set<String> = []
     /// Devices whose original pointer values couldn't be put back, so Whisker can say its values may still be
@@ -80,6 +82,12 @@ final class PointerController: ObservableObject {
     /// Whether an app on the bypass list was in front when settings were last applied. Nothing is written to a
     /// device then, whichever route asks, and presets can't be switched.
     @Published private(set) var isBypassed = false
+    @Published private(set) var slowPointerFactors: [String: Double] = [:]
+    private var slowPointerGeneration: UInt64 = 0
+    private var blockedSlowPointer: [String: UInt64] = [:]
+    private var slowPointerSessions: [String: UInt64] = [:]
+    private var slowPointerRestorations: Set<String> = []
+    private var latestSettings: WhiskerSettings = .default
 
     /// What was last written to a device, and to which services, so unchanged settings aren't rewritten.
     private struct Applied: Equatable {
@@ -94,14 +102,60 @@ final class PointerController: ObservableObject {
     /// What Whisker found on each device before changing it. A record stays until the values are back.
     private(set) var originals: [String: OriginalPointer]
     private var applied: [String: Applied] = [:]
-    @Published private var speedEdit: SpeedEdit?
+    @Published private var speedEdit: SpeedEdit? {
+        didSet { onSlowPointerAvailabilityChange?() }
+    }
     private var revertTimer: Timer?
     var onOriginalsChange: (([String: OriginalPointer]) -> Void)?
     /// Asked to bring the Pointer pane forward: a change is waiting to be kept, or the system refused one.
     var onAttention: (() -> Void)?
+    var onSlowPointerAvailabilityChange: (() -> Void)?
 
     /// Whether a speed change is waiting or being dragged, so no other can start.
     var isBusy: Bool { pending != nil || speedEdit != nil }
+
+    var slowPointerDevices: Set<String> {
+        Set(connected().filter { slowPointerUnavailable(on: $0.id) == nil }.map(\.id))
+    }
+
+    func slowPointerUnavailable(on deviceID: String) -> String? {
+        if isBypassed { return "Whisker is bypassed for the app in front." }
+        if isBusy { return "Finish or revert the pointer speed edit first." }
+        if let refusal = PointerPresetRefusal.targetRefusal(deviceID: deviceID, connected: connected()) {
+            return refusal.message(device: latestSettings.devices[deviceID]?.name ?? "")
+        }
+        guard latestSettings.activePointer(for: deviceID) != nil else {
+            return "Enable Whisker and custom pointer speed for this mouse first."
+        }
+        guard !refused(deviceID), applied[deviceID]?.pointer != nil,
+              applied[deviceID]?.services == hardware.serviceIDs(for: deviceID),
+              !hardware.serviceIDs(for: deviceID).isEmpty else {
+            return "A supported pointer service and an applied Whisker baseline are needed."
+        }
+        return nil
+    }
+
+    /// Only the engine's newest full begin/end state is accepted. This never edits saved settings.
+    func applySlowPointer(_ command: SlowPointerCommand) {
+        guard command.generation > slowPointerGeneration else { return }
+        slowPointerGeneration = command.generation
+        blockedSlowPointer = blockedSlowPointer.filter { command.factors[$0.key] != nil }
+        slowPointerSessions = command.sessions
+        var accepted: [String: Double] = [:]
+        for (id, factor) in command.factors {
+            guard let session = command.sessions[id] else { continue }
+            guard SlowPointer.isValid(factor), blockedSlowPointer[id] != session,
+                  slowPointerUnavailable(on: id) == nil else {
+                blockedSlowPointer[id] = session
+                continue
+            }
+            blockedSlowPointer[id] = nil
+            accepted[id] = factor
+        }
+        slowPointerRestorations.formUnion(Set(slowPointerFactors.keys).subtracting(accepted.keys))
+        slowPointerFactors = accepted
+        reapply()
+    }
 
     init(
         originals: [String: OriginalPointer] = [:],
@@ -127,22 +181,53 @@ final class PointerController: ObservableObject {
     /// A device is written again after it disconnects or its services change, and after a failed write or restore.
     /// It never changes `store`: the store publishes before it stores, so a change here would be lost.
     func apply(_ settings: WhiskerSettings, connected: [ConnectedDevice], bypassed: Bool = false) {
+        latestSettings = settings
         if isBypassed != bypassed { isBypassed = bypassed }
         let present = Set(connected.filter { !$0.isExcluded }.map(\.id))
+        for id in Array(slowPointerFactors.keys) {
+            if bypassed || !present.contains(id) || settings.activePointer(for: id) == nil
+                || applied[id]?.services != hardware.serviceIDs(for: id)
+                || PointerPresetRefusal.targetRefusal(deviceID: id, connected: connected) != nil {
+                slowPointerFactors[id] = nil
+                blockedSlowPointer[id] = slowPointerSessions[id]
+                slowPointerRestorations.insert(id)
+            }
+        }
         applied = applied.filter { present.contains($0.key) }
         for device in connected where !device.isExcluded {
-            let wanted = bypassed ? nil : settings.activePointer(for: device.id)
+            let baseline = bypassed ? nil : settings.activePointer(for: device.id)
+            let wanted = baseline.map { pointer in
+                slowPointerFactors[device.id].map { SlowPointer.applying($0, to: pointer) } ?? pointer
+            }
             let target = Applied(pointer: wanted, services: hardware.serviceIDs(for: device.id))
             guard applied[device.id] != target else { continue }
             if let wanted {
                 guard write(wanted, to: device) else {
                     applied[device.id] = nil
+                    if slowPointerFactors.removeValue(forKey: device.id) != nil, let baseline {
+                        blockedSlowPointer[device.id] = slowPointerSessions[device.id]
+                        slowPointerRestorations.insert(device.id)
+                        if write(baseline, to: device) {
+                            applied[device.id] = Applied(pointer: baseline, services: target.services)
+                            slowPointerRestorations.remove(device.id)
+                            notify(.hardwareRefused, on: device.id)
+                            continue
+                        }
+                    }
+                    if slowPointerRestorations.contains(device.id) {
+                        restoreFailures.insert(device.id)
+                        notify(.restoreFailed, on: device.id)
+                    }
                     continue
                 }
             } else if originals[device.id] != nil {
                 // Left unapplied, so the next call tries again.
-                guard restore(device.id) else { continue }
+                guard restore(device.id) else {
+                    if slowPointerRestorations.contains(device.id) { notify(.restoreFailed, on: device.id) }
+                    continue
+                }
             }
+            slowPointerRestorations.remove(device.id)
             applied[device.id] = target
         }
     }
@@ -170,6 +255,8 @@ final class PointerController: ObservableObject {
     /// Puts back every value Whisker changed. A device that refuses keeps its record, so the values are
     /// remembered for the next launch.
     func restoreAll() {
+        for id in slowPointerFactors.keys { blockedSlowPointer[id] = slowPointerSessions[id] }
+        slowPointerFactors.removeAll()
         for id in Array(originals.keys) { restore(id) }
         applied.removeAll()
     }

@@ -178,6 +178,13 @@ public struct EventProcessor: Sendable {
     private var hold: HoldScrollSession?
     private var idleHoldStatus: HoldScrollStatus = .idle
     private var horizontalStream = HorizontalStream()
+    private var slowPointer = SlowPointerHolds()
+
+    public var slowPointerCommand: SlowPointerCommand { slowPointer.command }
+
+    public mutating func cancelSlowPointer(unlessAvailable available: Set<String> = []) {
+        slowPointer.cancel(unlessAvailable: available)
+    }
 
     public init() {}
 
@@ -193,10 +200,12 @@ public struct EventProcessor: Sendable {
         return hold.fallback.map { .fellBack($0) } ?? .scrolling
     }
 
-    public mutating func process(_ event: InputEvent, settings: CompiledSettings) -> EventPlan {
+    public mutating func process(_ event: InputEvent, settings: CompiledSettings, slowPointerDevices: Set<String> = []) -> EventPlan {
         switch event.kind {
-        case .buttonDown(let button): return buttonDown(button, event, settings)
-        case .buttonUp(let button): return buttonUp(button, event)
+        case .buttonDown(let button): return buttonDown(button, event, settings, slowPointerDevices: slowPointerDevices)
+        case .buttonUp(let button):
+            if slowPointer.end(button: button, device: event.device) { return .swallow }
+            return buttonUp(button, event)
         case .buttonDragged(let button): return dragged(button, event, settings)
         case .scroll(let sample): return scroll(sample, event, settings)
         }
@@ -205,6 +214,7 @@ public struct EventProcessor: Sendable {
     /// Lets go of everything held, returning the actions to finish (e.g. release a synthetic click).
     /// Called when Whisker is turned off, the Mac sleeps or the app quits.
     public mutating func releaseAll() -> [(button: Int, action: Action)] {
+        slowPointer.cancel()
         var released = held.sorted { $0.key < $1.key }.filter { $0.value.followsTrigger }.map { (button: $0.key, action: $0.value) }
         held.removeAll()
         orphaned.removeAll()
@@ -278,7 +288,14 @@ public struct EventProcessor: Sendable {
         return nil
     }
 
-    private mutating func buttonDown(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+    private mutating func buttonDown(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings, slowPointerDevices: Set<String>) -> EventPlan {
+        if slowPointer.owns(button: button, device: event.device) { return .swallow }
+        if isActive(event, settings),
+           let mapping = lookup(.button(button), event, settings, exactOnly: false),
+           case .slowPointer(let factor) = mapping.action {
+            if button == 0, mapping.modifiers.isEmpty, !settings.general.allowPrimaryButtonRemap { return .passThrough }
+            return slowPointer.begin(button: button, device: event.device, factor: factor, available: slowPointerDevices) ? .swallow : .passThrough
+        }
         // A down without an up (missed event): finish the old one first by treating it as released.
         held[button] = nil
         orphaned.remove(button)
@@ -325,6 +342,7 @@ public struct EventProcessor: Sendable {
     }
 
     private mutating func dragged(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+        if slowPointer.owns(button: button, device: event.device) { return .dragAsMove }
         guard let action = held[button] else {
             if let target = swaps.target(of: button, from: event.device) { return .dragAs(button: target, modifiers: []) }
             return orphaned.contains(button) ? .dragAsMove : .passThrough

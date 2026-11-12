@@ -28,6 +28,8 @@ final class EventEngine: @unchecked Sendable {
         var reportedHold: HoldScrollStatus = .idle
         /// System Reduce Motion, snapshotted by the app outside the tap. While on, nothing is smoothed.
         var reduceMotion = false
+        var slowPointerDevices: Set<String> = []
+        var reportedSlowPointer: UInt64 = 0
     }
 
     static let eventMask: CGEventMask = {
@@ -48,6 +50,7 @@ final class EventEngine: @unchecked Sendable {
     private let attributeMotion: @Sendable (TimeInterval) -> DeviceAttribution?
     /// Called on the main queue when a hold-to-scroll starts, falls back or can't start.
     var onHoldStatus: (@Sendable (HoldScrollStatus) -> Void)?
+    var onSlowPointer: (@MainActor @Sendable (SlowPointerCommand) -> Void)?
 
     private let tapLock = NSLock()
     private var tap: CFMachPort?
@@ -80,6 +83,7 @@ final class EventEngine: @unchecked Sendable {
         state.withLock { state in
             state.compiled = CompiledSettings(settings, nativeWheelActive: state.compiled.nativeWheelActive)
             state.processor.resetScrollRecognition()
+            state.processor.cancelSlowPointer()
             // Pending smoothing was planned under settings that are going away.
             synthesizer.cancelSmoothScroll()
             // Settings that decide what to filter may have changed under a press that is being held back.
@@ -108,6 +112,25 @@ final class EventEngine: @unchecked Sendable {
         }
     }
 
+    func setSlowPointerDevices(_ devices: Set<String>) {
+        state.withLock { state in
+            guard state.slowPointerDevices != devices else { return }
+            state.slowPointerDevices = devices
+            state.processor.cancelSlowPointer(unlessAvailable: devices)
+            reportSlowPointer(&state)
+        }
+    }
+
+    /// Also returned for immediate main-actor cancellation, without waiting for its queued notification.
+    @discardableResult
+    func cancelSlowPointer() -> SlowPointerCommand {
+        state.withLock { state in
+            state.processor.cancelSlowPointer()
+            reportSlowPointer(&state)
+            return state.processor.slowPointerCommand
+        }
+    }
+
     /// Mice whose own wheel service Whisker has changed: their software distance and acceleration stand aside.
     func setNativeWheelActive(_ devices: Set<String>) {
         state.withLock { state in
@@ -129,6 +152,7 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.cancelSequence(.applicationChanged)
             // The pointer is anchored in the window that was in front, so a hold never carries over to another app.
             state.processor.cancelHold()
+            state.processor.cancelSlowPointer()
             syncBypass(&state, app: app, at: location)
             reportHold(&state)
         }
@@ -167,6 +191,7 @@ final class EventEngine: @unchecked Sendable {
             armExpiry(&state)
             // A hold started by a device that has gone ends now.
             state.processor.cancelHold(unlessConnected: connected)
+            state.processor.cancelSlowPointer(unlessAvailable: connected)
             // A swapped button of a mouse that has gone can't be released by the mouse itself.
             for (_, action) in state.processor.releaseSwaps(unlessConnected: connected) {
                 synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
@@ -250,12 +275,25 @@ final class EventEngine: @unchecked Sendable {
 
     /// Call with the state lock held. Tells the app about a change of hold-to-scroll status, off the tap thread.
     private func reportHold(_ state: inout State) {
+        reportSlowPointer(&state)
         let status = state.processor.holdStatus
         guard status != state.reportedHold else { return }
         state.reportedHold = status
         if case .fellBack = status { Log.events.notice("Hold to Scroll fell back to normal movement") }
         guard let onHoldStatus else { return }
         DispatchQueue.main.async { onHoldStatus(status) }
+    }
+
+    private func reportSlowPointer(_ state: inout State) {
+        let command = state.processor.slowPointerCommand
+        guard command.generation != state.reportedSlowPointer else { return }
+        state.reportedSlowPointer = command.generation
+        guard let onSlowPointer else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.state.withLock({ $0.processor.slowPointerCommand.generation == command.generation }) else { return }
+            MainActor.assumeIsolated { onSlowPointer(command) }
+        }
     }
 
     /// Call with the state lock held. Standing aside for an app lets go of everything held, once; the real
@@ -297,7 +335,8 @@ final class EventEngine: @unchecked Sendable {
     /// Call with the state lock held.
     private func replay(_ flushed: [FlushedPress], _ state: inout State) {
         for press in flushed {
-            let plan = state.processor.process(press.event, settings: state.compiled)
+            let plan = state.processor.process(press.event, settings: state.compiled, slowPointerDevices: state.slowPointerDevices)
+            reportSlowPointer(&state)
             if ClickInterruption.isCalledOffBy(press.event.kind, plan: plan) { synthesizer.cancelPendingClicks() }
             let location = CGPoint(x: press.event.location?.x ?? 0, y: press.event.location?.y ?? 0)
             let flags = CGEventFlags(rawValue: press.event.modifiers.eventFlags & ModifierSet([.shift, .control, .option, .command]).eventFlags)
@@ -377,7 +416,7 @@ final class EventEngine: @unchecked Sendable {
             case .moveOnly: return (.dragAsMove, originalClickState)
             case .proceed(let count): clickState = count
             }
-            var plan = state.processor.process(input, settings: state.compiled)
+            var plan = state.processor.process(input, settings: state.compiled, slowPointerDevices: state.slowPointerDevices)
             // A hold starting takes over the scrolling: pending smoothing is dropped, never replayed.
             if state.processor.isHolding { synthesizer.cancelSmoothScroll() }
             // A scroll calls off a triple click whether or not smoothing takes it over.

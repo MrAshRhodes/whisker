@@ -248,6 +248,32 @@ none of them reads **Custom**.
   the 5 seconds, the speed it was waiting on stays saved and applies at the next launch; use
   **Use System Settings** to drop it.
 
+## Slow pointer while held
+
+In **Settings › Buttons**, map a spare button to **Slow pointer while held** and choose a factor
+from ×0.1 to ×0.9 (×0.5 initially). It slows only the mouse you press, not every mouse. It needs
+Input Monitoring, exact device identification, a supported pointer service and an enabled
+**Custom pointer speed** baseline for that mouse. Otherwise the button passes through normally.
+Trackpads, touch mice and indistinguishable mice are not eligible. The primary-button safeguard
+still applies.
+
+The factor is a temporary overlay: acceleration and saved settings are unchanged. Overlapping
+holds use the slowest factor, not their product; speed stays within the normal pointer bounds.
+**Settings › Pointer** shows the temporary speed and baseline, explains unavailable states and
+provides a keyboard-accessible **Cancel pointer slowdown** button. Release restores the latest
+applicable baseline without asking you to confirm it again. After cancellation, let go before
+pressing again.
+
+A profile/settings or frontmost-app change, bypass, disconnection, paused event tap, sleep,
+session switch, disabling Whisker or quitting cancels the hold. A reconnected mouse gets its
+baseline, never a stale hold. If macOS refuses restoration, Whisker reports it and retains the
+original values for recovery and retry.
+
+This changes macOS pointer response, **not sensor DPI**. Repeated restoration on real hardware,
+games and raw-input paths are **not yet verified**; no game or anti-cheat compatibility is claimed.
+The action is additive without another schema change. Existing top-level unknown settings keys
+are preserved; the codec still does not preserve unknown keys inside nested objects.
+
 ## Pointer orientation — foundation only
 
 **Not available as a pointer setting.** The maintainer decision on rewriting pointer coordinates

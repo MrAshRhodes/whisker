@@ -308,6 +308,9 @@ extension WhiskerSettings {
             break
         }
         switch mapping.action {
+        case .slowPointer(let factor):
+            guard case .button = mapping.trigger else { return "Slow pointer needs a button to hold, not a wheel direction." }
+            guard SlowPointer.isValid(factor) else { return "Slow pointer factor must be between 0.1 and 0.9." }
         case .click(let button, _):
             guard Trigger.buttonRange.contains(button) else { return "Click buttons run from 0 to 31." }
         case .scroll(_, let lines):

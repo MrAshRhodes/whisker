@@ -454,6 +454,16 @@ struct PointerDeviceControls: View {
         let saved = binding.wrappedValue
         // While a change waits to be kept, nothing else may change the speed.
         let waiting = pointer.pending != nil
+        if let factor = pointer.slowPointerFactors[device.id], let baseline = saved.pointer {
+            LabeledContent("Temporary slowdown") {
+                Text("\(PointerMath.speedLabel(SlowPointer.applying(factor, to: baseline).speed)) (baseline \(PointerMath.speedLabel(baseline.speed)))")
+            }
+            Button("Cancel pointer slowdown") { model.cancelSlowPointer() }
+                .accessibilityHint("Restores the latest baseline. Let go of the held button before starting again.")
+        } else if let reason = pointer.slowPointerUnavailable(on: device.id) {
+            Text("Slow pointer while held is unavailable: \(reason)")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
         Toggle("Custom pointer speed", isOn: Binding(
             get: { saved.pointer != nil },
             set: { on in

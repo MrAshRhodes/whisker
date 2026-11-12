@@ -382,6 +382,19 @@ struct ActionEditor: View {
             ), in: ScrollMath.linesRange)
         case let .pointerPreset(deviceID, presetID):
             PointerPresetPicker(action: $action, settings: settings, deviceID: deviceID, presetID: presetID)
+        case .slowPointer(let factor):
+            HStack {
+                Text("Speed factor")
+                Slider(value: Binding(get: { factor }, set: { action = .slowPointer(factor: $0) }), in: SlowPointer.factorRange, step: 0.1)
+                    .accessibilityLabel("Held pointer speed factor")
+                Text(String(format: "%.1f×", factor)).monospacedDigit()
+            }
+            Text("Slows only the mouse you press, while held. Needs Input Monitoring, a supported mouse and an enabled custom pointer baseline. Otherwise the button keeps its normal behaviour. Overlapping holds use the slowest factor, not their product. Cancel from Pointer settings. This changes macOS pointer response, not sensor DPI; hardware and game compatibility are not yet verified.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !model.devices.canIdentifyDevices {
+                Label("Input Monitoring is off; Whisker cannot safely identify the held mouse.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
         case let .holdToScroll(config):
             Picker("Scroll", selection: Binding(
                 get: { config.axes },
