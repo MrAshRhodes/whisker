@@ -259,7 +259,13 @@ brew update && brew upgrade --cask whisker
   next time it starts.
 - **Trackpads and touch mice such as Magic Mouse** are left alone entirely (shown as
   "Touch mouse — left alone" under Devices): Whisker does not remap, reverse or change
-  the speed of them.
+  the speed of them. Decision: this stays the default, and there is no opt-in for Magic Mouse
+  buttons. Whisker cannot yet tell a Magic Mouse's clicks from its touch gestures or from other
+  mice, no model or macOS version has been verified, and its scrolling and gestures (swipe,
+  smart zoom, Mission Control) must stay exactly as macOS has them. Evidence that would reverse
+  it: hardware tests showing clicks reach Whisker as separate, exactly attributed events with
+  gestures and scroll momentum unchanged. Use Apple's own Mouse settings for secondary click
+  and gestures.
 
 ## Build from source
 

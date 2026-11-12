@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Documented decision: Magic Mouse and other touch mice stay left alone, with no opt-in for their buttons, because clicks cannot yet be told apart from gestures or other mice and no model has been verified on hardware. Native gestures and scrolling are untouched, and a tested eligibility policy records what any future opt-in would need ([#29]).
 - Smooth sideways scrolling for Scroll Left and Scroll Right mappings: an opt-in mode that runs the action once per swipe from an exactly identified mouse, after an activation distance in pixels, while vertical scrolling carries on. Momentum, trackpads and unidentified input pass through, and it has not yet been verified on hardware, including thumb wheels ([#17]).
 - Scroll faster or slower while holding modifier keys: choose the keys, a speed from ×0.25 to ×8 and the directions for each profile. It applies to wheel notches only, not trackpads or smooth scrolling, and has not yet been verified on hardware ([#16]).
 - Native wheel speed and acceleration: an opt-in, per-mouse setting that changes the mouse's own wheel values, offered only when Whisker can read and restore them. It suspends Whisker's lines per notch and acceleration for that mouse, puts the original values back when switched off, on quit, in bypass and after a crash, and has not yet been verified on hardware ([#26]).
@@ -41,4 +42,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#20]: https://github.com/MrAshRhodes/whisker/issues/20
 [#22]: https://github.com/MrAshRhodes/whisker/issues/22
 [#26]: https://github.com/MrAshRhodes/whisker/issues/26
+[#29]: https://github.com/MrAshRhodes/whisker/issues/29
 [#31]: https://github.com/MrAshRhodes/whisker/issues/31

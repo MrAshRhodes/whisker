@@ -304,7 +304,7 @@ public enum DeviceNote: Hashable, Sendable {
         case .excluded(.trackpad):
             return "Trackpads keep their own gestures and settings, so Whisker leaves them alone. It recognised this one from the name or connection type it reports."
         case .excluded(.touchMouse):
-            return "Touch mice such as the Magic Mouse keep their own gestures and settings, so Whisker leaves them alone. It recognised this one from its name."
+            return "Touch mice such as the Magic Mouse keep their own gestures and settings, so Whisker leaves them alone. There is no setting to change that: it has not been verified that a Magic Mouse's buttons can be remapped without disturbing its gestures. It recognised this one from its name."
         case .sharedIdentity(let devices, let hasSerial):
             return "\(devices) connected devices report the same vendor and product ids\(hasSerial ? " and serial number" : ""), so Whisker treats them as one mouse. They share one set of settings."
         case .noProductName:

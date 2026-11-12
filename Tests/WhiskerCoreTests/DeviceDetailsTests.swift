@@ -405,3 +405,35 @@ struct DeviceDetailsTests {
         #expect(DeviceDetailsBuilder.remembered(id: "not-an-identity", name: "", identification: .listening).name == "not-an-identity")
     }
 }
+
+@Suite struct TouchInputPolicyTests {
+    @Test func touchMouseIsLeftAloneByDefault() {
+        #expect(TouchInputPolicy.decide(kind: .touchMouse) == .leftAlone(.noOptIn))
+        #expect(TouchInputPolicy.decide(kind: nil) == .notExcluded)
+    }
+
+    @Test func trackpadIsNeverEligible() {
+        for optedIn in [false, true] {
+            for attribution in [TouchInputPolicy.Attribution.exact, .inferred, .conflicting, .unavailable] {
+                #expect(TouchInputPolicy.decide(kind: .trackpad, optedIn: optedIn, attribution: attribution, capability: .verified) == .leftAlone(.trackpad))
+            }
+        }
+    }
+
+    @Test func inferredOrConflictingAttributionIsNeverEnough() {
+        for attribution in [TouchInputPolicy.Attribution.inferred, .conflicting, .unavailable] {
+            #expect(TouchInputPolicy.decide(kind: .touchMouse, optedIn: true, attribution: attribution, capability: .verified) == .leftAlone(.attributionNotExact))
+        }
+    }
+
+    @Test func unverifiedHardwareKeepsExclusionEvenWithOptInAndExactAttribution() {
+        #expect(TouchInputPolicy.decide(kind: .touchMouse, optedIn: true, attribution: .exact) == .leftAlone(.capabilityUnverified))
+        #expect(TouchInputPolicy.decide(kind: .touchMouse, optedIn: true, attribution: .exact, capability: .verified) == .buttonsEligible)
+    }
+
+    @Test func scrollFromExcludedDevicesAlwaysPassesThrough() {
+        #expect(TouchInputPolicy.scrollIsPassedThrough(from: .touchMouse))
+        #expect(TouchInputPolicy.scrollIsPassedThrough(from: .trackpad))
+        #expect(!TouchInputPolicy.scrollIsPassedThrough(from: nil))
+    }
+}
