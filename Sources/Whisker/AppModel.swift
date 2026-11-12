@@ -103,7 +103,9 @@ final class AppModel: ObservableObject {
             access: hidAccess, source: devices, permission: { DeviceMonitor.inputMonitoringAllowed },
             settings: { store.settings }
         )
-        let pointer = PointerController(originals: runState.originalPointers, store: store, connected: { devices.devices })
+        let pointer = PointerController(
+            originals: runState.originalPointers, store: store, journal: store, connected: { devices.devices }
+        )
         self.pointer = pointer
         wheel = WheelController(records: runState.originalWheels)
         let sequences = ShortcutSequenceRunner(
@@ -174,7 +176,9 @@ final class AppModel: ObservableObject {
     }
 
     func start() {
-        let leftovers = !runState.cleanExit && !runState.originalPointers.isEmpty
+        // Before any mouse is written to: a speed change the last run left waiting is never applied again.
+        let interruptedTrial = pointer.recoverInterruptedTrial()
+        let leftovers = (!runState.cleanExit || interruptedTrial != nil) && !runState.originalPointers.isEmpty
         let wheelLeftovers = !runState.originalWheels.isEmpty
         runState.cleanExit = false
         store.saveRunState(runState)

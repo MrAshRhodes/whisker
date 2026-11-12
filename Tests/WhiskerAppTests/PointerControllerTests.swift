@@ -26,6 +26,8 @@ struct PointerControllerTests {
         var answers: [Answer] = []
         /// Writes that reached a device, wholly or in part.
         private(set) var writes: [String] = []
+        /// Told of every write as it arrives, with the resolution asked for.
+        var onWrite: ((Int64) -> Void)?
 
         func serviceIDs(for deviceID: String) -> Set<UInt64> { services[deviceID] ?? [] }
 
@@ -34,6 +36,7 @@ struct PointerControllerTests {
         }
 
         func write(resolution: Int64, acceleration: Int64?, to deviceID: String) -> Bool {
+            onWrite?(resolution)
             guard services[deviceID] != nil, !refuses else { return false }
             let answer = answers.isEmpty ? Answer.accept : answers.removeFirst()
             if answer == .refuse { return false }
@@ -43,28 +46,59 @@ struct PointerControllerTests {
         }
     }
 
+    /// A record kept in memory, which can be told to fail.
+    @MainActor
+    final class FakeJournal: PointerTrialJournal {
+        var entry: PointerTrialJournalEntry = .empty
+        var savesFail = false
+        var clearsFail = false
+
+        func loadPointerTrial() -> PointerTrialJournalEntry { entry }
+
+        func savePointerTrial(_ record: PointerTrialRecord) throws {
+            if savesFail { throw CocoaError(.fileWriteNoPermission) }
+            entry = .record(record)
+        }
+
+        func clearPointerTrial() throws {
+            if clearsFail { throw CocoaError(.fileWriteNoPermission) }
+            entry = .empty
+        }
+    }
+
     /// A controller on fake hardware, with a real store in a throwaway folder.
     @MainActor
     final class Rig {
         let hardware = FakeHardware()
         let store: SettingsStore
+        /// Where unconfirmed changes are written down: the store unless a test brings its own.
+        let journal: PointerTrialJournal
         /// The mice the system lists as connected.
         var connected: [PointingDevice]
         /// What the controller last asked to have kept as the mice's original values.
         var savedOriginals: [String: OriginalPointer]?
+        var clock = Date(timeIntervalSinceReferenceDate: 800_000_000)
         private let directory: URL
         private(set) lazy var controller: PointerController = {
             let controller = PointerController(
-                hardware: hardware, store: store, connected: { [unowned self] in self.connected }, confirmationTimeout: 3600
+                hardware: hardware, store: store, journal: journal, connected: { [unowned self] in self.connected },
+                confirmationTimeout: 3600, now: { [unowned self] in self.clock }
             )
-            controller.onOriginalsChange = { [unowned self] in self.savedOriginals = $0 }
+            controller.onOriginalsChange = { [unowned self] originals in
+                self.savedOriginals = originals
+                var state = self.store.loadRunState()
+                state.cleanExit = false
+                state.originalPointers = originals
+                self.store.saveRunState(state)
+            }
             return controller
         }()
 
-        init(settings: WhiskerSettings? = nil, connected: [PointingDevice]? = nil) throws {
+        init(settings: WhiskerSettings? = nil, connected: [PointingDevice]? = nil, journal: PointerTrialJournal? = nil) throws {
             directory = try SettingsStoreTests.makeDirectory()
             store = SettingsStore(directory: directory)
             store.settings = settings ?? PointerControllerTests.settings()
+            self.journal = journal ?? store
             self.connected = connected ?? [PointerControllerTests.device]
             for device in self.connected { hardware.services[device.id] = [1] }
         }
@@ -82,6 +116,29 @@ struct PointerControllerTests {
         /// The app applies the settings at launch and whenever they change.
         func start() {
             controller.apply(store.settings, connected: connected)
+        }
+
+        func reloadedStore() -> SettingsStore {
+            store.saveNow()
+            let reloaded = SettingsStore(directory: directory)
+            reloaded.saveNow()
+            return reloaded
+        }
+
+        /// A launch after Whisker stopped without quitting, from what is on disk, in the order
+        /// `AppModel.start()` uses: recovery first, then the leftover originals, then the saved settings.
+        func relaunch(journal: PointerTrialJournal? = nil) -> (
+            store: SettingsStore, controller: PointerController, recovered: PointerController.InterruptedTrial?
+        ) {
+            let reloaded = SettingsStore(directory: directory)
+            let controller = PointerController(
+                originals: reloaded.loadRunState().originalPointers, hardware: hardware, store: reloaded,
+                journal: journal ?? reloaded, connected: { [unowned self] in self.connected }
+            )
+            let recovered = controller.recoverInterruptedTrial()
+            controller.restoreLeftovers(connected: connected)
+            controller.apply(reloaded.settings, connected: connected)
+            return (reloaded, controller, recovered)
         }
 
         func disconnect() {
@@ -102,10 +159,9 @@ struct PointerControllerTests {
             controller.apply(store.settings, connected: connected, bypassed: bypassed)
         }
 
-        /// What the slider does: the store takes each speed, and the app applies it straight away.
+        /// The slider previews each speed through the controller, without saving it.
         func drag(to speed: Double) {
-            store.settings.devices[PointerControllerTests.id]?.setPointerSpeed(speed)
-            controller.apply(store.settings, connected: connected)
+            controller.setSpeed(speed, on: PointerControllerTests.id)
         }
     }
 
@@ -233,7 +289,7 @@ struct PointerControllerTests {
         let outcome = rig.controller.selectPreset("turbo", on: Self.id)
         #expect(outcome == .awaitingConfirmation)
         #expect(attention == 1)
-        #expect(rig.saved.pointer?.speed == 4)
+        #expect(rig.saved.pointer?.speed == 1)
         #expect(rig.held == Self.resolution(4))
         let pending = try #require(rig.controller.pending)
         #expect(pending.deviceID == Self.id)
@@ -256,6 +312,41 @@ struct PointerControllerTests {
         #expect(rig.held == Self.resolution(4))
     }
 
+    @Test func aPendingPresetNeverReachesSavedSettingsOrRelaunch() throws {
+        var settings = Self.settings()
+        settings.devices[Self.otherID] = DeviceSettings(
+            pointer: PointerSettings(speed: 0.5, acceleration: 0.2, linear: true),
+            pointerPresets: [PointerPreset(id: "precise", name: "Precise", speed: 0.5)],
+            activePointerPresetID: "precise"
+        )
+        let rig = try Rig(settings: settings, connected: [Self.device, Self.other])
+        defer { rig.finish() }
+        rig.start()
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        let confirmed = rig.store.settings
+
+        #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        #expect(rig.held == Self.resolution(4))
+        let reloaded = rig.reloadedStore()
+        #expect(reloaded.settings == confirmed)
+        let json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: reloaded.fileURL)) as? [String: Any])
+        #expect(json["schemaVersion"] as? Int == 2)
+        let devices = try #require(json["devices"] as? [String: [String: Any]])
+        #expect(devices[Self.id]?["activePointerPresetID"] as? String == "fast")
+        #expect((devices[Self.id]?["pointer"] as? [String: Any])?["speed"] as? Double == 1.5)
+
+        let restarted = PointerController(
+            originals: reloaded.loadRunState().originalPointers, hardware: rig.hardware,
+            store: reloaded, connected: { rig.connected }
+        )
+        restarted.restoreLeftovers(connected: rig.connected)
+        restarted.apply(reloaded.settings, connected: rig.connected)
+        #expect(restarted.pending == nil)
+        #expect(rig.held == Self.resolution(1.5))
+        #expect(rig.hardware.values[Self.otherID]?.resolution == Self.resolution(0.5))
+        #expect(reloaded.settings.devices[Self.otherID]?.activePointerPresetID == "precise")
+    }
+
     @Test func nothingSwitchesWhileAnyChangeWaits() throws {
         var settings = Self.settings()
         settings.devices[Self.otherID] = settings.devices[Self.id]
@@ -271,7 +362,7 @@ struct PointerControllerTests {
         #expect(sameMouse == .rejected(.confirmationPending))
         #expect(otherMouse == .rejected(.confirmationPending))
         #expect(rig.hardware.writes.count == writes)
-        #expect(rig.saved.activePointerPresetID == "turbo")
+        #expect(rig.saved.activePointerPresetID == "normal")
         #expect(rig.store.settings.devices[Self.otherID]?.activePointerPresetID == "normal")
         #expect(rig.controller.pending?.proposed.presetID == "turbo")
 
@@ -405,6 +496,90 @@ struct PointerControllerTests {
         #expect(rig.controller.pending == nil)
     }
 
+    @Test(arguments: [false, true])
+    func aReplacedServiceNeverInheritsAnUnconfirmedSelection(duringDrag: Bool) throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        if duringDrag {
+            rig.controller.beginSpeedEdit(on: Self.id)
+            rig.drag(to: 4)
+        } else {
+            #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        }
+
+        // The monitor can see replacement services without an intermediate disconnected list.
+        rig.hardware.services[Self.id] = [3]
+        rig.hardware.values[Self.id] = FakeHardware.native
+        rig.controller.devicesChanged(rig.connected)
+        #expect(!rig.controller.isBusy)
+        #expect(rig.held == Self.resolution(1.5))
+        rig.controller.endSpeedEdit()
+        rig.controller.confirmPending()
+        let reloaded = rig.reloadedStore()
+        #expect(reloaded.settings.devices[Self.id]?.pointer?.speed == 1.5)
+        #expect(reloaded.settings.devices[Self.id]?.activePointerPresetID == "fast")
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func settingsChangesCancelUnconfirmedChoicesWithoutOverwritingReplacements(duringDrag: Bool, disabled: Bool) throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        if duringDrag {
+            rig.controller.beginSpeedEdit(on: Self.id)
+            rig.drag(to: 1.8)
+        } else {
+            #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        }
+
+        var replacement = rig.store.settings
+        if disabled {
+            replacement.general.enabled = false
+        } else {
+            replacement.devices[Self.id]?.pointerSelection = PointerSelection(
+                pointer: PointerSettings(speed: duringDrag ? 1.8 : 4, acceleration: 0.2, linear: true)
+            )
+        }
+        rig.store.settings = replacement
+        rig.controller.apply(replacement, connected: rig.connected)
+        #expect(rig.controller.isBusy == false)
+        rig.controller.endSpeedEdit()
+        rig.controller.confirmPending()
+        rig.controller.revertPending()
+        let reloaded = rig.reloadedStore()
+        #expect(reloaded.settings == replacement)
+        if disabled {
+            #expect(rig.hardware.values[Self.id] == FakeHardware.native)
+        } else {
+            #expect(rig.hardware.values[Self.id]?.acceleration == -1 << 16)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func restoringAllCancelsUnconfirmedChoicesWithoutSavingThem(duringDrag: Bool) throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        if duringDrag {
+            rig.controller.beginSpeedEdit(on: Self.id)
+            rig.drag(to: 4)
+        } else {
+            #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        }
+        rig.controller.restoreAll()
+        #expect(rig.controller.isBusy == false)
+        #expect(rig.hardware.values[Self.id] == FakeHardware.native)
+        rig.controller.endSpeedEdit()
+        rig.controller.confirmPending()
+        let reloaded = rig.reloadedStore()
+        #expect(reloaded.settings.devices[Self.id]?.pointer?.speed == 1.5)
+        #expect(reloaded.settings.devices[Self.id]?.activePointerPresetID == "fast")
+        #expect(reloaded.loadRunState().originalPointers.isEmpty)
+    }
+
     @Test func useSystemSettingsCancelsAWaitingChangeAndPutsTheOriginalsBack() throws {
         let rig = try Rig()
         defer { rig.finish() }
@@ -489,6 +664,34 @@ struct PointerControllerTests {
         #expect(rig.held == Self.resolution(1))
     }
 
+    @Test func aRefusedPendingWriteCannotBeKeptAndRetainsRecoveryOnDisk() throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        rig.bypass(true)
+        rig.hardware.answers = [.partial, .refuse]
+
+        rig.bypass(false)
+        #expect(rig.controller.pending == nil)
+        #expect(rig.controller.notice?.message == PointerPresetRefusal.restoreFailed.message(device: "Mouse"))
+        rig.controller.confirmPending()
+        let reloaded = rig.reloadedStore()
+        #expect(reloaded.settings.devices[Self.id]?.pointer?.speed == 1.5)
+        #expect(reloaded.settings.devices[Self.id]?.activePointerPresetID == "fast")
+        #expect(reloaded.loadRunState().originalPointers == [Self.id: FakeHardware.native])
+
+        let restarted = PointerController(
+            originals: reloaded.loadRunState().originalPointers, hardware: rig.hardware,
+            store: reloaded, connected: { rig.connected }
+        )
+        restarted.restoreLeftovers(connected: rig.connected)
+        restarted.apply(reloaded.settings, connected: rig.connected)
+        #expect(rig.held == Self.resolution(1.5))
+        #expect(restarted.notice == nil)
+    }
+
     @Test func useSystemSettingsStillWorksWhileAnAppIsBypassed() throws {
         let rig = try Rig()
         defer { rig.finish() }
@@ -544,20 +747,49 @@ struct PointerControllerTests {
         #expect(rig.held == Self.resolution(2))
     }
 
-    @Test func aSliderSpeedTheSystemRefusesIsRolledBack() throws {
+    @Test(arguments: [false, true])
+    func anUnconfirmedSliderEditNeverReachesSavedSettingsOrRelaunch(ended: Bool) throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        rig.controller.beginSpeedEdit(on: Self.id)
+        rig.drag(to: 4)
+        if ended { rig.controller.endSpeedEdit() }
+        #expect(rig.held == Self.resolution(4))
+
+        let reloaded = rig.reloadedStore()
+        #expect(reloaded.settings.devices[Self.id]?.pointer?.speed == 1.5)
+        #expect(reloaded.settings.devices[Self.id]?.activePointerPresetID == "fast")
+        let restarted = PointerController(
+            originals: reloaded.loadRunState().originalPointers, hardware: rig.hardware,
+            store: reloaded, connected: { rig.connected }
+        )
+        restarted.restoreLeftovers(connected: rig.connected)
+        restarted.apply(reloaded.settings, connected: rig.connected)
+        #expect(!restarted.isBusy)
+        #expect(rig.held == Self.resolution(1.5))
+    }
+
+    @Test(arguments: [false, true])
+    func aSliderFailureKeepsTheConfirmedSelectionAndRecovery(rollbackRefused: Bool) throws {
         let rig = try Rig()
         defer { rig.finish() }
         rig.start()
 
         rig.controller.beginSpeedEdit(on: Self.id)
-        rig.hardware.answers = [.refuse]
+        rig.hardware.answers = rollbackRefused ? [.partial, .refuse] : [.refuse]
         rig.drag(to: 1.8)
         rig.controller.endSpeedEdit()
         #expect(rig.saved.pointer?.speed == 1)
         #expect(rig.saved.activePointerPresetID == "normal")
-        #expect(rig.held == Self.resolution(1))
-        #expect(rig.controller.notice?.message == PointerPresetRefusal.hardwareRefused.message(device: "Mouse"))
+        #expect(rig.held == Self.resolution(rollbackRefused ? 1.8 : 1))
+        let refusal: PointerPresetRefusal = rollbackRefused ? .restoreFailed : .hardwareRefused
+        #expect(rig.controller.notice?.message == refusal.message(device: "Mouse"))
         #expect(!rig.controller.isBusy)
+        let reloaded = rig.reloadedStore()
+        #expect(reloaded.settings.devices[Self.id]?.pointerSelection == Self.settings().devices[Self.id]?.pointerSelection)
+        #expect(reloaded.loadRunState().originalPointers == [Self.id: FakeHardware.native])
     }
 
     @Test func noPresetSwitchesDuringADragAndAMouseThatLeavesEndsIt() throws {
@@ -577,5 +809,205 @@ struct PointerControllerTests {
         #expect(rig.saved.activePointerPresetID == "normal")
         rig.reconnect()
         #expect(rig.held == Self.resolution(1))
+    }
+
+    // MARK: Unconfirmed changes on record
+
+    static func record(confirmed: PointerSelection?, trial: PointerSelection?, at date: Date) throws -> PointerTrialRecord {
+        PointerTrialRecord(
+            deviceID: id, confirmed: .init(try #require(confirmed)), trial: trial.map { .init($0) }, startedAt: date
+        )
+    }
+
+    /// Saved settings with the mouse at "Turbo", as if an unconfirmed switch had been saved.
+    static func leakedSettings() -> WhiskerSettings {
+        var settings = settings()
+        _ = settings.devices[id]?.selectPointerPreset(id: "turbo")
+        return settings
+    }
+
+    @Test func aChangeThatMustBeKeptIsOnRecordBeforeItReachesTheMouse() throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        var onRecord: [Int64: PointerTrialJournalEntry] = [:]
+        rig.hardware.onWrite = { onRecord[$0] = rig.store.loadPointerTrial() }
+
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        #expect(onRecord[Self.resolution(1.5)] == PointerTrialJournalEntry.empty)
+        let confirmed = rig.saved.pointerSelection
+
+        #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        let expected = try Self.record(
+            confirmed: confirmed, trial: rig.controller.pending?.proposed, at: rig.clock
+        )
+        #expect(expected.trial?.presetID == "turbo")
+        #expect(onRecord[Self.resolution(4)] == .record(expected))
+        #expect(rig.store.loadPointerTrial() == .record(expected))
+        rig.controller.revertPending()
+        #expect(rig.store.loadPointerTrial() == .empty)
+
+        #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        #expect(rig.store.loadPointerTrial() != .empty)
+        rig.controller.confirmPending()
+        #expect(rig.store.loadPointerTrial() == .empty)
+        #expect(rig.saved.activePointerPresetID == "turbo")
+    }
+
+    @Test func aDragOnRecordKeepsTheSpeedConfirmedBeforeItAndBlocksOtherChanges() throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        let confirmed = rig.saved.pointerSelection
+        var onRecord: [Int64: PointerTrialJournalEntry] = [:]
+        rig.hardware.onWrite = { onRecord[$0] = rig.store.loadPointerTrial() }
+
+        rig.controller.beginSpeedEdit(on: Self.id)
+        rig.drag(to: 1.8)
+        #expect(rig.store.loadPointerTrial() == .empty)
+        rig.drag(to: 2.5)
+        var expected = try Self.record(confirmed: confirmed, trial: nil, at: rig.clock)
+        #expect(onRecord[Self.resolution(2.5)] == .record(expected))
+        rig.clock += 5
+        rig.drag(to: 4)
+        #expect(rig.controller.selectPreset("turbo", on: Self.id) == .rejected(.confirmationPending))
+        #expect(rig.store.loadPointerTrial() == .record(expected))
+
+        rig.controller.endSpeedEdit()
+        expected.trial = .init(PointerSelection(pointer: PointerSettings(speed: 4, acceleration: 0.5)))
+        #expect(rig.store.loadPointerTrial() == .record(expected))
+        rig.clock += 5
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .rejected(.confirmationPending))
+        #expect(rig.store.loadPointerTrial() == .record(expected))
+
+        rig.controller.revertPending()
+        #expect(rig.store.loadPointerTrial() == .empty)
+        #expect(rig.held == Self.resolution(1))
+    }
+
+    @Test func aChangeThatCantBeOnRecordIsNeverApplied() throws {
+        let journal = FakeJournal()
+        journal.savesFail = true
+        let rig = try Rig(journal: journal)
+        defer { rig.finish() }
+        rig.start()
+        let writes = rig.hardware.writes.count
+        let message = PointerPresetRefusal.trialNotRecorded.message(device: "Mouse")
+
+        #expect(rig.controller.selectPreset("turbo", on: Self.id) == .rejected(.trialNotRecorded))
+        #expect(rig.hardware.writes.count == writes)
+        #expect(rig.controller.notice?.message == message)
+        #expect(!rig.controller.isBusy)
+        #expect(rig.saved.activePointerPresetID == "normal")
+
+        rig.controller.beginSpeedEdit(on: Self.id)
+        rig.drag(to: 1.8)
+        #expect(rig.held == Self.resolution(1.8))
+        rig.drag(to: 3)
+        #expect(rig.held == Self.resolution(1))
+        #expect(rig.controller.notice?.message == message)
+        // The rest of the drag is ignored.
+        rig.drag(to: 1.5)
+        #expect(rig.held == Self.resolution(1))
+        rig.controller.endSpeedEdit()
+        #expect(!rig.controller.isBusy)
+        #expect(rig.saved.pointer?.speed == 1)
+
+        // A change that doesn't have to be kept needs no record.
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        #expect(rig.held == Self.resolution(1.5))
+    }
+
+    @Test(arguments: [false, true])
+    func aChangeLeftWaitingWhenWhiskerStoppedIsNotUsedAtTheNextLaunch(macRestarted: Bool) throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.start()
+        #expect(rig.controller.selectPreset("fast", on: Self.id) == .applied)
+        #expect(rig.controller.selectPreset("turbo", on: Self.id) == .awaitingConfirmation)
+        #expect(rig.held == Self.resolution(4))
+        // Whisker crashes or is force quit with the change waiting; a restart also gives the mouse its own values back.
+        rig.store.saveNow()
+        if macRestarted { rig.hardware.values[Self.id] = nil }
+
+        let next = rig.relaunch()
+        #expect(next.recovered == .reverted(deviceID: Self.id))
+        #expect(next.store.loadPointerTrial() == .empty)
+        #expect(next.controller.notice?.deviceID == Self.id)
+        #expect(!next.controller.isBusy)
+        #expect(next.store.settings.devices[Self.id]?.activePointerPresetID == "fast")
+        #expect(rig.held == Self.resolution(1.5))
+
+        #expect(rig.relaunch().recovered == nil)
+        #expect(rig.held == Self.resolution(1.5))
+    }
+
+    @Test(arguments: [false, true])
+    func anUnconfirmedSelectionInSavedSettingsIsPutBack(recordedConfirmedIsValid: Bool) throws {
+        let rig = try Rig(settings: Self.leakedSettings())
+        defer { rig.finish() }
+        var confirmed = try #require(Self.settings().devices[Self.id]?.pointerSelection)
+        if !recordedConfirmedIsValid { confirmed.pointer?.speed = 50 }
+        try rig.store.savePointerTrial(Self.record(
+            confirmed: confirmed, trial: Self.leakedSettings().devices[Self.id]?.pointerSelection, at: rig.clock
+        ))
+        rig.store.saveNow()
+
+        let next = rig.relaunch()
+        #expect(next.recovered == .reverted(deviceID: Self.id))
+        let expected = recordedConfirmedIsValid ? confirmed : .system
+        #expect(next.store.settings.devices[Self.id]?.pointerSelection == expected)
+        #expect(SettingsStore(directory: next.store.directory).settings.devices[Self.id]?.pointerSelection == expected)
+        #expect(next.store.loadPointerTrial() == .empty)
+        // The unknown speed is never written: the mouse gets the confirmed one, or keeps its own.
+        #expect(rig.held == (recordedConfirmedIsValid ? Self.resolution(1) : nil))
+    }
+
+    @Test(arguments: [false, true])
+    func aRecordThatCantBeTrustedIsRemovedWithoutUsingAnythingInIt(fromAnotherVersion: Bool) throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.store.saveNow()
+        if fromAnotherVersion {
+            var record = try Self.record(confirmed: .system, trial: Self.leakedSettings().devices[Self.id]?.pointerSelection, at: rig.clock)
+            record.version = PointerTrialRecord.currentVersion + 1
+            try JSONEncoder().encode(record).write(to: rig.store.pointerTrialURL)
+        } else {
+            try Data("{\"version\": 1, \"deviceID\": ".utf8).write(to: rig.store.pointerTrialURL)
+        }
+
+        let next = rig.relaunch()
+        #expect(next.recovered == .unreadable)
+        #expect(next.controller.notice != nil)
+        #expect(next.store.settings.devices[Self.id]?.pointerSelection == Self.settings().devices[Self.id]?.pointerSelection)
+        #expect(next.store.loadPointerTrial() == .empty)
+        #expect(rig.held == Self.resolution(1))
+    }
+
+    @Test func aRecoveryCutShortGivesTheSameResultWhenItRunsAgain() throws {
+        let rig = try Rig(settings: Self.leakedSettings())
+        defer { rig.finish() }
+        rig.store.saveNow()
+        let confirmed = try #require(Self.settings().devices[Self.id]?.pointerSelection)
+        let journal = FakeJournal()
+        journal.entry = try .record(Self.record(
+            confirmed: confirmed, trial: Self.leakedSettings().devices[Self.id]?.pointerSelection, at: rig.clock
+        ))
+        let recorded = journal.entry
+        journal.clearsFail = true
+
+        let first = rig.relaunch(journal: journal)
+        #expect(first.recovered == .reverted(deviceID: Self.id))
+        #expect(first.store.settings.devices[Self.id]?.pointerSelection == confirmed)
+        #expect(journal.entry == recorded)
+        #expect(rig.held == Self.resolution(1))
+
+        journal.clearsFail = false
+        let second = rig.relaunch(journal: journal)
+        #expect(second.recovered == .reverted(deviceID: Self.id))
+        #expect(second.store.settings.devices[Self.id]?.pointerSelection == confirmed)
+        #expect(journal.entry == .empty)
+        #expect(rig.held == Self.resolution(1))
+        #expect(rig.relaunch(journal: journal).recovered == nil)
     }
 }

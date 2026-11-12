@@ -87,6 +87,9 @@ public enum PointerPresetRefusal: Equatable, Sendable {
     case hardwareRefused
     /// The previous speed couldn't be put back: after a refused switch, a revert, or a return to the system's speed.
     case restoreFailed
+    /// A change that has to be kept couldn't be written down first, so it wasn't applied: a crash could have
+    /// left it in use without anything on record to undo it.
+    case trialNotRecorded
 
     public func message(device: String) -> String {
         let name = device.isEmpty ? "this mouse" : device
@@ -103,6 +106,7 @@ public enum PointerPresetRefusal: Equatable, Sendable {
         case .excludedDevice: return "Whisker leaves \(name) alone."
         case .hardwareRefused: return "The system refused the new speed for \(name). The previous speed was put back."
         case .restoreFailed: return "The system wouldn’t put the previous speed back for \(name). Whisker keeps the original values and will try again."
+        case .trialNotRecorded: return "Whisker couldn’t save a recovery record for the new speed, so \(name) keeps its speed. Check that Whisker can write to its Application Support folder."
         }
     }
 }
