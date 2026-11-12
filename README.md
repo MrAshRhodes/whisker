@@ -14,11 +14,18 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   while ⌘, ⌥, ⌃ or ⇧ is held, so one button can do several things. Record a button by pressing
   it, or pick one from a list. The primary button is not remapped unless you hold a modifier key
   or turn on **Allow remapping the primary button**, so you cannot lock yourself out of clicking.
-- **Actions.** Click or double-click, press a keyboard shortcut (optionally repeating while the
-  button is held), go back or forward, send a media key (play/pause, track, volume, mute or
-  display brightness), open Mission Control, App Windows, Show Desktop, Launchpad or
-  Notification Centre, move to the Space on the left or right, switch apps, scroll, open an
-  app, file (by full path or a `~/` path) or web address, or do nothing at all.
+- **Actions.** Click, double-click or triple-click, press a keyboard shortcut (optionally
+  repeating while the button is held), go back or forward, send a media key (play/pause, track,
+  volume, mute or display brightness), open Mission Control, App Windows, Show Desktop,
+  Launchpad or Notification Centre, move to the Space on the left or right, switch apps, scroll,
+  open an app, file (by full path or a `~/` path) or web address, or do nothing at all.
+- **Triple click.** One press sends three left clicks in a row at the pointer, with optional
+  modifier keys, like Double Click. It is a mouse gesture, not a "select paragraph" command: what
+  three clicks do is up to the app, and Whisker does not promise that any app responds to them.
+  If something cuts a triple click short, such as a real click or scroll, a change of app or
+  Whisker being switched off, Whisker sends no more clicks and does not retry, but clicks already
+  sent cannot be taken back, so an app may see fewer than three. Not yet verified in TextEdit,
+  Safari or any other app.
 - **Wheel actions.** Turning the wheel runs its action once per burst of notches, or once for
   every notch if you choose **Repeat for every notch**.
 - **Scrolling.** Reverse the vertical or horizontal wheel for each mouse without changing the
@@ -206,7 +213,7 @@ builds cannot update themselves. See [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 Planned after 0.1, in no particular order:
 
 - Tilt-wheel buttons and two-button chords.
-- Auto-scroll, click lock and triple-click actions.
+- Auto-scroll and click lock.
 - Keyboard shortcut sequences and quick-switch pointer speed presets.
 - Native per-device wheel speed and acceleration, and smooth scrolling for notched wheels.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.

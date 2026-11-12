@@ -133,6 +133,9 @@ public enum Action: Hashable, Sendable {
     /// Press a mouse button for as long as the trigger is held.
     case click(button: Int, modifiers: ModifierSet)
     case doubleClick(modifiers: ModifierSet)
+    /// Three left clicks in a row at the pointer, counted 1, 2 and 3. What an app does with them (some
+    /// select a line or paragraph) is up to the app.
+    case tripleClick(modifiers: ModifierSet)
     case shortcut(KeyShortcut, repeatWhileHeld: Bool)
     case scroll(direction: WheelDirection, lines: Int)
     case media(MediaKey)
@@ -149,6 +152,7 @@ public enum Action: Hashable, Sendable {
         case .none: return .none
         case .click: return .click
         case .doubleClick: return .doubleClick
+        case .tripleClick: return .tripleClick
         case .shortcut: return .shortcut
         case .scroll: return .scroll
         case .media: return .media
@@ -210,6 +214,7 @@ public enum Action: Hashable, Sendable {
             }
             return modifiers.isEmpty ? name : "\(modifiers.symbols) \(name)"
         case .doubleClick(let modifiers): return modifiers.isEmpty ? "Double Click" : "\(modifiers.symbols) Double Click"
+        case .tripleClick(let modifiers): return modifiers.isEmpty ? "Triple Click" : "\(modifiers.symbols) Triple Click"
         case let .shortcut(shortcut, _): return "Keyboard Shortcut \(shortcut.displayString)"
         case let .scroll(direction, lines): return "\(direction.title) \(lines) \(lines == 1 ? "Line" : "Lines")"
         case .media(let key): return key.title
@@ -256,7 +261,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, shortcut, navigate, media, missionControl, space, appSwitch, scroll, open
+    case passthrough, none, click, doubleClick, tripleClick, shortcut, navigate, media, missionControl, space, appSwitch, scroll, open
 
     public var id: String { rawValue }
 
@@ -266,6 +271,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .none: return "Do Nothing"
         case .click: return "Click"
         case .doubleClick: return "Double Click"
+        case .tripleClick: return "Triple Click"
         case .shortcut: return "Keyboard Shortcut"
         case .navigate: return "Back or Forward"
         case .media: return "Media Key"
@@ -283,6 +289,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .none: return "nosign"
         case .click: return "cursorarrow.click"
         case .doubleClick: return "cursorarrow.click.2"
+        case .tripleClick: return "cursorarrow.motionlines.click"
         case .shortcut: return "keyboard"
         case .navigate: return "arrow.left.arrow.right"
         case .media: return "playpause"
@@ -301,6 +308,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .none: return .none
         case .click: return .click(button: 2, modifiers: [])
         case .doubleClick: return .doubleClick(modifiers: [])
+        case .tripleClick: return .tripleClick(modifiers: [])
         case .shortcut: return .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: false)
         case .navigate: return .navigate(.back)
         case .media: return .media(.playPause)
@@ -329,6 +337,7 @@ extension Action: Codable {
         case "none": self = .none
         case "click": self = .click(button: try container.decode(Int.self, forKey: .button), modifiers: try modifiers())
         case "doubleClick": self = .doubleClick(modifiers: try modifiers())
+        case "tripleClick": self = .tripleClick(modifiers: try modifiers())
         case "shortcut":
             self = .shortcut(
                 KeyShortcut(keyCode: try container.decode(UInt16.self, forKey: .keyCode), modifiers: try modifiers()),
@@ -361,6 +370,9 @@ extension Action: Codable {
             try container.encode(modifiers, forKey: .modifiers)
         case .doubleClick(let modifiers):
             try container.encode("doubleClick", forKey: .kind)
+            try container.encode(modifiers, forKey: .modifiers)
+        case .tripleClick(let modifiers):
+            try container.encode("tripleClick", forKey: .kind)
             try container.encode(modifiers, forKey: .modifiers)
         case let .shortcut(shortcut, repeats):
             try container.encode("shortcut", forKey: .kind)

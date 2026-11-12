@@ -15,6 +15,9 @@ struct SystemShortcutReader: SystemShortcutProviding {
 protocol ActionPerforming: AnyObject, Sendable {
     /// `clickState` is the click count of the real press, carried over to synthetic clicks.
     func perform(_ action: Action, phase: ActionPhase, at location: CGPoint, flags: CGEventFlags, clickState: Int64)
+    /// Calls off a click gesture that is still posting its clicks (a triple click spread out over time).
+    func cancelPendingClicks()
+    /// Lets go of everything held and stops repeating keys. Calls off a pending click gesture too.
     func releaseAll()
 }
 
@@ -29,11 +32,22 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     private let queue = DispatchQueue(label: "io.github.mrashrhodes.whisker.actions", qos: .userInteractive)
     private let shortcuts: SystemShortcutProviding
     private let switchApp: @MainActor (AppSwitchDirection) -> Void
+    private let clicks: ClickScheduler
+    private let tripleClickTiming: @Sendable () -> ClickTiming
     private var repeatTimer: DispatchSourceTimer?
 
-    init(shortcuts: SystemShortcutProviding = SystemShortcutReader(), switchApp: @escaping @MainActor (AppSwitchDirection) -> Void) {
+    /// `tripleClickTiming` is asked at every activation. It posts all three clicks back to back, like Double Click
+    /// does, until spacing them out is shown to be needed: `{ .spaced(withinInterval: NSEvent.doubleClickInterval) }`.
+    init(
+        shortcuts: SystemShortcutProviding = SystemShortcutReader(),
+        switchApp: @escaping @MainActor (AppSwitchDirection) -> Void,
+        clicks: ClickScheduler = ClickScheduler(post: { EventSynthesizer.postClick($0, at: $1, flags: $2) }),
+        tripleClickTiming: @escaping @Sendable () -> ClickTiming = { .immediate }
+    ) {
         self.shortcuts = shortcuts
         self.switchApp = switchApp
+        self.clicks = clicks
+        self.tripleClickTiming = tripleClickTiming
     }
 
     /// Runs on the event tap thread.
@@ -58,6 +72,11 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
                 postMouse(button: 0, down: true, at: location, flags: held, clickState: Int64(state))
                 postMouse(button: 0, down: false, at: location, flags: held, clickState: Int64(state))
             }
+        case .tripleClick(let modifiers):
+            // The trigger's release doesn't end the gesture: one press is one triple click.
+            guard phase != .up else { return }
+            let held = CGEventFlags(rawValue: flags.rawValue | modifiers.eventFlags)
+            clicks.start(.tripleClick, timing: tripleClickTiming(), at: location, flags: held)
         case let .shortcut(shortcut, repeats):
             runRepeating(phase: phase, repeats: repeats) { [weak self] in self?.postKey(shortcut) }
         case .media(let key):
@@ -85,8 +104,14 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
         }
     }
 
+    /// Calls off a click gesture that is still under way; a press already posted gets its release.
+    func cancelPendingClicks() {
+        clicks.cancel()
+    }
+
     /// Stops a repeating key and lets go of anything held.
     func releaseAll() {
+        clicks.cancel()
         queue.async { [weak self] in self?.stopRepeat() }
     }
 
@@ -123,10 +148,23 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     // MARK: Posting
 
     private func mark(_ event: CGEvent) {
-        event.setIntegerValueField(.eventSourceUserData, value: Self.marker)
+        Self.mark(event)
+    }
+
+    private static func mark(_ event: CGEvent) {
+        event.setIntegerValueField(.eventSourceUserData, value: marker)
     }
 
     private func postMouse(button: Int, down: Bool, at location: CGPoint, flags: CGEventFlags, clickState: Int64) {
+        Self.postMouse(button: button, down: down, at: location, flags: flags, clickState: clickState)
+    }
+
+    /// Posts one event of a click gesture. Called from the event tap thread or a timer.
+    static func postClick(_ step: ClickStep, at location: CGPoint, flags: CGEventFlags) {
+        postMouse(button: step.button, down: step.isDown, at: location, flags: flags, clickState: step.clickState)
+    }
+
+    private static func postMouse(button: Int, down: Bool, at location: CGPoint, flags: CGEventFlags, clickState: Int64) {
         let type: CGEventType
         let mouseButton: CGMouseButton
         switch button {

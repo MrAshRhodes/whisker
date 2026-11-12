@@ -276,6 +276,13 @@ struct ActionEditor: View {
                 get: { modifiers },
                 set: { action = .doubleClick(modifiers: $0) }
             ))
+        case .tripleClick(let modifiers):
+            ModifierToggles(modifiers: Binding(
+                get: { modifiers },
+                set: { action = .tripleClick(modifiers: $0) }
+            ))
+            Text("Three left clicks in a row at the pointer. What an app does with them is up to the app.")
+                .font(.footnote).foregroundStyle(.secondary)
         case let .shortcut(shortcut, repeats):
             ShortcutField(shortcut: Binding(
                 get: { shortcut },

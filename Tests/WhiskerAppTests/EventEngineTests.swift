@@ -31,6 +31,8 @@ struct EventEngineTests {
             lock.withLock { _calls.append(Call(action: action, phase: phase, clickState: clickState)) }
         }
 
+        func cancelPendingClicks() {}
+
         func releaseAll() {
             lock.withLock { _releases += 1 }
         }

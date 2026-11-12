@@ -47,7 +47,7 @@
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a></li>
-          <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li></ol></li>
+          <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li></ol></li>
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#wheel-actions">Wheel actions</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
@@ -148,6 +148,7 @@ make app</code></pre>
               <tr><th scope="row">Do Nothing</th><td>Ignores the button completely.</td></tr>
               <tr><th scope="row">Click</th><td>Clicks any mouse button, optionally with modifier keys. Holding your button holds the click, so dragging works.</td></tr>
               <tr><th scope="row">Double Click</th><td>A double-click, optionally with modifier keys.</td></tr>
+              <tr><th scope="row">Triple Click</th><td>Three left clicks in a row at the pointer, optionally with modifier keys. It's a mouse gesture, and what an app does with it varies: see <a href="#triple-click">Triple Click</a> below.</td></tr>
               <tr><th scope="row">Keyboard Shortcut</th><td>Presses a key combination. Turn on <span class="ui">Repeat while held</span> to repeat it like a held key.</td></tr>
               <tr><th scope="row">Back or Forward</th><td>Presses <kbd>⌘[</kbd> or <kbd>⌘]</kbd>, which most apps understand.</td></tr>
               <tr><th scope="row">Media Key</th><td>Play/Pause, Next Track, Previous Track, Volume Up, Volume Down, Mute, Brightness Up or Brightness Down. Volume and brightness keep changing while you hold the button.</td></tr>
@@ -158,6 +159,15 @@ make app</code></pre>
               <tr><th scope="row">Open App, File or Website</th><td>Opens an app, file, folder or web address. Paths can be full paths or start with <code>~/</code>.</td></tr>
             </tbody>
           </table>
+
+          <h3 id="triple-click">Triple Click</h3>
+          <p>Triple Click sends three left clicks in a row at the pointer each time you press the button, with the same optional modifier keys as Double Click. Letting go of the button sends nothing more, so unlike Click it can't be used to drag. On a wheel direction it runs once for each burst of turning, or once for every notch with <span class="ui">Repeat for every notch</span>.</p>
+          <ul>
+            <li>It's a mouse gesture, not a "select paragraph" command. What three clicks do is up to the app: text fields often use them to select a line or paragraph, while other apps ignore them or do something else. Whisker doesn't promise any particular result.</li>
+            <li>Whisker sends the clicks back to back, as Double Click does. Whether any app needs them spaced out is not yet known, so there is no setting for it.</li>
+            <li>If something cuts a triple click short, such as a click, scroll or button press of your own, a change of app or profile, Whisker being switched off or quit, Whisker losing Accessibility access, the mouse you used being unplugged, your Mac going to sleep or macOS pausing Whisker, Whisker sends no more clicks and doesn't try again. Clicks already sent can't be taken back, so an app may see fewer than three.</li>
+          </ul>
+          <p>This has not yet been verified in TextEdit, Safari or any other app, so which apps respond to it as a triple click is not yet known.</p>
         </section>
 
         <section aria-labelledby="scrolling">
@@ -295,6 +305,8 @@ make app</code></pre>
           <p>Your mouse probably sends smooth scrolling rather than notches. Direction settings still apply.</p>
           <h3>Speed while holding keys makes no difference</h3>
           <p>Your mouse may send smooth scrolling rather than notches. Also check that the keys aren't the same ones that scroll sideways and that no wheel action is set on them.</p>
+          <h3>Triple Click doesn't select anything</h3>
+          <p>Whisker only sends the three clicks. Whether they select a line or paragraph, or do something else, is up to the app, and some apps don't treat them as a triple click. See <a href="#triple-click">Triple Click</a>.</p>
           <h3>Pointer speed won't change</h3>
           <p>Some mice don't accept pointer changes from macOS. Whisker tells you when that happens.</p>
           <h3>Whisker still changes my mouse in an app I've bypassed</h3>

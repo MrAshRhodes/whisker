@@ -124,6 +124,7 @@ final class AppModel: ObservableObject {
         devices.onChange = { [weak self] connected in
             guard let self else { return }
             self.applyPointers(self.store.settings, connected: connected)
+            self.engine.devicesChanged(connected: Set(connected.map(\.id)))
         }
         devices.start()
         if leftovers {

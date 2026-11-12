@@ -16,6 +16,8 @@ final class EventEngine: @unchecked Sendable {
         var capturing = false
         /// Set by `stop()` so presses that arrive while the tap is being torn down pass through untouched.
         var stopped = false
+        /// The device that triggered the last action, which a click gesture still under way depends on.
+        var actionSource: String?
         /// Whether the app in front was on the bypass list at the last check, so standing aside happens once.
         var bypassed = false
     }
@@ -62,17 +64,26 @@ final class EventEngine: @unchecked Sendable {
         let location = Self.cursorLocation()
         state.withLock { state in
             state.compiled = compiled
-            if !settings.general.enabled { release(&state, at: location) }
+            if settings.general.enabled {
+                // A click gesture under way began under the settings that are going away.
+                synthesizer.cancelPendingClicks()
+            } else {
+                release(&state, at: location)
+            }
             syncBypass(&state, app: app, at: location)
         }
     }
 
-    /// The app in front changed. Whisker lets go of what it holds when that app is on the bypass list; the
-    /// event tap itself already passes events through for it, this only ends what was started before.
+    /// The app in front changed. A click gesture under way was aimed at the app that has gone, so it is called
+    /// off. Whisker also lets go of what it holds when the new app is on the bypass list; the event tap itself
+    /// already passes events through for it, this only ends what was started before.
     func frontmostAppChanged() {
         let app = frontmostApp()
         let location = Self.cursorLocation()
-        state.withLock { syncBypass(&$0, app: app, at: location) }
+        state.withLock { state in
+            synthesizer.cancelPendingClicks()
+            syncBypass(&state, app: app, at: location)
+        }
     }
 
     func setCapturing(_ capturing: Bool) {
@@ -87,6 +98,15 @@ final class EventEngine: @unchecked Sendable {
     func releaseAll() {
         let location = Self.cursorLocation()
         state.withLock { release(&$0, at: location) }
+    }
+
+    /// The set of connected mice changed. A click gesture under way is called off if the mouse that started it is gone.
+    func devicesChanged(connected: Set<String>) {
+        state.withLock { state in
+            if ClickInterruption.isCalledOffByDeviceChange(startedBy: state.actionSource, connected: connected) {
+                synthesizer.cancelPendingClicks()
+            }
+        }
     }
 
     /// Starts the tap. Returns false when the system refuses one (no Accessibility access).
@@ -216,7 +236,9 @@ final class EventEngine: @unchecked Sendable {
         let plan = state.withLock { state -> EventPlan in
             guard !state.capturing, !state.stopped else { return .passThrough }
             let plan = state.processor.process(input, settings: state.compiled)
+            if ClickInterruption.isCalledOffBy(kind, plan: plan) { synthesizer.cancelPendingClicks() }
             if case let .perform(action, phase) = plan {
+                state.actionSource = input.device?.id
                 synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: clickState)
             }
             return plan

@@ -89,6 +89,48 @@ struct EventProcessorTests {
         #expect(processor.process(event(.buttonUp(2)), settings: settings) == .passThrough)
     }
 
+    @Test(arguments: [Action.doubleClick(modifiers: []), .tripleClick(modifiers: .shift)])
+    func clickGesturesFireOncePerPressAndSwallowTheRelease(gesture: Action) {
+        var processor = EventProcessor()
+        let settings = compiled([Mapping(trigger: .button(3), action: gesture)])
+        #expect(processor.process(event(.buttonDown(3)), settings: settings) == .perform(gesture, .once))
+        #expect(processor.process(event(.buttonDragged(3)), settings: settings) == .dragAsMove)
+        #expect(processor.process(event(.buttonUp(3)), settings: settings) == .swallow)
+        #expect(processor.process(event(.buttonDown(3)), settings: settings) == .perform(gesture, .once))
+    }
+
+    @Test func cleanupHasNoTripleClickPressToRelease() {
+        var processor = EventProcessor()
+        let settings = compiled([
+            Mapping(trigger: .button(2), action: .click(button: 1, modifiers: [])),
+            Mapping(trigger: .button(3), action: .tripleClick(modifiers: [])),
+        ])
+        _ = processor.process(event(.buttonDown(2)), settings: settings)
+        _ = processor.process(event(.buttonDown(3)), settings: settings)
+        #expect(processor.releaseAll().map(\.button) == [2])
+        #expect(processor.process(event(.buttonUp(3)), settings: settings) == .passThrough)
+    }
+
+    @Test func tripleClickKeepsThePrimaryButtonGuard() {
+        var processor = EventProcessor()
+        let triple = Action.tripleClick(modifiers: [])
+        let bare = compiled([Mapping(trigger: .button(0), action: triple)])
+        #expect(processor.process(event(.buttonDown(0)), settings: bare) == .passThrough)
+        #expect(processor.process(event(.buttonUp(0)), settings: bare) == .passThrough)
+
+        let allowed = compiled([Mapping(trigger: .button(0), action: triple)]) { $0.general.allowPrimaryButtonRemap = true }
+        #expect(processor.process(event(.buttonDown(0)), settings: allowed) == .perform(triple, .once))
+        #expect(processor.process(event(.buttonUp(0)), settings: allowed) == .swallow)
+
+        let withModifier = compiled([Mapping(trigger: .button(0), modifiers: .option, action: triple)])
+        #expect(processor.process(event(.buttonDown(0), .option), settings: withModifier) == .perform(triple, .once))
+        #expect(processor.process(event(.buttonUp(0)), settings: withModifier) == .swallow)
+
+        // Any other button needs no permission.
+        let side = compiled([Mapping(trigger: .button(4), action: triple)])
+        #expect(processor.process(event(.buttonDown(4)), settings: side) == .perform(triple, .once))
+    }
+
     // MARK: Wheel
 
     @Test func wheelMappingFiresOncePerBurst() {
@@ -111,6 +153,22 @@ struct EventProcessorTests {
         for time in [0, 0.05, 0.1] {
             #expect(processor.process(event(notch(-1), .option, at: time), settings: settings) == .perform(.media(.volumeDown), .once))
             #expect(processor.process(event(notch(-1), .shift, at: time), settings: settings) == .perform(.scroll(direction: .right, lines: 2), .once))
+        }
+    }
+
+    @Test func aWheelTripleClickFiresOncePerBurstUnlessItRepeatsPerNotch() {
+        let triple = Action.tripleClick(modifiers: [])
+        var burst = EventProcessor()
+        let once = compiled([Mapping(trigger: .wheel(.up), modifiers: .control, action: triple)])
+        #expect(burst.process(event(notch(1), .control, at: 0), settings: once) == .perform(triple, .once))
+        #expect(burst.process(event(notch(1), .control, at: 0.1), settings: once) == .swallow)
+        #expect(burst.process(event(notch(1), .control, at: 0.2), settings: once) == .swallow)
+        #expect(burst.process(event(notch(1), .control, at: 0.5), settings: once) == .perform(triple, .once))
+
+        var perNotch = EventProcessor()
+        let each = compiled([Mapping(trigger: .wheel(.up), modifiers: .control, action: triple, repeatPerNotch: true)])
+        for time in [0, 0.05, 0.1] {
+            #expect(perNotch.process(event(notch(1), .control, at: time), settings: each) == .perform(triple, .once))
         }
     }
 

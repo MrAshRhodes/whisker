@@ -41,7 +41,7 @@ struct SettingsTests {
 
     @Test func everyActionRoundTrips() throws {
         let actions: [Action] = [
-            .passthrough, .none, .click(button: 2, modifiers: [.command]), .doubleClick(modifiers: []),
+            .passthrough, .none, .click(button: 2, modifiers: [.command]), .doubleClick(modifiers: []), .tripleClick(modifiers: [.shift]),
             .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: true),
             .scroll(direction: .left, lines: 4), .media(.volumeUp), .navigate(.forward),
             .missionControl(.appWindows), .space(.right), .appSwitch(.previous), .open(url: "https://example.com"),
@@ -70,6 +70,36 @@ struct SettingsTests {
         let decoded = try SettingsCodec.decode(data)
         #expect(decoded == settings)
         #expect(decoded.profile(id: "safari")?.inherits == nil)
+    }
+
+    @Test func tripleClickCodesAsItsOwnKindAndModifiersAreOptional() throws {
+        func decode(_ json: String) throws -> Action { try JSONDecoder().decode(Action.self, from: Data(json.utf8)) }
+        #expect(try decode(#"{"kind":"tripleClick"}"#) == .tripleClick(modifiers: []))
+        #expect(try decode(#"{"kind":"tripleClick","modifiers":["command","shift"]}"#) == .tripleClick(modifiers: [.command, .shift]))
+        #expect(try decode(#"{"kind":"doubleClick"}"#) == .doubleClick(modifiers: []))
+
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Action.tripleClick(modifiers: .shift))) as? [String: Any]
+        #expect(written?["kind"] as? String == "tripleClick")
+        #expect(written?["modifiers"] as? [String] == ["shift"])
+    }
+
+    @Test func filesFromBeforeTripleClickLoadAsTheyWereAndKeepTheirUnknownKeys() throws {
+        let old = """
+        {"schemaVersion":1,"general":{"enabled":true},"future":{"x":[1,true,null]},"profiles":[{"id":"default","mappings":[
+        {"trigger":{"type":"button","button":3},"action":{"kind":"doubleClick","modifiers":["shift"]}},
+        {"trigger":{"type":"button","button":4},"action":{"kind":"navigate","direction":"forward"}}]}]}
+        """
+        var settings = try SettingsCodec.decodeValidated(Data(old.utf8))
+        #expect(settings.schemaVersion == WhiskerSettings.currentSchemaVersion)
+        #expect(settings.defaultProfile.mappings == [
+            Mapping(trigger: .button(3), action: .doubleClick(modifiers: .shift)),
+            Mapping(trigger: .button(4), action: .navigate(.forward)),
+        ])
+
+        settings.profiles[0].mappings.append(Mapping(trigger: .button(5), action: .tripleClick(modifiers: .shift)))
+        let reloaded = try SettingsCodec.decodeValidated(SettingsCodec.encode(settings))
+        #expect(reloaded == settings)
+        #expect(reloaded.unknownKeys["future"] == .object(["x": .array([.number(1), .bool(true), .null])]))
     }
 
     @Test func scrollSpeedModifierRoundTripsAndOlderFilesDecodeWithoutIt() throws {
@@ -215,11 +245,12 @@ struct SettingsTests {
         }
     }
 
-    @Test func primaryButtonNeedsModifierUnlessAllowed() {
-        let bare = Mapping(trigger: .button(0), action: .navigate(.back))
+    @Test(arguments: [Action.navigate(.back), .tripleClick(modifiers: [])])
+    func primaryButtonNeedsModifierUnlessAllowed(action: Action) {
+        let bare = Mapping(trigger: .button(0), action: action)
         #expect(WhiskerSettings.problem(with: bare, allowPrimary: false) != nil)
         #expect(WhiskerSettings.problem(with: bare, allowPrimary: true) == nil)
-        #expect(WhiskerSettings.problem(with: Mapping(trigger: .button(0), modifiers: .command, action: .navigate(.back)), allowPrimary: false) == nil)
+        #expect(WhiskerSettings.problem(with: Mapping(trigger: .button(0), modifiers: .command, action: action), allowPrimary: false) == nil)
     }
 
     @Test func importsMustAlreadyBeValid() throws {
