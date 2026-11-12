@@ -70,9 +70,13 @@ final class AppModel: ObservableObject {
     }
 
     /// Mice whose duplicate-click filter is on trial, with when it switches itself off unless kept. Never saved.
+    /// The length is only changed by tests.
     @Published private(set) var clickFilterTrials: [String: Date] = [:]
     private var clickFilterTimers: [String: Task<Void, Never>] = [:]
-    static let clickFilterTrialDuration: TimeInterval = 60
+    var clickFilterTrialDuration: TimeInterval = 60
+    /// The local duplicate-click test in Devices, as the event tap last reported it: counts for one mouse, kept in
+    /// memory while the test runs. Never saved or logged.
+    @Published private(set) var clickFilterTest: ClickFilterTally?
 
     /// Mice whose swapped primary and secondary buttons are on trial, with when the swap switches itself off unless
     /// kept. Never saved. The length is only changed by tests.
@@ -148,6 +152,7 @@ final class AppModel: ObservableObject {
             self.pointer.applySlowPointer(command)
             self.engine.setSlowPointerDevices(self.pointer.slowPointerDevices)
         }
+        engine.onClickFilterTest = { [weak self] test in self?.clickFilterTest = test }
         pointer.onSlowPointerAvailabilityChange = { [weak self] in
             guard let self else { return }
             self.engine.setSlowPointerDevices(self.pointer.slowPointerDevices)
@@ -266,6 +271,7 @@ final class AppModel: ObservableObject {
                 MainActor.assumeIsolated { self?.cancelSlowPointer() }
                 MainActor.assumeIsolated { self?.inputTiming.interrupt(.sleep) }
                 MainActor.assumeIsolated { self?.extraButtonDiscovery.stop(reason: "Sleep or user switch. Observations cleared.") }
+                MainActor.assumeIsolated { self?.stopClickFilterTest() }
             })
         }
         // An auto-scroll is anchored to a spot on a display and a Space, and a change to either leaves that spot
@@ -349,10 +355,11 @@ final class AppModel: ObservableObject {
         }
         device.clickDebounce = ClickDebounceSettings(buttons: buttons, interval: interval).normalised
         store.settings.devices[id] = device
-        clickFilterTrials[id] = Date().addingTimeInterval(Self.clickFilterTrialDuration)
+        clickFilterTrials[id] = Date().addingTimeInterval(clickFilterTrialDuration)
         clickFilterTimers[id]?.cancel()
+        let duration = clickFilterTrialDuration
         clickFilterTimers[id] = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.clickFilterTrialDuration))
+            try? await Task.sleep(for: .seconds(duration))
             guard !Task.isCancelled else { return }
             self?.revertClickFilter(device: id)
         }
@@ -373,6 +380,20 @@ final class AppModel: ObservableObject {
         clickFilterTimers[id]?.cancel()
         clickFilterTimers[id] = nil
         clickFilterTrials[id] = nil
+    }
+
+    /// Starts counting accepted and filtered presses of one mouse for the local test in Devices, from zero. Only
+    /// one mouse is tested at a time. The count arrives in `clickFilterTest`.
+    func startClickFilterTest(device id: String) {
+        engine.setClickFilterTest(device: id)
+    }
+
+    func stopClickFilterTest() {
+        engine.setClickFilterTest(device: nil)
+    }
+
+    func resetClickFilterTest() {
+        engine.clearClickFilterTest()
     }
 
     /// Swaps a mouse's primary and secondary buttons, or puts them back. Switching it on starts a trial: unless it
