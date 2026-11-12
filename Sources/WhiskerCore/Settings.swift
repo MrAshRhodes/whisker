@@ -273,6 +273,8 @@ public struct Profile: Equatable, Sendable, Identifiable {
     /// Nil inherits the parent's scroll settings.
     public var scroll: ScrollSettings?
     public var mappings: [Mapping]
+    /// Nil inherits; an explicit empty list disables inherited chords. Dormant in the current app.
+    public var chords: [ButtonChord]?
 
     public init(
         id: String = UUID().uuidString.lowercased(),
@@ -280,7 +282,8 @@ public struct Profile: Equatable, Sendable, Identifiable {
         match: ProfileMatch = ProfileMatch(),
         inherits: String? = Profile.defaultID,
         scroll: ScrollSettings? = nil,
-        mappings: [Mapping] = []
+        mappings: [Mapping] = [],
+        chords: [ButtonChord]? = nil
     ) {
         self.id = id
         self.name = name
@@ -288,6 +291,7 @@ public struct Profile: Equatable, Sendable, Identifiable {
         self.inherits = id == Profile.defaultID ? nil : inherits
         self.scroll = scroll
         self.mappings = mappings
+        self.chords = chords
     }
 
     public var isDefault: Bool { id == Self.defaultID }
@@ -540,7 +544,7 @@ extension ModifierScaling: Codable {
 }
 
 extension Profile: Codable {
-    private enum CodingKeys: String, CodingKey { case id, name, match, inherits, scroll, mappings }
+    private enum CodingKeys: String, CodingKey { case id, name, match, inherits, scroll, mappings, chords }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -557,6 +561,7 @@ extension Profile: Codable {
         }
         scroll = try c.decodeIfPresent(ScrollSettings.self, forKey: .scroll)
         mappings = try c.decodeIfPresent([Mapping].self, forKey: .mappings) ?? []
+        chords = try c.decodeIfPresent([ButtonChord].self, forKey: .chords)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -569,6 +574,7 @@ extension Profile: Codable {
         }
         if let scroll { try c.encode(scroll, forKey: .scroll) } else { try c.encodeNil(forKey: .scroll) }
         try c.encode(mappings, forKey: .mappings)
+        try c.encodeIfPresent(chords, forKey: .chords)
     }
 }
 

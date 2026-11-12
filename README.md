@@ -254,6 +254,39 @@ access returns.
 
 See the [user guide](https://mrashrhodes.github.io/whisker/guide.html) for each settings pane.
 
+## Two-button chords — foundation only
+
+**Two-button chords are not active in this build.** Buttons shows disabled **Record two-button
+chord…** and **Primary + secondary → middle click** controls with the reason. No presses are
+buffered, no chord clicks are generated and ordinary mappings, primary clicks and Click Lock's
+primary-button escape are unchanged. Granting Input Monitoring does not enable chords.
+
+The additive per-profile `chords` field can retain definitions for future use: `first` and
+`second` are distinct button numbers, alongside `modifiers`, `action` and `pressWindow` in
+milliseconds. An omitted field inherits the parent's list (or means no chords without a parent);
+`[]` disables inherited chords. A non-empty list replaces the parent's list, without changing
+ordinary mappings. Overlapping pairs are rejected, including pairs with different modifiers.
+A primary-button pair requires keyboard modifiers or **Allow remapping the primary button**;
+the middle-click preset uses the existing Click action, not a new action type. Unknown top-level
+settings keys remain preserved; unknown nested keys are still not preserved.
+
+The pure recognition model is tested with either press order, original-payload fallback, held
+middle-click dragging, release draining and cancellation. Its provisional window is **75 ms**,
+bounded to **20–200 ms**. Live recognition would delay eligible single clicks by up to that window;
+timeout, early release or drag would resolve the originals through ordinary mappings in order.
+The window has **not yet been verified on hardware or through usability testing**.
+
+Live integration remains blocked on reliable **physical-connection** attribution for presses
+and releases, including identical mice and shared receivers, plus retained Quartz-event replay,
+timer expiry and ownership shared with other held actions. Existing model-level attribution is
+not enough; Input Monitoring may become a prerequisite. Before activation, app/profile/bypass
+changes, recording, disconnect, sleep, disable, quit and tap interruption must discard pending
+clicks without replay into another app and release owned outputs once. These adapter and recovery
+paths, recording, and real-app/hardware trials are not implemented or verified by the pure tests.
+There is no chord state to recover in the running app today. Issue [#24] remains partial.
+
+[#24]: https://github.com/MrAshRhodes/whisker/issues/24
+
 ## Application bypass
 
 Add an app under **Settings › Applications › Application Bypass**, or tick **Bypass Whisker in

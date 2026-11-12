@@ -296,6 +296,11 @@ extension WhiskerSettings {
             kept.append(mapping)
         }
         profile.mappings = kept
+        if let chords = profile.chords, let problem = ButtonChord.problem(in: chords, allowPrimary: allowPrimary) {
+            issues.append(ValidationIssue("\(path).chords", problem))
+            // A rejected list must not reactivate an inherited pair.
+            profile.chords = []
+        }
         return profile
     }
 

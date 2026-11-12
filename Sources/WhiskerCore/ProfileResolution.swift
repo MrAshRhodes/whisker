@@ -21,12 +21,15 @@ public struct ResolvedProfile: Equatable, Sendable {
     public var name: String
     public var mappings: [MappingKey: ResolvedMapping]
     public var scroll: ScrollSettings
+    public var chords: [ButtonChord]
 
-    public init(profileID: String, name: String, mappings: [MappingKey: ResolvedMapping], scroll: ScrollSettings) {
+    public init(profileID: String, name: String, mappings: [MappingKey: ResolvedMapping], scroll: ScrollSettings,
+                chords: [ButtonChord] = []) {
         self.profileID = profileID
         self.name = name
         self.mappings = mappings
         self.scroll = scroll
+        self.chords = chords
     }
 
     public func mapping(_ trigger: Trigger, modifiers: ModifierSet) -> Mapping? {
@@ -104,13 +107,15 @@ extension WhiskerSettings {
         let leaf = chain[chain.count - 1]
         var mappings: [MappingKey: ResolvedMapping] = [:]
         var scroll = ScrollSettings.system
+        var chords: [ButtonChord] = []
         for profile in chain {
             for mapping in profile.mappings {
                 mappings[mapping.key] = ResolvedMapping(mapping: mapping, sourceProfileID: profile.id, inherited: profile.id != leaf.id)
             }
             if let own = profile.scroll { scroll = own }
+            if let own = profile.chords { chords = own }
         }
-        return ResolvedProfile(profileID: leaf.id, name: leaf.name, mappings: mappings, scroll: scroll)
+        return ResolvedProfile(profileID: leaf.id, name: leaf.name, mappings: mappings, scroll: scroll, chords: chords)
     }
 
     public func resolvedProfile(device: String?, app: String?) -> ResolvedProfile {

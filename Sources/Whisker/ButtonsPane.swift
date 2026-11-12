@@ -128,6 +128,27 @@ struct ButtonsPane: View {
                     )
                 }
             }
+            Section {
+                Text(ButtonChordAvailability.explanation)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Record two-button chord…") {}
+                        .disabled(true)
+                        .help(ButtonChordAvailability.explanation)
+                    Button("Primary + secondary → middle click") {}
+                        .disabled(true)
+                        .help("Requires a modifier or primary-remapping opt-in, plus verified connection attribution.")
+                }
+                ForEach(resolved.chords.indices, id: \.self) { index in
+                    Text("\(resolved.chords[index].summary) — saved only (\(resolved.chords[index].pressWindow) ms)")
+                        .font(.footnote)
+                }
+            } header: {
+                Text("Two-button Chords — Not Active")
+            } footer: {
+                Text("No clicks are delayed. Future recognition would delay eligible single clicks by up to the press window (provisional: 75 ms, adjustable from 20–200 ms) and may need Input Monitoring. Granting it does not enable chords in this build.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             if !inherited.isEmpty {
                 Section("Inherited") {
                     ForEach(inherited, id: \.mapping.key) { item in
