@@ -47,7 +47,7 @@
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li><li><a href="#duplicate-clicks">Duplicate clicks</a></li></ol></li>
-          <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li></ol></li>
+          <li><a href="#buttons">Buttons</a><ol><li><a href="#tilt-wheel">Tilt-wheel controls</a></li><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li></ol></li>
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#smooth-notched-scrolling">Smooth notched scrolling</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
@@ -176,6 +176,23 @@ make app</code></pre>
           <p>Buttons are numbered the way macOS reports them: primary, secondary, middle, then Button 4, Button 5 and so on, up to 32. Out of the box, Button 4 goes Back and Button 5 goes Forward.</p>
           <p>So that you can always click, the primary button can only be remapped with a modifier key held. <span class="ui">Settings › General › Safety › Allow remapping the primary button</span> lifts that limit; take care with it.</p>
           <p>If an action relies on a macOS keyboard shortcut that's switched off, Whisker warns you and offers <span class="ui">Open Keyboard Shortcuts</span>.</p>
+
+          <h3 id="tilt-wheel">Tilt-wheel controls</h3>
+          <p>A wheel that tilts sideways may reach macOS as a numbered button or as horizontal scrolling, and which one depends on the mouse and its driver. Whisker doesn't assume either. <span class="ui">Identify tilt-wheel controls…</span> in <span class="ui">Settings › Buttons</span> asks you to tilt left, tilt right and press the wheel, shows what macOS actually reported for each, and saves only what you confirm.</p>
+          <ul>
+            <li><strong>A numbered button</strong> stays an ordinary button mapping, with a normal press and release.</li>
+            <li><strong>Horizontal scrolling</strong> stays Scroll Left or Scroll Right. That mapping also matches any other horizontal scrolling from the same mouse, so it can't be limited to the tilt, and a tilt sends no release, so it runs once per tilt and is never held down. Existing once-per-burst and per-notch behaviour is unchanged.</li>
+            <li><strong>Nothing, smooth or coasting scrolling, a fraction of a notch, or sideways and vertical movement together</strong> only gets an explanation. Whisker never guesses a button number from them.</li>
+          </ul>
+          <p>The flow names the mouse it believes you used and how sure it is. When exactly one mouse sent input just now it can save a mouse-specific profile and optional labels such as “Wheel tilt left”. When it is only a guess, or several mice are active, you can still save mappings into the selected profile but no hardware label is attached. Labels are notes shown with the mouse: they don't change what a trigger matches or the primary-button safeguard below. A confirmed mapping starts as <span class="ui">Pass through</span>, so nothing changes until you pick an action.</p>
+          <p>Not yet verified on hardware: no tilt-wheel mouse has been tested. Checklist for a mouse you have:</p>
+          <ol>
+            <li>Tilt left and right. Note whether the preview says button or horizontal scrolling, and which direction each tilt gives.</li>
+            <li>Press the wheel without tilting; it should not be reported as a tilt.</li>
+            <li>Hold a tilt and see whether it repeats, and whether other horizontal scrolling from the same mouse (a thumb wheel, say) shows as the same trigger.</li>
+            <li>With a mapping saved, check that plain vertical scrolling and ordinary buttons still work, and that a tilt runs its action once.</li>
+            <li>Connect a second mouse and check the flow does not claim the wrong one.</li>
+          </ol>
 
           <h3 id="actions">Actions</h3>
           <table>

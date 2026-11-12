@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Identify tilt-wheel controls in Buttons: a guided, cancellable flow that previews whether a tilt (and the wheel press) arrives as a numbered button or as horizontal scrolling, and saves only what you confirm. Scrolling is never turned into a guessed button, a horizontal scroll mapping is explained as matching other horizontal scrolling from the same mouse, and optional per-mouse control labels are saved only for an exactly identified mouse and never change what a trigger matches. Not yet verified on hardware ([#23]).
 - Best-effort wireless mouse battery status in Settings › Devices: a read-only percentage from the mouse's own standard HID battery element (0 to 100 only, with charging shown only when the mouse reports it explicitly), with Not supported, Waiting for a reading, Unavailable, Stale and Disconnected states. It is read once Input Monitoring is allowed, never from the Mac's battery or a UPS, never shown for an ambiguous device such as identical mice without serial numbers or a receiver, kept in memory only, and no mouse or receiver model has been verified yet ([#28]).
 - Opt-in duplicate-click filter for one mouse and chosen buttons (Settings › Devices › Duplicate clicks): a press within 20 to 100 ms of the previous click's release that is let go just as quickly is dropped together with its release, while the first click is never delayed and a drag, long hold or other input lets a held press through in order. The wheel and other mice are never filtered, a bare left click stays exempt unless primary-button remapping is allowed, turning it on starts a 60-second trial that reverts unless kept, and a fast deliberate double-click can be ignored too. It has not yet been verified on faulty hardware or across apps ([#9]).
 - Documented decision: Magic Mouse and other touch mice stay left alone, with no opt-in for their buttons, because clicks cannot yet be told apart from gestures or other mice and no model has been verified on hardware. Native gestures and scrolling are untouched, and a tested eligibility policy records what any future opt-in would need ([#29]).
@@ -46,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#17]: https://github.com/MrAshRhodes/whisker/issues/17
 [#20]: https://github.com/MrAshRhodes/whisker/issues/20
 [#22]: https://github.com/MrAshRhodes/whisker/issues/22
+[#23]: https://github.com/MrAshRhodes/whisker/issues/23
 [#26]: https://github.com/MrAshRhodes/whisker/issues/26
 [#27]: https://github.com/MrAshRhodes/whisker/issues/27
 [#28]: https://github.com/MrAshRhodes/whisker/issues/28

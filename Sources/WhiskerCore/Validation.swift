@@ -83,6 +83,21 @@ extension WhiskerSettings {
                 }
                 result.devices[id]?.wheel.native = native
             }
+            var labels: [ControlLabel] = []
+            for (index, label) in device.controlLabels.enumerated() {
+                let labelPath = "\(path).controlLabels[\(index)]"
+                if case .button(let number) = label.trigger, !Trigger.buttonRange.contains(number) {
+                    issues.append(ValidationIssue(labelPath, "Button numbers run from 0 to 31."))
+                } else if labels.contains(where: { $0.trigger == label.trigger }) {
+                    issues.append(ValidationIssue(labelPath, "\(label.trigger.title) already has a label."))
+                } else if let name = ControlLabel.normalised(label.name) {
+                    if name != label.name { issues.append(ValidationIssue(labelPath, "Label was trimmed or shortened to \(ControlLabel.maxLength) characters.")) }
+                    labels.append(ControlLabel(trigger: label.trigger, name: name))
+                } else {
+                    issues.append(ValidationIssue(labelPath, "A label needs a name."))
+                }
+            }
+            result.devices[id]?.controlLabels = labels
         }
 
         for (id, device) in result.devices.sorted(by: { $0.key < $1.key }) {

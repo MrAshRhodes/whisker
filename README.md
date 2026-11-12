@@ -45,6 +45,16 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   swipe, after a distance in pixels you choose, and any vertical scrolling at the same time
   carries on. It needs a mouse Whisker can identify exactly, ignores coasting and trackpads, and
   is not yet verified on hardware.
+- **Tilt-wheel controls.** **Identify tilt-wheel controls…** in Buttons asks you to tilt left,
+  tilt right and press the wheel, previews what macOS actually reported and saves only what you
+  confirm. A numbered button stays an ordinary button mapping with a normal press and release.
+  A horizontal scroll report stays Scroll Left or Scroll Right, which also matches any other
+  horizontal scrolling from the same mouse and runs once per tilt, never held. No event, smooth
+  or coasting scrolling, fractions of a notch and mixed-axis input only get an explanation, never
+  a guessed button number. The flow shows the mouse it believes you used and how sure it is, and
+  attaches optional labels (such as "Wheel tilt left") only when that is exact; labels never
+  change what a trigger matches. Not yet verified on hardware: see the checklist in the
+  [guide](https://mrashrhodes.github.io/whisker/guide.html#tilt-wheel).
 - **Scrolling.** Reverse the vertical or horizontal wheel for each mouse without changing the
   trackpad or the system's natural-scrolling setting. Each profile can set how many lines a
   wheel notch scrolls, add scroll acceleration, choose a modifier key that scrolls sideways and

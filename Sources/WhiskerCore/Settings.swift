@@ -95,18 +95,21 @@ public struct DeviceSettings: Equatable, Sendable {
     /// `nil` keeps the system pointer speed.
     public var pointer: PointerSettings?
     public var wheel: WheelSettings
+    /// Confirmed names for this device's controls, such as "Wheel tilt left". Metadata only.
+    public var controlLabels: [ControlLabel]
     /// Opt-in filter for very short duplicate clicks; `nil` leaves clicks alone.
     public var clickDebounce: ClickDebounceSettings?
 
     public init(
         name: String = "", enabled: Bool = true, pointer: PointerSettings? = nil, wheel: WheelSettings = WheelSettings(),
-        clickDebounce: ClickDebounceSettings? = nil
+        clickDebounce: ClickDebounceSettings? = nil, controlLabels: [ControlLabel] = []
     ) {
         self.name = name
         self.enabled = enabled
         self.pointer = pointer
         self.wheel = wheel
         self.clickDebounce = clickDebounce
+        self.controlLabels = controlLabels
     }
 }
 
@@ -338,7 +341,7 @@ extension GeneralSettings: Codable {
 }
 
 extension DeviceSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel, clickDebounce }
+    private enum CodingKeys: String, CodingKey { case name, enabled, pointer, wheel, clickDebounce, controlLabels }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -347,6 +350,7 @@ extension DeviceSettings: Codable {
         pointer = try c.decodeIfPresent(PointerSettings.self, forKey: .pointer)
         wheel = try c.decodeIfPresent(WheelSettings.self, forKey: .wheel) ?? WheelSettings()
         clickDebounce = try c.decodeIfPresent(ClickDebounceSettings.self, forKey: .clickDebounce)
+        controlLabels = try c.decodeIfPresent([ControlLabel].self, forKey: .controlLabels) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -356,6 +360,7 @@ extension DeviceSettings: Codable {
         try c.encodeIfPresent(pointer, forKey: .pointer)
         try c.encode(wheel, forKey: .wheel)
         try c.encodeIfPresent(clickDebounce, forKey: .clickDebounce)
+        if !controlLabels.isEmpty { try c.encode(controlLabels, forKey: .controlLabels) }
     }
 }
 

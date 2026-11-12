@@ -38,4 +38,21 @@ struct ButtonRecorderTests {
         other.setIntegerValueField(.mouseEventButtonNumber, value: 4)
         #expect(ButtonRecorder.trigger(for: try #require(NSEvent(cgEvent: other))) == .button(4))
     }
+
+    @Test("Mixed-axis and momentum scrolling aren't recorded as a wheel notch")
+    func ambiguousScrollIgnored() throws {
+        #expect(ButtonRecorder.trigger(for: try wheel(vertical: 1, horizontal: 1)) == nil)
+        let coasting = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: 0, wheel2: 1, wheel3: 0))
+        coasting.setIntegerValueField(.scrollWheelEventMomentumPhase, value: 2)
+        #expect(ButtonRecorder.trigger(for: try #require(NSEvent(cgEvent: coasting))) == nil)
+    }
+
+    @Test("The guided flow sees a horizontal notch as scrolling, never as a button")
+    func tiltObservation() throws {
+        let observation = try #require(TiltObserver.observation(for: try wheel(vertical: 0, horizontal: 1)))
+        #expect(TiltClassifier.classify([observation]) == .horizontalScroll(.left))
+        let other = try #require(CGEvent(mouseEventSource: nil, mouseType: .otherMouseDown, mouseCursorPosition: .zero, mouseButton: .center))
+        other.setIntegerValueField(.mouseEventButtonNumber, value: 5)
+        #expect(TiltObserver.observation(for: try #require(NSEvent(cgEvent: other))) == .buttonDown(5))
+    }
 }

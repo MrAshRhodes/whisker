@@ -44,12 +44,8 @@ final class ButtonRecorder: ObservableObject {
         case .otherMouseDown: return .button(event.buttonNumber)
         case .scrollWheel:
             guard let cgEvent = event.cgEvent,
-                  cgEvent.getIntegerValueField(.scrollWheelEventIsContinuous) == 0 else { return nil }
-            let vertical = cgEvent.getIntegerValueField(.scrollWheelEventDeltaAxis1)
-            let horizontal = cgEvent.getIntegerValueField(.scrollWheelEventDeltaAxis2)
-            if vertical != 0 { return .wheel(vertical > 0 ? .up : .down) }
-            if horizontal != 0 { return .wheel(horizontal > 0 ? .left : .right) }
-            return nil
+                  case .notch(let direction) = EventEngine.readSample(cgEvent).classification else { return nil }
+            return .wheel(direction)
         default: return nil
         }
     }
@@ -62,6 +58,7 @@ struct ButtonsPane: View {
     @ObservedObject var store: SettingsStore
     @StateObject private var recorder = ButtonRecorder()
     @StateObject private var messages = MessageState()
+    @StateObject private var tilt = TiltSheetState()
 
     var body: some View {
         let profileID = store.settings.profile(id: model.selectedProfileID)?.id ?? Profile.defaultID
@@ -109,6 +106,7 @@ struct ButtonsPane: View {
                             }
                         }
                         .fixedSize()
+                        Button("Identify tilt-wheel controls…") { messages.text = nil; tilt.isPresented = true }
                         Spacer()
                     }
                 }
@@ -138,6 +136,13 @@ struct ButtonsPane: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $tilt.isPresented) {
+            TiltIdentifySheet(store: store, profileID: profileID) { note in
+                tilt.isPresented = false
+                messages.text = note
+            }
+            .environmentObject(model)
+        }
         .onDisappear { recorder.stop() }
     }
 
