@@ -77,13 +77,26 @@ public struct InputEvent: Equatable, Sendable {
     public var device: DeviceAttribution?
     /// Bundle identifier of the frontmost app.
     public var app: String?
+    /// Where the pointer is, when the event carries a position.
+    public var location: PointerPoint?
+    /// Relative movement. Only read while a hold needs it, so most events leave it nil.
+    public var motion: PointerMotion?
+    /// The device the movement came from. Unlike `device` it is never inferred from there being one mouse: it is
+    /// nil unless the movement was attributed to exactly one non-excluded device.
+    public var motionDevice: DeviceAttribution?
 
-    public init(_ kind: InputKind, modifiers: ModifierSet = [], timestamp: TimeInterval = 0, device: DeviceAttribution? = nil, app: String? = nil) {
+    public init(
+        _ kind: InputKind, modifiers: ModifierSet = [], timestamp: TimeInterval = 0, device: DeviceAttribution? = nil, app: String? = nil,
+        location: PointerPoint? = nil, motion: PointerMotion? = nil, motionDevice: DeviceAttribution? = nil
+    ) {
         self.kind = kind
         self.modifiers = modifiers
         self.timestamp = timestamp
         self.device = device
         self.app = app
+        self.location = location
+        self.motion = motion
+        self.motionDevice = motionDevice
     }
 }
 
@@ -110,6 +123,8 @@ public enum EventPlan: Equatable, Sendable {
     case dragAsMove
     /// Rewrite the scroll distances, removing modifier flags that only served to change the axis.
     case scroll(ScrollSample, removing: ModifierSet)
+    /// Drop the movement, scroll by these pixels and put the pointer back on `anchor`.
+    case holdScroll(ScrollPixels, anchor: PointerPoint)
     /// Perform the action and let the rest of the scroll event through: the mapped axis is already taken out
     /// of the sample. A zero sample means nothing is left to deliver.
     case performWithScroll(Action, ActionPhase, remaining: ScrollSample)
@@ -131,6 +146,8 @@ public struct EventProcessor: Sendable {
     private var lastWheelEvent: [MappingKey: TimeInterval] = [:]
     private var notchTimes: [TimeInterval] = []
     private var scaler = ScrollScaler()
+    private var hold: HoldScrollSession?
+    private var idleHoldStatus: HoldScrollStatus = .idle
     private var horizontalStream = HorizontalStream()
 
     public init() {}
@@ -138,11 +155,20 @@ public struct EventProcessor: Sendable {
     /// Buttons currently held as a mapped action.
     public var heldButtons: [Int: Action] { held }
 
+    /// Whether a hold-to-scroll is in progress and wants the movement details of drag events.
+    public var isHolding: Bool { hold != nil }
+
+    /// How the latest hold-to-scroll went, for diagnostics. A fall-back is kept until the next press.
+    public var holdStatus: HoldScrollStatus {
+        guard let hold else { return idleHoldStatus }
+        return hold.fallback.map { .fellBack($0) } ?? .scrolling
+    }
+
     public mutating func process(_ event: InputEvent, settings: CompiledSettings) -> EventPlan {
         switch event.kind {
         case .buttonDown(let button): return buttonDown(button, event, settings)
         case .buttonUp(let button): return buttonUp(button)
-        case .buttonDragged(let button): return dragged(button)
+        case .buttonDragged(let button): return dragged(button, event, settings)
         case .scroll(let sample): return scroll(sample, event, settings)
         }
     }
@@ -153,6 +179,7 @@ public struct EventProcessor: Sendable {
         let released = held.sorted { $0.key < $1.key }.filter { $0.value.followsTrigger }.map { (button: $0.key, action: $0.value) }
         held.removeAll()
         orphaned.removeAll()
+        endHold(cancelled: true)
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
         scaler.reset()
@@ -175,6 +202,27 @@ public struct EventProcessor: Sendable {
         return released
     }
 
+    /// Ends an in-progress hold-to-scroll without waiting for its button (the app in front changed, the mouse
+    /// went away…). The button is still down, so it stays swallowed and its movement stays plain pointer movement
+    /// until it comes up.
+    public mutating func cancelHold() {
+        endHold(cancelled: false)
+    }
+
+    /// Cancels the hold when the device that started it is no longer among `connected`.
+    public mutating func cancelHold(unlessConnected connected: Set<String>) {
+        guard let hold, !connected.contains(hold.device) else { return }
+        endHold(cancelled: false)
+    }
+
+    private mutating func endHold(cancelled releaseButton: Bool) {
+        guard let session = hold else { return }
+        hold = nil
+        idleHoldStatus = session.fallback.map { .fellBack($0) } ?? .idle
+        // After a full release nothing is held any more, but the physical button may still be down.
+        if releaseButton { orphaned.insert(session.button) }
+    }
+
     // MARK: Buttons
 
     private func isActive(_ event: InputEvent, _ settings: CompiledSettings) -> Bool {
@@ -195,26 +243,51 @@ public struct EventProcessor: Sendable {
         // A down without an up (missed event): finish the old one first by treating it as released.
         held[button] = nil
         orphaned.remove(button)
+        if hold?.button == button { endHold(cancelled: false) }
         guard isActive(event, settings) else { return .passThrough }
         guard let mapping = lookup(.button(button), event, settings, exactOnly: false) else { return .passThrough }
         // The primary button with no modifiers is the way back if a mapping goes wrong.
         if button == 0, mapping.modifiers.isEmpty, !settings.general.allowPrimaryButtonRemap { return .passThrough }
         let action = mapping.action
         if action == .passthrough { return .passThrough }
+        if case .holdToScroll(let config) = action { return beginHold(button, config, event) }
         held[button] = action
         if action == .none { return .swallow }
         return .perform(action, action.followsTrigger ? .down : .once)
     }
 
+    private mutating func beginHold(_ button: Int, _ config: HoldScroll, _ event: InputEvent) -> EventPlan {
+        // Attribution has to be exact and the position known, or the hold can't be kept to one device.
+        guard let device = event.device, device.exact, let anchor = event.location, config.isValid else {
+            idleHoldStatus = .unavailable
+            return .passThrough
+        }
+        held[button] = .holdToScroll(config)
+        // One hold at a time: a second hold button is swallowed and does nothing.
+        if hold == nil {
+            hold = HoldScrollSession(button: button, device: device.id, app: event.app, anchor: anchor, config: config)
+            idleHoldStatus = .idle
+        }
+        return .swallow
+    }
+
     private mutating func buttonUp(_ button: Int) -> EventPlan {
+        if hold?.button == button { endHold(cancelled: false) }
         guard let action = held.removeValue(forKey: button) else {
             return orphaned.remove(button) != nil ? .swallow : .passThrough
         }
         return action.followsTrigger ? .perform(action, .up) : .swallow
     }
 
-    private func dragged(_ button: Int) -> EventPlan {
+    private mutating func dragged(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
         guard let action = held[button] else { return orphaned.contains(button) ? .dragAsMove : .passThrough }
+        if hold?.button == button {
+            guard isActive(event, settings), hold?.app == event.app else {
+                endHold(cancelled: false)
+                return .dragAsMove
+            }
+            return hold!.motion(event)
+        }
         if case let .click(target, modifiers) = action { return .dragAs(button: target, modifiers: modifiers) }
         return .dragAsMove
     }

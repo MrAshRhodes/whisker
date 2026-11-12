@@ -44,7 +44,9 @@ struct SettingsTests {
             .passthrough, .none, .click(button: 2, modifiers: [.command]), .doubleClick(modifiers: []), .tripleClick(modifiers: [.shift]),
             .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: true),
             .scroll(direction: .left, lines: 4), .media(.volumeUp), .navigate(.forward),
-            .missionControl(.appWindows), .space(.right), .appSwitch(.previous), .open(url: "https://example.com"),
+            .missionControl(.appWindows), .space(.right), .appSwitch(.previous),
+            .holdToScroll(HoldScroll(axes: .free, sensitivity: 2.5, invertVertical: true, invertHorizontal: false)),
+            .open(url: "https://example.com"),
         ]
         for action in actions {
             let data = try JSONEncoder().encode(action)

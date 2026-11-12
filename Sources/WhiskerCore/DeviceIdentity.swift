@@ -94,6 +94,7 @@ public struct DeviceAttribution: Equatable, Sendable {
 public struct DeviceAttributor: Sendable {
     public static let window: TimeInterval = 0.03
     public static let capacity = 32
+    public static let motionCapacity = 256
 
     public enum ReportKind: Sendable, Equatable {
         case button(Int)
@@ -109,6 +110,15 @@ public struct DeviceAttributor: Sendable {
     private var reports: [Report] = []
     /// Devices currently connected and not excluded.
     public var connected: [String] = []
+    /// Devices that are left alone (trackpads, touch mice). Their movement is still recorded so it can
+    /// veto attribution, but is never attributed.
+    public var excluded: Set<String> = []
+    private var motionReports: [MotionReport] = []
+
+    private struct MotionReport: Sendable {
+        var deviceID: String
+        var time: TimeInterval
+    }
 
     public init(connected: [String] = []) {
         self.connected = connected
@@ -117,6 +127,25 @@ public struct DeviceAttributor: Sendable {
     public mutating func record(deviceID: String, kind: ReportKind, at time: TimeInterval) {
         reports.append(Report(deviceID: deviceID, kind: kind, time: time))
         if reports.count > Self.capacity { reports.removeFirst(reports.count - Self.capacity) }
+    }
+
+    public mutating func recordMotion(deviceID: String, at time: TimeInterval) {
+        motionReports.append(MotionReport(deviceID: deviceID, time: time))
+        // Movement reports are frequent; keep only what the window can still use.
+        if motionReports.count > Self.motionCapacity { motionReports.removeFirst(motionReports.count - Self.motionCapacity) }
+    }
+
+    /// The device that moved at `time`, only when exactly one device reported movement within the window and it
+    /// is not excluded. Unlike buttons there is no fall-back to "the only mouse": movement from a trackpad or a
+    /// second mouse, or no report at all, is simply unattributed.
+    public func attributeMotion(at time: TimeInterval) -> DeviceAttribution? {
+        var source: String?
+        for report in motionReports where time - report.time <= Self.window && report.time <= time + Self.window {
+            if let source, source != report.deviceID { return nil }
+            source = report.deviceID
+        }
+        guard let source, !excluded.contains(source) else { return nil }
+        return DeviceAttribution(id: source, exact: true)
     }
 
     /// The most recent device reporting `kind` within the window before `time`; otherwise the only

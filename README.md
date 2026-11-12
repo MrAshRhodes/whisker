@@ -39,6 +39,10 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   scroll faster or slower, from ×0.25 to ×8, while modifier keys you choose are held. The speed
   change applies to wheel notches, not trackpads or smooth scrolling, and is not yet verified on
   hardware.
+- **Hold to Scroll (experimental).** Hold a button and roll the ball to scroll instead of moving
+  the pointer, which stays where it was and does not jump when you let go. Choose the axes,
+  speed and direction. It needs Input Monitoring, is not yet verified on hardware, and falls
+  back to normal pointer movement when Whisker can't tell which mouse you're using.
 - **Profiles.** Give an app, a mouse, or an app on one mouse its own buttons and scrolling.
   Anything a profile does not set comes from the profile it inherits from, ending at the
   default profile, and Whisker switches profiles as you change apps.

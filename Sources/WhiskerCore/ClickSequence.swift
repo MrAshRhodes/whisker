@@ -139,7 +139,7 @@ public enum ClickInterruption {
         if case .buttonDragged = kind { return false }
         switch plan {
         case .passThrough, .perform, .performWithScroll, .scroll: return true
-        case .swallow, .dragAs, .dragAsMove: return false
+        case .swallow, .dragAs, .dragAsMove, .holdScroll: return false
         }
     }
 

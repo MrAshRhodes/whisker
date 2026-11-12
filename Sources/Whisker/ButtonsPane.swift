@@ -250,6 +250,7 @@ struct MappingRow: View {
 // MARK: - Action editor
 
 struct ActionEditor: View {
+    @EnvironmentObject private var model: AppModel
     @Binding var action: Action
 
     var body: some View {
@@ -342,6 +343,43 @@ struct ActionEditor: View {
                 get: { lines },
                 set: { action = .scroll(direction: direction, lines: $0) }
             ), in: ScrollMath.linesRange)
+        case let .holdToScroll(config):
+            Picker("Scroll", selection: Binding(
+                get: { config.axes },
+                set: { var updated = config; updated.axes = $0; action = .holdToScroll(updated) }
+            )) {
+                ForEach(HoldScrollAxes.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                Text("Sensitivity")
+                Slider(value: Binding(
+                    get: { config.sensitivity },
+                    set: { var updated = config; updated.sensitivity = $0; action = .holdToScroll(updated) }
+                ), in: HoldScroll.sensitivityRange)
+                Text(String(format: "%.1f×", config.sensitivity)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            if config.axes != .horizontal {
+                Toggle("Reverse vertical direction", isOn: Binding(
+                    get: { config.invertVertical },
+                    set: { var updated = config; updated.invertVertical = $0; action = .holdToScroll(updated) }
+                ))
+            }
+            if config.axes != .vertical {
+                Toggle("Reverse horizontal direction", isOn: Binding(
+                    get: { config.invertHorizontal },
+                    set: { var updated = config; updated.invertHorizontal = $0; action = .holdToScroll(updated) }
+                ))
+            }
+            Text("Experimental. While the button is held, moving the ball scrolls and the pointer stays put; the page follows the ball. Keeping the pointer still has not yet been verified on hardware, and Whisker falls back to normal movement if it cannot. Only the mouse you pressed scrolls, which needs Input Monitoring.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if !model.devices.canIdentifyDevices {
+                Label("Input Monitoring is off, so Hold to Scroll cannot tell which mouse you pressed and the button keeps its normal behaviour.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+            if let note = model.holdToScrollNote {
+                Label(note, systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
+            }
         case .open(let url):
             OpenField(url: Binding(get: { url }, set: { action = .open(url: $0) }))
         }

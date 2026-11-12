@@ -44,6 +44,11 @@ public struct ResolvedProfile: Equatable, Sendable {
 }
 
 extension WhiskerSettings {
+    /// Whether an enabled mapping in any profile needs pointer movement (hold to scroll).
+    public var usesMotionActions: Bool {
+        general.enabled && profiles.contains { $0.mappings.contains { $0.action.usesMotion } }
+    }
+
     /// The profile that applies to a device in an app.
     ///
     /// Most specific wins: device and app, then app on any device, then device in any app, then default.
@@ -107,6 +112,8 @@ public final class CompiledSettings: @unchecked Sendable {
     public let settings: WhiskerSettings
     private let resolvedByID: [String: ResolvedProfile]
     private let bypassApps: Set<String>
+    /// Whether any mapping needs pointer movement. When false, nothing in the app reads movement at all.
+    public let needsMotion: Bool
     private var cache: [CacheKey: String] = [:]
     private let lock = NSLock()
 
@@ -126,6 +133,7 @@ public final class CompiledSettings: @unchecked Sendable {
         }
         resolvedByID = resolved
         bypassApps = Set(settings.general.bypassApps)
+        needsMotion = settings.usesMotionActions
     }
 
     public var general: GeneralSettings { settings.general }

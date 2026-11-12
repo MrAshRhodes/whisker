@@ -19,6 +19,12 @@ protocol ActionPerforming: AnyObject, Sendable {
     func cancelPendingClicks()
     /// Lets go of everything held and stops repeating keys. Calls off a pending click gesture too.
     func releaseAll()
+    /// Scrolls by whole pixels and puts the pointer back on `anchor`.
+    func holdScroll(_ pixels: ScrollPixels, anchor: CGPoint)
+}
+
+extension ActionPerforming {
+    func holdScroll(_ pixels: ScrollPixels, anchor: CGPoint) {}
 }
 
 /// Posts the events and runs the commands that mapped actions turn into.
@@ -98,10 +104,28 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
             guard phase != .up else { return }
             let switchApp = self.switchApp
             DispatchQueue.main.async { MainActor.assumeIsolated { switchApp(direction) } }
+        case .holdToScroll:
+            // Driven by pointer movement through `holdScroll`, not by the press itself.
+            return
         case .open(let string):
             guard phase != .up else { return }
             DispatchQueue.main.async { Self.open(string) }
         }
+    }
+
+    /// Runs on the event tap thread, inline, so scrolling stays in step with the movement that caused it.
+    ///
+    /// The pointer is put back with `CGWarpMouseCursorPosition` (public API; the mouse stays associated with the
+    /// cursor). Whether that keeps the pointer still without a visible shake or a jump on release has not been
+    /// verified on hardware; the event processor watches for drift and falls back to ordinary movement.
+    func holdScroll(_ pixels: ScrollPixels, anchor: CGPoint) {
+        CGWarpMouseCursorPosition(anchor)
+        guard !pixels.isZero,
+              let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(clamping: pixels.vertical), wheel2: Int32(clamping: pixels.horizontal), wheel3: 0)
+        else { return }
+        event.location = anchor
+        mark(event)
+        event.post(tap: .cghidEventTap)
     }
 
     /// Calls off a click gesture that is still under way; a press already posted gets its release.

@@ -203,6 +203,9 @@ extension WhiskerSettings {
             guard Trigger.buttonRange.contains(button) else { return "Click buttons run from 0 to 31." }
         case .scroll(_, let lines):
             guard ScrollMath.linesRange.contains(lines) else { return "Scroll distance must be 1 to 20 lines." }
+        case .holdToScroll(let config):
+            let range = HoldScroll.sensitivityRange
+            guard config.isValid else { return "Hold to Scroll sensitivity must be between \(String(format: "%g", range.lowerBound)) and \(String(format: "%g", range.upperBound))." }
         case .shortcut(let shortcut, _):
             guard shortcut.keyCode < 0x80 else { return "Key code \(shortcut.keyCode) is not a key." }
         case .open(let url):

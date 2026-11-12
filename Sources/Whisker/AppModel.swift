@@ -48,6 +48,8 @@ final class AppModel: ObservableObject {
     let engine: EventEngine
 
     @Published private(set) var engineRunning = false
+    /// Why the latest Hold to Scroll fell back or could not start, for the Buttons pane.
+    @Published private(set) var holdToScrollNote: String?
     /// The app in front while it's on the bypass list and Whisker stands aside for it. Separate from the master
     /// switch, which stays as it was and still wins. Never saved: it follows the app in front.
     @Published private(set) var bypassedApp: String?
@@ -74,8 +76,12 @@ final class AppModel: ObservableObject {
         engine = EventEngine(
             synthesizer: synthesizer,
             attribute: { devices.attribute($0, at: $1) },
-            frontmostApp: { frontApp.frontmostBundleID }
+            frontmostApp: { frontApp.frontmostBundleID },
+            attributeMotion: { devices.attributeMotion(at: $0) }
         )
+        engine.onHoldStatus = { [weak self] status in
+            DispatchQueue.main.async { self?.holdToScrollNote = status.message }
+        }
     }
 
     var settings: WhiskerSettings {
@@ -124,7 +130,7 @@ final class AppModel: ObservableObject {
         devices.onChange = { [weak self] connected in
             guard let self else { return }
             self.applyPointers(self.store.settings, connected: connected)
-            self.engine.devicesChanged(connected: Set(connected.map(\.id)))
+            self.engine.devicesChanged(connected: Set(connected.filter { !$0.isExcluded }.map(\.id)))
         }
         devices.start()
         if leftovers {
@@ -136,6 +142,7 @@ final class AppModel: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] settings in
                 guard let self else { return }
+                self.devices.setTrackingMotion(settings.usesMotionActions)
                 self.engine.update(settings)
                 self.refreshBypass(using: settings)
                 self.applyPointers(settings)

@@ -143,6 +143,8 @@ public enum Action: Hashable, Sendable {
     case missionControl(MissionControlTarget)
     case space(SpaceDirection)
     case appSwitch(AppSwitchDirection)
+    /// While the button is held, movement of the device that pressed it scrolls instead of moving the pointer.
+    case holdToScroll(HoldScroll)
     /// An app, file or web address.
     case open(url: String)
 
@@ -160,8 +162,15 @@ public enum Action: Hashable, Sendable {
         case .missionControl: return .missionControl
         case .space: return .space
         case .appSwitch: return .appSwitch
+        case .holdToScroll: return .holdToScroll
         case .open: return .open
         }
+    }
+
+    /// Whether the action needs to see pointer movement, not just buttons and the wheel.
+    public var usesMotion: Bool {
+        if case .holdToScroll = self { return true }
+        return false
     }
 
     /// Actions that follow the trigger: pressed while it is down, released when it comes up.
@@ -222,6 +231,7 @@ public enum Action: Hashable, Sendable {
         case .missionControl(let target): return target.title
         case .space(let direction): return "Move to \(direction.title)"
         case .appSwitch(let direction): return "Switch to \(direction.title)"
+        case .holdToScroll(let config): return config.summary
         case .open(let url): return "Open \(Self.openTitle(url))"
         }
     }
@@ -261,7 +271,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, tripleClick, shortcut, navigate, media, missionControl, space, appSwitch, scroll, open
+    case passthrough, none, click, doubleClick, tripleClick, shortcut, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, open
 
     public var id: String { rawValue }
 
@@ -279,6 +289,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .space: return "Switch Space"
         case .appSwitch: return "Switch App"
         case .scroll: return "Scroll"
+        case .holdToScroll: return "Hold to Scroll (Experimental)"
         case .open: return "Open App, File or Website"
         }
     }
@@ -297,6 +308,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .space: return "square.split.2x1"
         case .appSwitch: return "rectangle.stack"
         case .scroll: return "arrow.up.and.down"
+        case .holdToScroll: return "arrow.up.and.down.and.arrow.left.and.right"
         case .open: return "arrow.up.forward.app"
         }
     }
@@ -316,6 +328,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .space: return .space(.left)
         case .appSwitch: return .appSwitch(.next)
         case .scroll: return .scroll(direction: .down, lines: 3)
+        case .holdToScroll: return .holdToScroll(HoldScroll())
         case .open: return .open(url: "")
         }
     }
@@ -323,7 +336,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
 
 extension Action: Codable {
     private enum CodingKeys: String, CodingKey {
-        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url
+        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, axes, sensitivity, invertVertical, invertHorizontal
     }
 
     public init(from decoder: Decoder) throws {
@@ -353,6 +366,13 @@ extension Action: Codable {
         case "missionControl": self = .missionControl(try container.decode(MissionControlTarget.self, forKey: .target))
         case "space": self = .space(try container.decode(SpaceDirection.self, forKey: .direction))
         case "appSwitch": self = .appSwitch(try container.decode(AppSwitchDirection.self, forKey: .direction))
+        case "holdToScroll":
+            self = .holdToScroll(HoldScroll(
+                axes: try container.decodeIfPresent(HoldScrollAxes.self, forKey: .axes) ?? .vertical,
+                sensitivity: try container.decodeIfPresent(Double.self, forKey: .sensitivity) ?? 1,
+                invertVertical: try container.decodeIfPresent(Bool.self, forKey: .invertVertical) ?? false,
+                invertHorizontal: try container.decodeIfPresent(Bool.self, forKey: .invertHorizontal) ?? false
+            ))
         case "open": self = .open(url: try container.decode(String.self, forKey: .url))
         default:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "Unknown action “\(kind)”.")
@@ -398,6 +418,12 @@ extension Action: Codable {
         case .appSwitch(let direction):
             try container.encode("appSwitch", forKey: .kind)
             try container.encode(direction, forKey: .direction)
+        case .holdToScroll(let config):
+            try container.encode("holdToScroll", forKey: .kind)
+            try container.encode(config.axes, forKey: .axes)
+            try container.encode(config.sensitivity, forKey: .sensitivity)
+            try container.encode(config.invertVertical, forKey: .invertVertical)
+            try container.encode(config.invertHorizontal, forKey: .invertHorizontal)
         case .open(let url):
             try container.encode("open", forKey: .kind)
             try container.encode(url, forKey: .url)

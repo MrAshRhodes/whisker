@@ -20,6 +20,8 @@ final class EventEngine: @unchecked Sendable {
         var actionSource: String?
         /// Whether the app in front was on the bypass list at the last check, so standing aside happens once.
         var bypassed = false
+        /// The hold-to-scroll status last reported to `onHoldStatus`.
+        var reportedHold: HoldScrollStatus = .idle
     }
 
     static let eventMask: CGEventMask = {
@@ -36,6 +38,9 @@ final class EventEngine: @unchecked Sendable {
     private let synthesizer: any ActionPerforming
     private let attribute: @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution?
     private let frontmostApp: @Sendable () -> String?
+    private let attributeMotion: @Sendable (TimeInterval) -> DeviceAttribution?
+    /// Called on the main queue when a hold-to-scroll starts, falls back or can't start.
+    var onHoldStatus: (@Sendable (HoldScrollStatus) -> Void)?
 
     private let tapLock = NSLock()
     private var tap: CFMachPort?
@@ -45,11 +50,13 @@ final class EventEngine: @unchecked Sendable {
     init(
         synthesizer: any ActionPerforming,
         attribute: @escaping @Sendable (DeviceAttributor.ReportKind, TimeInterval) -> DeviceAttribution?,
-        frontmostApp: @escaping @Sendable () -> String?
+        frontmostApp: @escaping @Sendable () -> String?,
+        attributeMotion: @escaping @Sendable (TimeInterval) -> DeviceAttribution? = { _ in nil }
     ) {
         self.synthesizer = synthesizer
         self.attribute = attribute
         self.frontmostApp = frontmostApp
+        self.attributeMotion = attributeMotion
     }
 
     var isRunning: Bool {
@@ -71,7 +78,10 @@ final class EventEngine: @unchecked Sendable {
             } else {
                 release(&state, at: location)
             }
+            // A hold whose mapping was removed ends now; one that is merely edited keeps the settings it started with.
+            if !compiled.needsMotion { state.processor.cancelHold() }
             syncBypass(&state, app: app, at: location)
+            reportHold(&state)
         }
     }
 
@@ -83,7 +93,10 @@ final class EventEngine: @unchecked Sendable {
         let location = Self.cursorLocation()
         state.withLock { state in
             synthesizer.cancelPendingClicks()
+            // The pointer is anchored in the window that was in front, so a hold never carries over to another app.
+            state.processor.cancelHold()
             syncBypass(&state, app: app, at: location)
+            reportHold(&state)
         }
     }
 
@@ -107,6 +120,9 @@ final class EventEngine: @unchecked Sendable {
             if ClickInterruption.isCalledOffByDeviceChange(startedBy: state.actionSource, connected: connected) {
                 synthesizer.cancelPendingClicks()
             }
+            // A hold started by a device that has gone ends now.
+            state.processor.cancelHold(unlessConnected: connected)
+            reportHold(&state)
         }
     }
 
@@ -177,6 +193,17 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.perform(action, phase: .up, at: location, flags: [], clickState: 1)
         }
         synthesizer.releaseAll()
+        reportHold(&state)
+    }
+
+    /// Call with the state lock held. Tells the app about a change of hold-to-scroll status, off the tap thread.
+    private func reportHold(_ state: inout State) {
+        let status = state.processor.holdStatus
+        guard status != state.reportedHold else { return }
+        state.reportedHold = status
+        if case .fellBack = status { Log.events.notice("Hold to Scroll fell back to normal movement") }
+        guard let onHoldStatus else { return }
+        DispatchQueue.main.async { onHoldStatus(status) }
     }
 
     /// Call with the state lock held. Standing aside for an app lets go of everything held, once; the real
@@ -224,14 +251,24 @@ final class EventEngine: @unchecked Sendable {
         case .buttonDown(let button), .buttonUp(let button), .buttonDragged(let button): reportKind = .button(button)
         case .scroll: reportKind = .wheel
         }
-        let input = InputEvent(
+        let location = event.location
+        var pending = InputEvent(
             kind,
             modifiers: ModifierSet(eventFlags: event.flags.rawValue),
             timestamp: now,
             device: attribute(reportKind, now),
-            app: frontmostApp()
+            app: frontmostApp(),
+            location: PointerPoint(x: location.x, y: location.y)
         )
-        let location = event.location
+        // Movement is only decoded and attributed while a hold wants it; every other drag skips this.
+        if case .buttonDragged = kind, state.withLock({ $0.processor.isHolding }) {
+            pending.motion = PointerMotion(
+                dx: Int(event.getIntegerValueField(.mouseEventDeltaX)),
+                dy: Int(event.getIntegerValueField(.mouseEventDeltaY))
+            )
+            pending.motionDevice = attributeMotion(now)
+        }
+        let input = pending
         let flags = CGEventFlags(rawValue: event.flags.rawValue & ModifierSet([.shift, .control, .option, .command]).eventFlags)
         let clickState = event.getIntegerValueField(.mouseEventClickState)
         let plan = state.withLock { state -> EventPlan in
@@ -245,6 +282,10 @@ final class EventEngine: @unchecked Sendable {
             default:
                 break
             }
+            if case let .holdScroll(pixels, anchor) = plan {
+                synthesizer.holdScroll(pixels, anchor: CGPoint(x: anchor.x, y: anchor.y))
+            }
+            reportHold(&state)
             return plan
         }
         return apply(plan, to: event)
@@ -256,7 +297,7 @@ final class EventEngine: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         case .swallow:
             return nil
-        case .perform:
+        case .perform, .holdScroll:
             // Already posted under the state lock in `handle`.
             return nil
         case let .dragAs(button, modifiers):

@@ -33,6 +33,8 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     private var deviceIDs: [IOHIDDevice: String] = [:]
     private var opened = false
     private let attributor = OSAllocatedUnfairLock(initialState: DeviceAttributor())
+    /// Movement reports arrive at the mouse's polling rate, so they are only kept while a mapping needs them.
+    private let trackingMotion = OSAllocatedUnfairLock(initialState: false)
     /// Main thread only. One time per device, never saved or logged.
     private var evidence = AttributionEvidence()
     private var expiryTimer: Timer?
@@ -40,6 +42,15 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     /// Called from the event tap thread.
     func attribute(_ kind: DeviceAttributor.ReportKind, at time: TimeInterval) -> DeviceAttribution? {
         attributor.withLock { $0.attribute(kind: kind, at: time) }
+    }
+
+    /// Called from the event tap thread.
+    func attributeMotion(at time: TimeInterval) -> DeviceAttribution? {
+        attributor.withLock { $0.attributeMotion(at: time) }
+    }
+
+    func setTrackingMotion(_ tracking: Bool) {
+        trackingMotion.withLock { $0 = tracking }
     }
 
     /// Details for the connected devices, for the Devices pane.
@@ -218,7 +229,11 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
 
     private func changed() {
         let usable = devices.filter { !$0.isExcluded }.map(\.id)
-        attributor.withLock { $0.connected = usable }
+        let excluded = Set(devices.filter(\.isExcluded).map(\.id))
+        attributor.withLock {
+            $0.connected = usable
+            $0.excluded = excluded
+        }
         onChange?(devices)
     }
 
@@ -229,6 +244,11 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         let usage = Int(IOHIDElementGetUsage(element))
         let kind: DeviceAttributor.ReportKind
         switch (page, usage) {
+        case (kHIDPage_GenericDesktop, kHIDUsage_GD_X), (kHIDPage_GenericDesktop, kHIDUsage_GD_Y):
+            guard trackingMotion.withLock({ $0 }) else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            attributor.withLock { $0.recordMotion(deviceID: id, at: now) }
+            return
         case (kHIDPage_Button, 1...32): kind = .button(usage - 1)
         case (kHIDPage_GenericDesktop, kHIDUsage_GD_Wheel), (kHIDPage_Consumer, kHIDUsage_Csmr_ACPan): kind = .wheel
         default: return
