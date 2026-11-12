@@ -277,9 +277,9 @@ struct SmoothScrollTests {
         var settings = WhiskerSettings()
         settings.profiles[0].scroll = ScrollSettings(linesPerNotch: 4, acceleration: 1, smoothScrolling: true)
         let native = CompiledSettings(settings, nativeWheelActive: [Self.mouse.id])
-        let request = try #require(request(processor.process(event(ScrollSample(vertical: .lines(-3))), settings: native)))
-        #expect(request.sample == ScrollSample(vertical: .lines(-3)) && !request.changed)
-        #expect(request.unsmoothed == .passThrough)
+        let smooth = try #require(request(processor.process(event(ScrollSample(vertical: .lines(-3))), settings: native)))
+        #expect(smooth.sample == ScrollSample(vertical: .lines(-3)) && !smooth.changed)
+        #expect(smooth.unsmoothed == .passThrough)
     }
 
     @Test func aMappedWheelDirectionActsAndNeverAlsoScrolls() {
