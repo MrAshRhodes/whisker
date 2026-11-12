@@ -58,6 +58,7 @@ final class EventEngine: @unchecked Sendable {
     private let clock: any ClickClock
     private let attributeMotion: @Sendable (TimeInterval) -> DeviceAttribution?
     private let makeMovement: ClickLockMovementFactory
+    private let chords: ChordRouter
     /// Called on the main queue when a hold-to-scroll starts, falls back or can't start.
     var onHoldStatus: (@Sendable (HoldScrollStatus) -> Void)?
     /// Called on the main queue when a Click Lock begins or ends.
@@ -77,7 +78,9 @@ final class EventEngine: @unchecked Sendable {
         frontmostApp: @escaping @Sendable () -> String?,
         clock: any ClickClock = SystemClickClock(),
         attributeMotion: @escaping @Sendable (TimeInterval) -> DeviceAttribution? = { _ in nil },
-        movement makeMovement: @escaping ClickLockMovementFactory = { runLoop, hooks in ClickLockMovementTap(runLoop: runLoop, hooks: hooks) }
+        movement makeMovement: @escaping ClickLockMovementFactory = { runLoop, hooks in ClickLockMovementTap(runLoop: runLoop, hooks: hooks) },
+        attributeChord: @escaping @Sendable (Int, Bool, TimeInterval) -> ChordSource? = { _, _, _ in nil },
+        postChordEvent: @escaping @Sendable (CGEvent) -> Void = { $0.post(tap: .cghidEventTap) }
     ) {
         self.clock = clock
         self.synthesizer = synthesizer
@@ -85,6 +88,8 @@ final class EventEngine: @unchecked Sendable {
         self.frontmostApp = frontmostApp
         self.attributeMotion = attributeMotion
         self.makeMovement = makeMovement
+        chords = ChordRouter(clock: clock, attribute: attributeChord, post: postChordEvent)
+        chords.host = self
     }
 
     var isRunning: Bool {
@@ -96,6 +101,7 @@ final class EventEngine: @unchecked Sendable {
     func update(_ settings: WhiskerSettings) {
         let app = frontmostApp()
         let location = Self.cursorLocation()
+        chords.update(engaged: settings.general.enabled && settings.profiles.contains { $0.chords?.isEmpty == false }, at: location)
         state.withLock { state in
             // A Click Lock began under the settings that are going away, so whatever changed, it ends.
             endClickLock(&state, settings.general.enabled ? .settingsChanged : .disabled, at: location)
@@ -171,6 +177,7 @@ final class EventEngine: @unchecked Sendable {
     func frontmostAppChanged() {
         let app = frontmostApp()
         let location = Self.cursorLocation()
+        chords.cancel(at: location)
         state.withLock { state in
             synthesizer.cancelPendingClicks()
             // What is still being spread out was aimed at the app that has gone.
@@ -199,6 +206,7 @@ final class EventEngine: @unchecked Sendable {
 
     func setCapturing(_ capturing: Bool) {
         let location = Self.cursorLocation()
+        if capturing { chords.cancel(at: location) }
         state.withLock { state in
             state.capturing = capturing
             if capturing { release(&state, at: location, because: .capture) }
@@ -209,6 +217,7 @@ final class EventEngine: @unchecked Sendable {
     /// Lets go of held buttons, a Click Lock and repeating keys (sleep, switching users, quitting).
     func releaseAll(because reason: ClickLockEnd = .quit) {
         let location = Self.cursorLocation()
+        chords.reset(at: location)
         state.withLock { release(&$0, at: location, because: reason) }
     }
 
@@ -221,6 +230,7 @@ final class EventEngine: @unchecked Sendable {
     /// The set of connected mice changed. A click gesture under way is called off if the mouse that started it is gone.
     func devicesChanged(connected: Set<String>) {
         let location = Self.cursorLocation()
+        chords.devicesChanged(connected: connected, at: location)
         state.withLock { state in
             if ClickInterruption.isCalledOffByDeviceChange(startedBy: state.actionSource, connected: connected) {
                 synthesizer.cancelPendingClicks()
@@ -307,6 +317,7 @@ final class EventEngine: @unchecked Sendable {
 
     func stop() {
         let location = Self.cursorLocation()
+        chords.reset(at: location)
         let movement = state.withLock { state -> (any ClickLockMovement)? in
             state.stopped = true
             release(&state, at: location, because: .quit)
@@ -520,6 +531,7 @@ final class EventEngine: @unchecked Sendable {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             // Releases may have been missed while the tap was off, so nothing held is trusted any more.
             let location = Self.cursorLocation()
+            chords.reset(at: location)
             state.withLock { release(&$0, at: location, because: .tapInterrupted) }
             tapLock.lock()
             let port = tap
@@ -531,6 +543,10 @@ final class EventEngine: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         }
         if event.getIntegerValueField(.eventSourceUserData) == EventSynthesizer.marker {
+            return Unmanaged.passUnretained(event)
+        }
+        if event.getIntegerValueField(.eventSourceUserData) == ChordRouter.marker {
+            chords.returned()
             return Unmanaged.passUnretained(event)
         }
         guard let kind = Self.inputKind(type, event) else { return Unmanaged.passUnretained(event) }
@@ -560,7 +576,14 @@ final class EventEngine: @unchecked Sendable {
             )
             pending.motionDevice = attributeMotion(now)
         }
-        let input = pending
+        return chords.route(event, pending, originalClickState: originalClickState)
+    }
+
+    /// Ordinary handling of one event, as if chords did not exist. A chord fallback replays held-back presses
+    /// through here, so they get exactly what they would have had.
+    func resolve(_ event: CGEvent, _ input: InputEvent, originalClickState: Int64) -> Unmanaged<CGEvent>? {
+        let kind = input.kind
+        let location = event.location
         let flags = CGEventFlags(rawValue: event.flags.rawValue & ModifierSet([.shift, .control, .option, .command]).eventFlags)
         let (plan, clickState) = state.withLock { state -> (EventPlan, Int64) in
             guard !state.capturing, !state.stopped else { return (.passThrough, originalClickState) }
@@ -708,5 +731,27 @@ final class EventEngine: @unchecked Sendable {
         event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: sample.horizontal.fixed)
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(sample.vertical.points.rounded()))
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(sample.horizontal.points.rounded()))
+    }
+}
+
+extension EventEngine: ChordRouterHost {
+    func chordGate(device: String, app: String?) -> ChordGate {
+        state.withLock { state in
+            let compiled = state.compiled
+            guard !state.capturing, !state.stopped, compiled.general.enabled, !compiled.isBypassed(app: app),
+                  compiled.settings.devices[device]?.enabled != false else { return .closed }
+            let allowPrimary = compiled.general.allowPrimaryButtonRemap
+            var chords = compiled.profile(device: device, app: app).chords
+            // Swapped, the secondary button is the primary one, and keeps the same protection.
+            if compiled.swappedDevices.contains(device), !allowPrimary {
+                chords.removeAll { $0.contains(1) && $0.modifiers.withoutFunction.isEmpty }
+            }
+            return ChordGate(chords: chords, allowPrimary: allowPrimary,
+                             outputsIdle: state.processor.ownsNoOutput && !state.debouncer.hasPending)
+        }
+    }
+
+    func performChord(_ action: Action, _ phase: ActionPhase, at location: CGPoint, flags: CGEventFlags) {
+        state.withLock { _ in synthesizer.perform(action, phase: phase, at: location, flags: flags, clickState: 1) }
     }
 }

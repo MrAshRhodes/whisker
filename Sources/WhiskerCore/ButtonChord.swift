@@ -1,7 +1,7 @@
 import Foundation
 
-/// Saved configuration only. The app deliberately does not intercept chord input until physical-connection
-/// attribution and retained Quartz-event replay have been verified together.
+/// Two buttons of one mouse pressed together. The event tap holds back an eligible first press for at most
+/// `pressWindow`, and only for a Bluetooth mouse it can tell apart from every other connected mouse.
 public struct ButtonChord: Equatable, Sendable, Codable {
     public static let windowRange = 20...200
     public static let defaultWindow = 75
@@ -79,11 +79,14 @@ extension Action {
 }
 
 public enum ButtonChordAvailability {
-    public static let explanation = "Two-button chords are not active in this build. Reliable physical-connection attribution and original-event replay are not yet verified. Ordinary mappings are unchanged."
+    public static let explanation = "Chords need Input Monitoring and a Bluetooth mouse Whisker can tell apart from every other connected mouse. USB mice, receivers and two mice of the same model pass presses through unchanged."
+    public static func latency(_ chord: ButtonChord) -> String {
+        "A single click of \(Trigger.buttonTitle(chord.first)) or \(Trigger.buttonTitle(chord.second)) waits up to \(chord.pressWindow) ms for its partner."
+    }
 }
 
-/// Never a model/settings identifier. A future adapter must mint a fresh token for each physical connection,
-/// and supply nil when a receiver, missing report or ambiguous report cannot identify that connection.
+/// Never a model/settings identifier. The adapter mints a fresh token for each physical connection, and
+/// supplies nil when a receiver, missing report or ambiguous report cannot identify that connection.
 public struct ChordConnection: Hashable, Sendable {
     public let token: UInt64
     public init(token: UInt64) { self.token = token }
@@ -92,7 +95,7 @@ public struct ChordConnection: Hashable, Sendable {
 public enum ChordPhase: Equatable, Sendable { case down, up, drag }
 
 /// Payload is deliberately opaque: fallback must retain the *whole* original event, not reconstruct its flags,
-/// position or click count. A future adapter resolves `forward` through ordinary mappings without re-entering
+/// position or click count. The adapter resolves `forward` through ordinary mappings without re-entering
 /// this recogniser. No Quartz event is retained or posted by the core.
 public struct ChordInput<Payload: Equatable & Sendable>: Equatable, Sendable {
     public var button: Int
@@ -120,7 +123,7 @@ public enum ChordEffect<Payload: Equatable & Sendable>: Equatable, Sendable {
     case move(Payload)
 }
 
-/// Dormant, deterministic recognition model; not wired into EventProcessor or the event tap.
+/// Deterministic recognition model; the event tap's chord router feeds it and carries out its effects.
 /// One pending event and one recognised pair globally is intentional: concurrent pairs fail open rather than
 /// creating output ownership that the existing synthesiser cannot safely arbitrate.
 public struct ChordRecognizer<Payload: Equatable & Sendable>: Sendable {
@@ -148,6 +151,10 @@ public struct ChordRecognizer<Payload: Equatable & Sendable>: Sendable {
     private var suppressed: Set<Press> = []
     private var lastTime: TimeInterval?
     public var deadline: TimeInterval? { pending?.deadline }
+    /// The press being held back, if any.
+    public var pendingPayload: Payload? { pending?.input.payload }
+    /// Nothing is held back, recognised or waiting for a consumed release.
+    public var isIdle: Bool { pending == nil && active == nil && suppressed.isEmpty }
 
     public init() {}
 
@@ -256,8 +263,8 @@ public struct ChordRecognizer<Payload: Equatable & Sendable>: Sendable {
 
     /// Context/profile/app/bypass change, recording, disconnect, sleep, disable, quit and tap interruption all
     /// discard pending input; never send stale clicks to a new app. Releases only the hold owned by this model,
-    /// once. Known consumed tails are suppressed until release; ambiguous release attribution remains an
-    /// adapter obligation before enabling live recognition.
+    /// once. Known consumed tails are suppressed until release; the adapter calls `settle()` once every button is up,
+    /// so a release it could not attribute never leaves a press suppressed or held forever.
     public mutating func cancel() -> [Effect] {
         let release = active.flatMap { $0.holding ? Effect.perform($0.chord.action, .up) : nil }
         if let pending, let connection = pending.input.connection {
@@ -269,6 +276,18 @@ public struct ChordRecognizer<Payload: Equatable & Sendable>: Sendable {
         pending = nil
         active = nil
         lastTime = nil
+        return release.map { [$0] } ?? []
+    }
+
+    /// Every button is physically up, so whatever the recogniser still thinks is held, recognised or consumed
+    /// had a release it could not attribute: forget it, letting go of a hold still owned, so nothing blocks the
+    /// next attempt or swallows a later press. A pending press means a button is down, so it is left alone.
+    public mutating func settle() -> [Effect] {
+        guard pending == nil else { return [] }
+        let release = active.flatMap { $0.holding ? Effect.perform($0.chord.action, .up) : nil }
+        active = nil
+        held.removeAll()
+        suppressed.removeAll()
         return release.map { [$0] } ?? []
     }
 

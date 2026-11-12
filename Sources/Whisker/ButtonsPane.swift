@@ -128,27 +128,7 @@ struct ButtonsPane: View {
                     )
                 }
             }
-            Section {
-                Text(ButtonChordAvailability.explanation)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Button("Record two-button chord…") {}
-                        .disabled(true)
-                        .help(ButtonChordAvailability.explanation)
-                    Button("Primary + secondary → middle click") {}
-                        .disabled(true)
-                        .help("Requires a modifier or primary-remapping opt-in, plus verified connection attribution.")
-                }
-                ForEach(resolved.chords.indices, id: \.self) { index in
-                    Text("\(resolved.chords[index].summary) — saved only (\(resolved.chords[index].pressWindow) ms)")
-                        .font(.footnote)
-                }
-            } header: {
-                Text("Two-button Chords — Not Active")
-            } footer: {
-                Text("No clicks are delayed. Future recognition would delay eligible single clicks by up to the press window (provisional: 75 ms, adjustable from 20–200 ms) and may need Input Monitoring. Granting it does not enable chords in this build.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
+            ChordSection(store: store, devices: model.devices, profile: profile, resolved: resolved.chords)
             if !inherited.isEmpty {
                 Section("Inherited") {
                     ForEach(inherited, id: \.mapping.key) { item in
@@ -323,6 +303,8 @@ struct ActionEditor: View {
     var trigger: Trigger? = nil
     /// Gesture actions: only actions a gesture can run are offered, and none of them repeats while held.
     var inGesture = false
+    /// Chord actions: a click, or anything a gesture can run.
+    var inChord = false
     /// A gesture slot picks its kind itself (it can also be left empty), so it asks for the details alone.
     var showsKindPicker = true
 
@@ -331,6 +313,7 @@ struct ActionEditor: View {
     private var kinds: [ActionKind] {
         ActionKind.allCases.filter { kind in
             guard !inGesture || kind.defaultAction.allowedInGestures else { return false }
+            guard !inChord || kind.defaultAction.allowedInChords else { return false }
             if let trigger, case .wheel = trigger, kind == .holdToScroll { return false }
             switch kind {
             case .pointerPreset: return action.kind == .pointerPreset || settings.firstPointerPreset() != nil
@@ -405,7 +388,7 @@ struct ActionEditor: View {
                 get: { shortcut },
                 set: { action = .shortcut($0, repeatWhileHeld: repeats) }
             ))
-            if !inGesture {
+            if !inGesture && !inChord {
                 Toggle("Repeat while held", isOn: Binding(
                     get: { repeats },
                     set: { action = .shortcut(shortcut, repeatWhileHeld: $0) }

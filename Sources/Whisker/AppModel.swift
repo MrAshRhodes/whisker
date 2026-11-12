@@ -126,7 +126,8 @@ final class AppModel: ObservableObject {
             synthesizer: synthesizer,
             attribute: { devices.attribute($0, at: $1) },
             frontmostApp: { frontApp.frontmostBundleID },
-            attributeMotion: { devices.attributeMotion(at: $0) }
+            attributeMotion: { devices.attributeMotion(at: $0) },
+            attributeChord: { devices.attributeChord(button: $0, down: $1, at: $2) }
         )
         engine.onHoldStatus = { [weak self] status in
             DispatchQueue.main.async { self?.holdToScrollNote = status.message }
