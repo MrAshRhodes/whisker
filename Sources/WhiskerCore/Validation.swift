@@ -290,10 +290,38 @@ extension WhiskerSettings {
                     mapping.continuousInput?.distance = continuous.effectiveDistance
                 }
             }
+            if let gestures = mapping.gestures {
+                mapping.gestures = repair(gestures, of: mapping, path: "\(mappingPath).gestures", issues: &issues)
+            }
             kept.append(mapping)
         }
         profile.mappings = kept
         return profile
+    }
+
+    /// The gestures of a button mapping with what can't be used taken out: the threshold clamped and each action that
+    /// isn't a valid gesture action dropped. Gestures on anything but a button are dropped altogether.
+    private static func repair(_ gestures: ButtonGestures, of mapping: Mapping, path: String, issues: inout [ValidationIssue]) -> ButtonGestures? {
+        guard case .button = mapping.trigger else {
+            issues.append(ValidationIssue(path, "Gestures only apply to mouse buttons."))
+            return nil
+        }
+        var gestures = gestures
+        let range = ButtonGestures.thresholdRange
+        if !range.contains(gestures.threshold) {
+            issues.append(ValidationIssue("\(path).threshold", "Must be between \(range.lowerBound) and \(range.upperBound)."))
+            gestures.threshold = range.clamp(gestures.threshold)
+        }
+        for direction in GestureDirection.allCases {
+            guard let action = gestures.action(for: direction), let problem = problem(withGestureAction: action) else { continue }
+            issues.append(ValidationIssue("\(path).\(direction.rawValue)", problem))
+            gestures.setAction(nil, for: direction)
+        }
+        if let tap = gestures.tap, let problem = problem(withGestureAction: tap) {
+            issues.append(ValidationIssue("\(path).tap", problem))
+            gestures.tap = nil
+        }
+        return gestures
     }
 
     /// Why a single mapping can't be used, or nil when it is fine.
@@ -301,15 +329,25 @@ extension WhiskerSettings {
         switch mapping.trigger {
         case .button(let number):
             guard Trigger.buttonRange.contains(number) else { return "Button numbers run from 0 to 31." }
-            if number == 0, mapping.modifiers.isEmpty, !allowPrimary, mapping.action != .passthrough {
+            if number == 0, mapping.modifiers.isEmpty, !allowPrimary, mapping.action != .passthrough || mapping.gestures != nil {
                 return "The primary button can only be remapped with a modifier key, unless remapping it is turned on in General."
             }
         case .wheel:
             break
         }
-        switch mapping.action {
+        if case .slowPointer = mapping.action, case .wheel = mapping.trigger {
+            return "Slow pointer needs a button to hold, not a wheel direction."
+        }
+        if case .autoScroll = mapping.action, case .wheel = mapping.trigger {
+            return "Auto-scroll needs a mouse button as its trigger."
+        }
+        return problem(with: mapping.action)
+    }
+
+    /// Why an action can't be used, or nil when it is fine.
+    public static func problem(with action: Action) -> String? {
+        switch action {
         case .slowPointer(let factor):
-            guard case .button = mapping.trigger else { return "Slow pointer needs a button to hold, not a wheel direction." }
             guard SlowPointer.isValid(factor) else { return "Slow pointer factor must be between 0.1 and 0.9." }
         case .click(let button, _):
             guard Trigger.buttonRange.contains(button) else { return "Click buttons run from 0 to 31." }
@@ -319,7 +357,6 @@ extension WhiskerSettings {
             let range = HoldScroll.sensitivityRange
             guard config.isValid else { return "Hold to Scroll sensitivity must be between \(String(format: "%g", range.lowerBound)) and \(String(format: "%g", range.upperBound))." }
         case .autoScroll(let config):
-            guard case .button = mapping.trigger else { return "Auto-scroll needs a mouse button as its trigger." }
             let zone = AutoScroll.deadZoneRange
             let speed = AutoScroll.maxSpeedRange
             guard config.isValid else {
@@ -338,6 +375,12 @@ extension WhiskerSettings {
             break
         }
         return nil
+    }
+
+    /// Why an action can't be a gesture action, or nil when it can. Gestures only run actions that happen once.
+    public static func problem(withGestureAction action: Action) -> String? {
+        guard action.allowedInGestures else { return "\(action.kind.title) can't be a gesture action." }
+        return problem(with: action)
     }
 
     static func inheritanceLoops(from id: String, in profiles: [Profile]) -> Bool {

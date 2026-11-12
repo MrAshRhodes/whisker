@@ -107,6 +107,8 @@ final class EventEngine: @unchecked Sendable {
             }
             // A hold whose mapping was removed ends now; one that is merely edited keeps the settings it started with.
             if !state.compiled.needsMotion { state.processor.cancelHold() }
+            // A gesture began under the settings that are going away, so it is called off rather than finished under new ones.
+            state.processor.cancelGesture()
             syncBypass(&state, app: app, at: location)
             syncAutoScroll(&state)
             reportHold(&state)
@@ -150,8 +152,9 @@ final class EventEngine: @unchecked Sendable {
     }
 
     /// The app in front changed. A click gesture under way was aimed at the app that has gone, so it is called
-    /// off. Whisker also lets go of what it holds when the new app is on the bypass list; the event tap itself
-    /// already passes events through for it, this only ends what was started before.
+    /// off, and so is a button gesture or a hold to scroll. Whisker also lets go of what it holds when the new app
+    /// is on the bypass list; the event tap itself already passes events through for it, this only ends what was
+    /// started before.
     func frontmostAppChanged() {
         let app = frontmostApp()
         let location = Self.cursorLocation()
@@ -162,6 +165,7 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.cancelSequence(.applicationChanged)
             // The pointer is anchored in the window that was in front, so a hold never carries over to another app.
             state.processor.cancelHold()
+            state.processor.cancelGesture()
             // An auto-scroll is addressed to the window under its anchor, so it ends rather than scroll the new app.
             state.processor.cancelAutoScroll()
             state.processor.cancelSlowPointer()
@@ -202,8 +206,9 @@ final class EventEngine: @unchecked Sendable {
             synthesizer.cancelSmoothScroll(unlessConnected: connected)
             state.debouncer.devicesChanged(connected: connected)
             armExpiry(&state)
-            // A hold started by a device that has gone ends now.
+            // A hold started by a device that has gone ends now, and so does a gesture.
             state.processor.cancelHold(unlessConnected: connected)
+            state.processor.cancelGesture(unlessConnected: connected)
             state.processor.cancelSlowPointer(unlessAvailable: connected)
             // A swapped button of a mouse that has gone can't be released by the mouse itself.
             for (_, action) in state.processor.releaseSwaps(unlessConnected: connected) {
@@ -439,8 +444,8 @@ final class EventEngine: @unchecked Sendable {
             location: PointerPoint(x: location.x, y: location.y),
             clickCount: originalClickState
         )
-        // Movement is only decoded and attributed while a hold wants it; every other drag skips this.
-        if case .buttonDragged = kind, state.withLock({ $0.processor.isHolding }) {
+        // Movement is only decoded and attributed while a hold or a gesture wants it; every other drag skips this.
+        if case .buttonDragged = kind, state.withLock({ $0.processor.wantsMotion }) {
             pending.motion = PointerMotion(
                 dx: Int(event.getIntegerValueField(.mouseEventDeltaX)),
                 dy: Int(event.getIntegerValueField(.mouseEventDeltaY))

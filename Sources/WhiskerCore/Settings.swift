@@ -328,16 +328,31 @@ public struct Mapping: Equatable, Sendable {
     /// Scroll Left/Right only: nil acts on discrete notches alone; otherwise a mouse's smooth horizontal
     /// scrolling also fires the action once per burst, leaving any vertical movement alone.
     public var continuousInput: ContinuousWheelInput?
+    /// Button triggers only: opt-in directional gestures. When set the button is a gesture button and `action` is
+    /// not used (the Buttons pane stores Default there).
+    public var gestures: ButtonGestures?
 
-    public init(trigger: Trigger, modifiers: ModifierSet = [], action: Action, repeatPerNotch: Bool = false, continuousInput: ContinuousWheelInput? = nil) {
+    public init(
+        trigger: Trigger, modifiers: ModifierSet = [], action: Action, repeatPerNotch: Bool = false,
+        continuousInput: ContinuousWheelInput? = nil, gestures: ButtonGestures? = nil
+    ) {
         self.trigger = trigger
         self.modifiers = modifiers
         self.action = action
         self.repeatPerNotch = repeatPerNotch
         self.continuousInput = continuousInput
+        self.gestures = gestures
     }
 
     public var key: MappingKey { MappingKey(trigger, modifiers) }
+
+    /// Whether the mapping needs to see pointer movement, not just buttons and the wheel.
+    public var usesMotion: Bool { gestures != nil || action.usesMotion }
+
+    /// One line describing what the mapping does, for lists.
+    public var summary: String { gestures?.summary ?? action.summary }
+
+    public var symbolName: String { gestures == nil ? action.symbolName : "arrow.up.and.down.and.arrow.left.and.right" }
 }
 
 // MARK: - Coding
@@ -539,7 +554,7 @@ extension Profile: Codable {
 }
 
 extension Mapping: Codable {
-    private enum CodingKeys: String, CodingKey { case trigger, modifiers, action, repeatPerNotch, continuousInput }
+    private enum CodingKeys: String, CodingKey { case trigger, modifiers, action, repeatPerNotch, continuousInput, gestures }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -548,6 +563,7 @@ extension Mapping: Codable {
         action = try c.decode(Action.self, forKey: .action)
         repeatPerNotch = try c.decodeIfPresent(Bool.self, forKey: .repeatPerNotch) ?? false
         continuousInput = try c.decodeIfPresent(ContinuousWheelInput.self, forKey: .continuousInput)
+        gestures = try c.decodeIfPresent(ButtonGestures.self, forKey: .gestures)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -557,6 +573,7 @@ extension Mapping: Codable {
         try c.encode(action, forKey: .action)
         if repeatPerNotch { try c.encode(true, forKey: .repeatPerNotch) }
         if let continuousInput { try c.encode(continuousInput, forKey: .continuousInput) }
+        if let gestures { try c.encode(gestures, forKey: .gestures) }
     }
 }
 

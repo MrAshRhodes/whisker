@@ -77,6 +77,27 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   movement, drops sideways drift and treats a diagonal as vertical; its threshold is
   provisional and not yet verified on thumb or finger trackballs), speed and direction. It needs Input Monitoring, is not yet verified on hardware, and falls
   back to normal pointer movement when Whisker can't tell which mouse you're using.
+- **Button gestures (opt-in).** Turn on **Gestures** for a button in Buttons and give it up to
+  five actions: one each for holding the button while you move the mouse up, down, left or
+  right, and an optional **Tap** for letting go without having moved. The first movement that
+  adds up to the distance you choose (60 units to start, from 20 to 400, counted in the movement
+  macOS reports for the mouse) and runs mostly one way, at least twice as far along one axis as
+  across it, picks the direction; a diagonal, or jitter that goes nowhere, picks nothing.
+  Letting go runs the action once. The pointer keeps moving, but the app sees no click or drag
+  from that button, and other buttons, other mappings and an unmodified primary click carry on
+  as usual (a gesture on the primary button follows the same safeguard as any other mapping of
+  it). Only actions that happen once can be chosen, so not Click, Hold to Scroll, Auto-scroll,
+  Slow pointer while held, a shortcut sequence, a repeating shortcut or a pointer speed preset.
+  It needs Input Monitoring and a mouse Whisker can identify exactly: only the mouse you pressed
+  counts, and the button keeps its normal behaviour when Whisker can't tell which mouse that
+  was. Changing app (even if you come straight back), losing the mouse, changing settings, and
+  switching Whisker off, bypassing it, sleep or quitting all call a gesture off, and nothing
+  runs. It works with buttons macOS reports as ordinary presses and releases. Whether a
+  particular gesture button does, such as the one on the Logitech MX Master 3S, is not yet
+  verified, no mouse is listed as supported, and a button macOS does not report is out of reach
+  (support for those is [#25](https://github.com/MrAshRhodes/whisker/issues/25)). The distances
+  and rules are provisional and not yet verified on hardware. See the
+  [guide](https://mrashrhodes.github.io/whisker/guide.html#button-gestures).
 - **Auto-scroll (experimental).** Press a button you choose to anchor the pointer, then let go:
   the window under that spot keeps scrolling, faster the further you move the pointer from it,
   down when the pointer is below the anchor and up when it is above (and sideways too, if you

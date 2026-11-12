@@ -134,7 +134,10 @@ struct ButtonsPane: View {
                         HStack {
                             TriggerLabel(mapping: item.mapping)
                             Spacer()
-                            Label(store.settings.summary(of: item.mapping.action), systemImage: item.mapping.action.symbolName)
+                            Label(
+                                item.mapping.gestures == nil ? store.settings.summary(of: item.mapping.action) : item.mapping.summary,
+                                systemImage: item.mapping.symbolName
+                            )
                                 .foregroundStyle(.secondary)
                             Text("from \(store.settings.profile(id: item.sourceProfileID)?.name ?? item.sourceProfileID)")
                                 .font(.footnote).foregroundStyle(.tertiary)
@@ -232,7 +235,28 @@ struct MappingRow: View {
                 .buttonStyle(.borderless)
                 .help("Remove this mapping")
             }
-            ActionEditor(action: $mapping.action, settings: settings)
+            if case .button = mapping.trigger {
+                Toggle("Gestures", isOn: Binding(
+                    get: { mapping.gestures != nil },
+                    set: { on in
+                        guard on != (mapping.gestures != nil) else { return }
+                        var updated = mapping
+                        updated.gestures = on ? ButtonGestures() : nil
+                        // The button's own action isn't used while it has gestures; older versions of Whisker leave it alone.
+                        if on { updated.action = .passthrough }
+                        mapping = updated
+                    }
+                ))
+                .help("Hold the button, move the mouse up, down, left or right and let go to run an action for each direction; letting go without moving can run one too. Not yet verified on hardware.")
+            }
+            if mapping.gestures != nil {
+                GestureEditor(gestures: Binding(
+                    get: { mapping.gestures ?? ButtonGestures() },
+                    set: { mapping.gestures = $0 }
+                ), settings: settings)
+            } else {
+                ActionEditor(action: $mapping.action, settings: settings)
+            }
             if case .wheel = mapping.trigger {
                 Toggle("Repeat for every notch", isOn: $mapping.repeatPerNotch)
             }
@@ -275,10 +299,17 @@ struct ActionEditor: View {
     @EnvironmentObject private var model: AppModel
     @Binding var action: Action
     let settings: WhiskerSettings
+    /// Gesture actions: only actions a gesture can run are offered, and none of them repeats while held.
+    var inGesture = false
+    /// A gesture slot picks its kind itself (it can also be left empty), so it asks for the details alone.
+    var showsKindPicker = true
 
     /// Pointer speed presets are offered once there is a preset to switch to.
     private var kinds: [ActionKind] {
-        ActionKind.allCases.filter { $0 != .pointerPreset || action.kind == .pointerPreset || settings.firstPointerPreset() != nil }
+        ActionKind.allCases.filter {
+            (!inGesture || $0.defaultAction.allowedInGestures)
+                && ($0 != .pointerPreset || action.kind == .pointerPreset || settings.firstPointerPreset() != nil)
+        }
     }
 
     private func newAction(for kind: ActionKind) -> Action {
@@ -290,12 +321,14 @@ struct ActionEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Picker("Action", selection: Binding(
-                get: { action.kind },
-                set: { kind in if kind != action.kind { action = newAction(for: kind) } }
-            )) {
-                ForEach(kinds) { kind in
-                    Label(kind.title, systemImage: kind.symbolName).tag(kind)
+            if showsKindPicker {
+                Picker("Action", selection: Binding(
+                    get: { action.kind },
+                    set: { kind in if kind != action.kind { action = newAction(for: kind) } }
+                )) {
+                    ForEach(kinds) { kind in
+                        Label(kind.title, systemImage: kind.symbolName).tag(kind)
+                    }
                 }
             }
             details
@@ -338,10 +371,12 @@ struct ActionEditor: View {
                 get: { shortcut },
                 set: { action = .shortcut($0, repeatWhileHeld: repeats) }
             ))
-            Toggle("Repeat while held", isOn: Binding(
-                get: { repeats },
-                set: { action = .shortcut(shortcut, repeatWhileHeld: $0) }
-            ))
+            if !inGesture {
+                Toggle("Repeat while held", isOn: Binding(
+                    get: { repeats },
+                    set: { action = .shortcut(shortcut, repeatWhileHeld: $0) }
+                ))
+            }
         case .shortcutSequence(let steps):
             SequenceEditor(steps: Binding(get: { steps }, set: { action = .shortcutSequence($0) }))
         case .navigate(let direction):

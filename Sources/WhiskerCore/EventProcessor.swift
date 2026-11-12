@@ -177,6 +177,7 @@ public struct EventProcessor: Sendable {
     private var scaler = ScrollScaler()
     private var hold: HoldScrollSession?
     private var idleHoldStatus: HoldScrollStatus = .idle
+    private var gesture: GestureSession?
     private var horizontalStream = HorizontalStream()
     private var autoScroll: AutoScrollSession?
     private var autoScrollGeneration = 0
@@ -196,6 +197,12 @@ public struct EventProcessor: Sendable {
     /// Whether a hold-to-scroll is in progress and wants the movement details of drag events.
     public var isHolding: Bool { hold != nil }
 
+    /// Whether a button gesture is still waiting for enough movement to pick a direction.
+    public var isRecognisingGesture: Bool { gesture?.state == .undecided }
+
+    /// Whether drag events need their movement details read: a hold is under way or a gesture is waiting for movement.
+    public var wantsMotion: Bool { hold != nil || isRecognisingGesture }
+
     /// The auto-scroll in progress. The processor only decides when one starts and ends; whoever reads this
     /// runs it, and must stop it as soon as the session is gone or is no longer the one it was running.
     public var autoScrollSession: AutoScrollSession? { autoScroll }
@@ -211,7 +218,7 @@ public struct EventProcessor: Sendable {
         case .buttonDown(let button): return buttonDown(button, event, settings, slowPointerDevices: slowPointerDevices)
         case .buttonUp(let button):
             if slowPointer.end(button: button, device: event.device) { return .swallow }
-            return buttonUp(button, event)
+            return buttonUp(button, event, settings)
         case .buttonDragged(let button): return dragged(button, event, settings)
         case .scroll(let sample): return scroll(sample, event, settings)
         }
@@ -229,6 +236,7 @@ public struct EventProcessor: Sendable {
         released += swapped.map { (button: $0.button, action: Action.click(button: $0.target, modifiers: [])) }
         orphaned.formUnion(swapped.map(\.button))
         endHold(cancelled: true)
+        endGesture(cancelled: true)
         autoScroll = nil
         lastWheelEvent.removeAll()
         notchTimes.removeAll()
@@ -285,6 +293,26 @@ public struct EventProcessor: Sendable {
         if releaseButton { orphaned.insert(session.button) }
     }
 
+    /// Calls off a gesture that is being recognised, without waiting for its button: nothing is performed, now or
+    /// when the button comes up (the app in front changed, the settings were replaced, the mouse went away…). The
+    /// button is still down, so it stays swallowed and its movement stays plain pointer movement until it comes up.
+    public mutating func cancelGesture() {
+        endGesture(cancelled: false)
+    }
+
+    /// Calls off the gesture when the device that started it is no longer among `connected`.
+    public mutating func cancelGesture(unlessConnected connected: Set<String>) {
+        guard let gesture, !connected.contains(gesture.device) else { return }
+        endGesture(cancelled: false)
+    }
+
+    private mutating func endGesture(cancelled releaseButton: Bool) {
+        guard let session = gesture else { return }
+        gesture = nil
+        // After a full release nothing is held any more, but the physical button may still be down.
+        if releaseButton { orphaned.insert(session.button) }
+    }
+
     // MARK: Buttons
 
     private func isActive(_ event: InputEvent, _ settings: CompiledSettings) -> Bool {
@@ -309,6 +337,7 @@ public struct EventProcessor: Sendable {
         if slowPointer.owns(button: button, device: event.device) { return .swallow }
         if isActive(event, settings),
            let mapping = lookup(.button(button), event, settings, exactOnly: false),
+           mapping.gestures == nil,
            case .slowPointer(let factor) = mapping.action {
             if button == 0, mapping.modifiers.isEmpty, !settings.general.allowPrimaryButtonRemap { return .passThrough }
             return slowPointer.begin(button: button, device: event.device, factor: factor, available: slowPointerDevices) ? .swallow : .passThrough
@@ -318,6 +347,7 @@ public struct EventProcessor: Sendable {
         orphaned.remove(button)
         swaps.forget(button, from: event.device)
         if hold?.button == button { endHold(cancelled: false) }
+        if gesture?.button == button { gesture = nil }
         guard isActive(event, settings) else { return .passThrough }
         if let device = event.device, let target = ButtonSwap.target(of: button, in: event, settings: settings) {
             swaps.began(button, as: target, from: device.id)
@@ -326,6 +356,7 @@ public struct EventProcessor: Sendable {
         guard let mapping = lookup(.button(button), event, settings, exactOnly: false) else { return .passThrough }
         // The primary button with no modifiers is the way back if a mapping goes wrong.
         if button == 0, mapping.modifiers.isEmpty, !settings.general.allowPrimaryButtonRemap { return .passThrough }
+        if let gestures = mapping.gestures { return beginGesture(button, gestures, event, settings) }
         let action = mapping.action
         if action == .passthrough { return .passThrough }
         if case .holdToScroll(let config) = action { return beginHold(button, config, event) }
@@ -338,8 +369,8 @@ public struct EventProcessor: Sendable {
     /// The press of an auto-scroll trigger. Pressed while its own auto-scroll runs, it stops it and does nothing
     /// else; otherwise it starts one anchored where the pointer is.
     private mutating func toggleAutoScroll(_ button: Int, _ key: MappingKey, _ config: AutoScroll, _ event: InputEvent, running: AutoScrollSession?) -> EventPlan {
-        if running?.key == key || hold != nil {
-            // A hold owns the pointer, so an auto-scroll can't start until it ends.
+        if running?.key == key || hold != nil || gesture != nil {
+            // A hold or a gesture owns the pointer, so an auto-scroll can't start until it ends.
             held[button] = .autoScroll(config)
             return .swallow
         }
@@ -357,20 +388,40 @@ public struct EventProcessor: Sendable {
             return .passThrough
         }
         held[button] = .holdToScroll(config)
-        // One hold at a time: a second hold button is swallowed and does nothing.
-        if hold == nil {
+        // One hold at a time, and not while a gesture is being recognised: another hold button is swallowed and does nothing.
+        if hold == nil, gesture == nil {
             hold = HoldScrollSession(button: button, device: device.id, app: event.app, anchor: anchor, config: config)
             idleHoldStatus = .idle
         }
         return .swallow
     }
 
-    private mutating func buttonUp(_ button: Int, _ event: InputEvent) -> EventPlan {
+    private mutating func beginGesture(_ button: Int, _ config: ButtonGestures, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
+        // Movement can only be kept to the pressing device when the device is known for certain, and there has to be
+        // something to perform. Otherwise the button keeps doing what it normally does.
+        guard let device = event.device, device.exact, !config.isEmpty else { return .passThrough }
+        held[button] = Action.none
+        // One gesture at a time, and not during a hold: another gesture button is swallowed and does nothing.
+        if gesture == nil, hold == nil {
+            let profile = settings.profile(device: device.id, app: event.app).profileID
+            gesture = GestureSession(button: button, device: device.id, app: event.app, profile: profile, config: config)
+        }
+        return .swallow
+    }
+
+    private mutating func buttonUp(_ button: Int, _ event: InputEvent, _ settings: CompiledSettings) -> EventPlan {
         if hold?.button == button { endHold(cancelled: false) }
+        var outcome = GestureOutcome.nothing
+        if let session = gesture, session.button == button {
+            gesture = nil
+            // Only a gesture that nothing has changed under can finish: Whisker still on and the same app in front.
+            if isActive(event, settings), session.app == event.app { outcome = session.release(from: event.device) }
+        }
         guard let action = held.removeValue(forKey: button) else {
             if let target = swaps.end(button, from: event.device) { return .perform(.click(button: target, modifiers: []), .up) }
             return orphaned.remove(button) != nil ? .swallow : .passThrough
         }
+        if case .perform(let gestureAction) = outcome { return .perform(gestureAction, .once) }
         return action.followsTrigger ? .perform(action, .up) : .swallow
     }
 
@@ -379,6 +430,15 @@ public struct EventProcessor: Sendable {
         guard let action = held[button] else {
             if let target = swaps.target(of: button, from: event.device) { return .dragAs(button: target, modifiers: []) }
             return orphaned.contains(button) ? .dragAsMove : .passThrough
+        }
+        if gesture?.button == button {
+            guard isActive(event, settings), gesture?.app == event.app else {
+                gesture = nil
+                return .dragAsMove
+            }
+            if let motion = event.motion { gesture?.move(motion, from: event.motionDevice) }
+            if gesture?.state == .cancelled { gesture = nil }
+            return .dragAsMove
         }
         if hold?.button == button {
             guard isActive(event, settings), hold?.app == event.app else {

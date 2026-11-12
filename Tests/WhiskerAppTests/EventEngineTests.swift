@@ -261,6 +261,130 @@ struct EventEngineTests {
         #expect(statuses.withLock { seen } == [.scrolling, .fellBack(.attributionLost)])
     }
 
+    // MARK: Button gestures
+
+    static let gestureTap = Action.media(.playPause)
+    static let gestureLeft = Action.navigate(.back)
+    static let gestures = ButtonGestures(
+        up: .missionControl(.missionControl), down: .missionControl(.showDesktop),
+        left: gestureLeft, right: .navigate(.forward), tap: gestureTap, threshold: 60
+    )
+    static let elsewhere = DeviceAttribution(id: "1234:5678", exact: true)
+    static let gestureApp = "com.example.app"
+
+    static func makeGestureEngine(_ recorder: Recorder, _ motion: Motion, front: EventEngineBypassTests.FrontApp? = nil) -> EventEngine {
+        var settings = WhiskerSettings()
+        settings.profiles[0].mappings = [Mapping(trigger: .button(3), action: .passthrough, gestures: gestures)]
+        let engine = EventEngine(
+            synthesizer: recorder, attribute: { _, _ in ball }, frontmostApp: { front?.bundleID ?? gestureApp },
+            attributeMotion: { _ in motion.read() }
+        )
+        engine.update(settings)
+        return engine
+    }
+
+    static func release() -> CGEvent { EventEngineTests.button3(down: false) }
+
+    @Test func aGestureButtonIsSwallowedMovesThePointerAndPerformsItsDirectionOnceOnRelease() {
+        let recorder = Recorder()
+        let engine = Self.makeGestureEngine(recorder, Motion())
+        #expect(engine.handle(.otherMouseDown, Self.holdPress()) == nil)
+        // The pointer keeps moving, the app sees no drag, and what is picked can't change any more.
+        for (dx, dy) in [(-30, 2), (-40, 1), (0, 90)] {
+            let drag = Self.holdDrag(dx, dy)
+            #expect(engine.handle(.otherMouseDragged, drag) != nil)
+            #expect(drag.type == .mouseMoved)
+        }
+        let primary = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: Self.anchor, mouseButton: .left)!
+        #expect(engine.handle(.leftMouseDown, primary) != nil)
+        #expect(recorder.calls.isEmpty)
+
+        #expect(engine.handle(.otherMouseUp, Self.release()) == nil)
+        #expect(recorder.calls == [.init(action: Self.gestureLeft, phase: .once, clickState: 1)])
+
+        // Over: its movement is nobody's business again and nothing runs twice.
+        let drag = Self.holdDrag(-90, 0)
+        #expect(engine.handle(.otherMouseDragged, drag) != nil)
+        #expect(drag.type == .otherMouseDragged)
+        #expect(recorder.calls.count == 1)
+    }
+
+    @Test func aTapRunsOnReleaseAndMovementThatIsNotThePressingMiceNeverPicksADirection() {
+        let recorder = Recorder()
+        let motion = Motion()
+        let engine = Self.makeGestureEngine(recorder, motion)
+        _ = engine.handle(.otherMouseDown, Self.holdPress())
+        _ = engine.handle(.otherMouseDragged, Self.holdDrag(3, -2))
+        _ = engine.handle(.otherMouseUp, Self.release())
+        #expect(recorder.calls.map(\.action) == [Self.gestureTap])
+
+        // The pointer is going a long way, but another mouse is moving it.
+        motion.device = Self.elsewhere
+        _ = engine.handle(.otherMouseDown, Self.holdPress())
+        #expect(engine.handle(.otherMouseDragged, Self.holdDrag(-200, 0)) != nil)
+        _ = engine.handle(.otherMouseUp, Self.release())
+        #expect(recorder.calls.map(\.action) == [Self.gestureTap, Self.gestureTap])
+
+        // Movement nobody can be blamed for keeps coming: the attempt is called off rather than guessed at.
+        motion.device = nil
+        _ = engine.handle(.otherMouseDown, Self.holdPress())
+        for _ in 0..<3 { _ = engine.handle(.otherMouseDragged, Self.holdDrag(-200, 0)) }
+        _ = engine.handle(.otherMouseUp, Self.release())
+        #expect(recorder.calls.count == 2)
+    }
+
+    @Test func movementIsOnlyReadWhileAGestureIsStillOpen() {
+        let recorder = Recorder()
+        let motion = Motion()
+        let engine = Self.makeGestureEngine(recorder, motion)
+        #expect(engine.handle(.otherMouseDragged, Self.holdDrag(5, 5)) != nil)
+        #expect(motion.reads == 0)
+        _ = engine.handle(.otherMouseDown, Self.holdPress())
+        _ = engine.handle(.otherMouseDragged, Self.holdDrag(10, 0))
+        #expect(motion.reads == 1)
+        _ = engine.handle(.otherMouseDragged, Self.holdDrag(70, 0))
+        #expect(motion.reads == 2)
+        // A direction is picked: nothing is read any more, and neither is it once the button is up.
+        _ = engine.handle(.otherMouseDragged, Self.holdDrag(70, 0))
+        _ = engine.handle(.otherMouseUp, Self.release())
+        _ = engine.handle(.otherMouseDragged, Self.holdDrag(70, 0))
+        #expect(motion.reads == 2)
+    }
+
+    @Test func appChangesDeviceLossSettingsAndCaptureCallOffTheGesture() {
+        func performs(_ end: (EventEngine, EventEngineBypassTests.FrontApp) -> Void) -> Bool {
+            let recorder = Recorder()
+            let front = EventEngineBypassTests.FrontApp()
+            front.activate(Self.gestureApp)
+            let engine = Self.makeGestureEngine(recorder, Motion(), front: front)
+            _ = engine.handle(.otherMouseDown, Self.holdPress())
+            _ = engine.handle(.otherMouseDragged, Self.holdDrag(-80, 0))
+            end(engine, front)
+            _ = engine.handle(.otherMouseDragged, Self.holdDrag(-80, 0))
+            _ = engine.handle(.otherMouseUp, Self.release())
+            return recorder.calls == [.init(action: Self.gestureLeft, phase: .once, clickState: 1)]
+        }
+        #expect(performs { _, _ in })
+        #expect(performs { engine, _ in engine.devicesChanged(connected: [Self.ball.id]) })
+        // Leaving the app and coming back is still a change of app.
+        #expect(!performs { engine, front in
+            front.activate("com.example.other")
+            engine.frontmostAppChanged()
+            front.activate(Self.gestureApp)
+            engine.frontmostAppChanged()
+        })
+        #expect(!performs { engine, _ in engine.devicesChanged(connected: []) })
+        #expect(!performs { engine, _ in engine.setCapturing(true) })
+        #expect(!performs { engine, _ in engine.releaseAll() })
+        #expect(!performs { engine, _ in engine.stop() })
+        #expect(!performs { engine, _ in
+            var off = WhiskerSettings()
+            off.general.enabled = false
+            engine.update(off)
+        })
+        #expect(!performs { engine, _ in engine.update(WhiskerSettings()) })
+    }
+
     @Test func stoppedEngineLetsPressesThrough() {
         let recorder = Recorder()
         let engine = Self.makeEngine(recorder)

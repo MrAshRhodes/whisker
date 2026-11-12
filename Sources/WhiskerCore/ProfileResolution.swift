@@ -44,9 +44,9 @@ public struct ResolvedProfile: Equatable, Sendable {
 }
 
 extension WhiskerSettings {
-    /// Whether an enabled mapping in any profile needs pointer movement (hold to scroll).
+    /// Whether an enabled mapping in any profile needs pointer movement (hold to scroll, button gestures).
     public var usesMotionActions: Bool {
-        general.enabled && profiles.contains { $0.mappings.contains { $0.action.usesMotion } }
+        general.enabled && profiles.contains { $0.mappings.contains { $0.usesMotion } }
     }
 
     /// The profile that applies to a device in an app.
