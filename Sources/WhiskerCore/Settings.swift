@@ -292,7 +292,7 @@ public struct Profile: Equatable, Sendable, Identifiable {
     /// Nil inherits the parent's scroll settings.
     public var scroll: ScrollSettings?
     public var mappings: [Mapping]
-    /// Nil inherits; an explicit empty list disables inherited chords. Dormant in the current app.
+    /// Nil inherits; an explicit empty list disables inherited chords.
     public var chords: [ButtonChord]?
 
     public init(

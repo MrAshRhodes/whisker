@@ -21,6 +21,8 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     @Published private(set) var recentInput: Set<String> = []
     /// Best-effort battery state by device id. In memory only, and never reaches `onChange` or the event path.
     @Published private(set) var batteries: [String: BatteryState] = [:]
+    /// Whether each listed device can form two-button chords, by device id. Only meaningful while listening.
+    @Published private(set) var chordEligibility: [String: ChordEligibility] = [:]
     var onChange: (([ConnectedDevice]) -> Void)?
 
     var canIdentifyDevices: Bool { identification == .listening }
@@ -35,6 +37,11 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     private var deviceIDs: [IOHIDDevice: String] = [:]
     private var opened = false
     private let attributor = OSAllocatedUnfairLock(initialState: DeviceAttributor())
+    /// Button presses and releases per physical connection, for two-button chords.
+    private let chordAttributor = OSAllocatedUnfairLock(initialState: ChordAttributor())
+    /// Main thread only. The chord token of each pointing interface: the lowest runtime id among the interfaces of
+    /// its physical device, so a reconnection never gets an old token.
+    private var chordTokens: [IOHIDDevice: UInt64] = [:]
     /// Movement reports arrive at the mouse's polling rate, so they are only kept while a mapping needs them.
     private let trackingMotion = OSAllocatedUnfairLock(initialState: false)
     /// Main thread only. One time per device, never saved or logged.
@@ -71,6 +78,11 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
     /// Called from the event tap thread.
     func attributeMotion(at time: TimeInterval) -> DeviceAttribution? {
         attributor.withLock { $0.attributeMotion(at: time) }
+    }
+
+    /// Called from the event tap thread.
+    func attributeChord(button: Int, down: Bool, at time: TimeInterval) -> ChordSource? {
+        chordAttributor.withLock { $0.attribute(button: button, down: down, at: time) }
     }
 
     func setTrackingMotion(_ tracking: Bool) {
@@ -261,6 +273,7 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
             for key in device.physicalKeys { owner[key] = device.id }
         }
         deviceIDs = interfaces.compactMapValues { $0.isPointing ? owner[$0.physicalKey] : nil }
+        syncChordConnections(listed)
         publishControls()
         pruneEvidence(keeping: Set(listed.map(\.id)))
         guard listed != devices else {
@@ -279,6 +292,34 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         changed()
     }
 
+    /// Tells chord attribution which connections exist, and publishes which devices can form chords.
+    private func syncChordConnections(_ listed: [ConnectedDevice]) {
+        let excluded = Set(listed.filter(\.isExcluded).map(\.id))
+        var lowest: [String: Int] = [:]
+        for device in deviceIDs.keys {
+            guard let key = interfaces[device]?.physicalKey, let runtimeID = runtimeIDs[device] else { continue }
+            lowest[key] = min(lowest[key] ?? runtimeID, runtimeID)
+        }
+        var tokens: [IOHIDDevice: UInt64] = [:]
+        var infos: [UInt64: ChordConnectionInfo] = [:]
+        for (device, id) in deviceIDs {
+            guard let info = interfaces[device], let runtimeID = lowest[info.physicalKey] else { continue }
+            let token = UInt64(bitPattern: Int64(runtimeID))
+            tokens[device] = token
+            if infos[token] == nil {
+                infos[token] = ChordConnectionInfo(
+                    token: token, deviceID: id, vendorID: info.vendorID, productID: info.productID,
+                    transport: info.transport, locationID: info.locationID, excluded: excluded.contains(id)
+                )
+            }
+        }
+        chordTokens = tokens
+        let all = infos.values.sorted { $0.token < $1.token }
+        chordAttributor.withLock { $0.update(connections: all) }
+        let eligibility = ChordConnectionPolicy.eligibility(byDevice: all)
+        if eligibility != chordEligibility { chordEligibility = eligibility }
+    }
+
     private func changed() {
         let usable = devices.filter { !$0.isExcluded }.map(\.id)
         let excluded = Set(devices.filter(\.isExcluded).map(\.id))
@@ -295,10 +336,16 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
             batteryProvider.notified(runtimeID: runtimeID)
             return
         }
-        guard let id = deviceIDs[device], IOHIDValueGetIntegerValue(value) != 0 else { return }
         let element = IOHIDValueGetElement(value)
         let page = Int(IOHIDElementGetUsagePage(element))
         let usage = Int(IOHIDElementGetUsage(element))
+        // Chords need releases as well as presses, so these are recorded before releases are dropped below.
+        if page == kHIDPage_Button, (1...32).contains(usage), let token = chordTokens[device] {
+            let down = IOHIDValueGetIntegerValue(value) != 0
+            let now = ProcessInfo.processInfo.systemUptime
+            chordAttributor.withLock { $0.record(token: token, button: usage - 1, down: down, at: now) }
+        }
+        guard let id = deviceIDs[device], IOHIDValueGetIntegerValue(value) != 0 else { return }
         let kind: DeviceAttributor.ReportKind
         switch (page, usage) {
         case (kHIDPage_GenericDesktop, kHIDUsage_GD_X), (kHIDPage_GenericDesktop, kHIDUsage_GD_Y):

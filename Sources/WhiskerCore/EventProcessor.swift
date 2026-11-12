@@ -234,6 +234,12 @@ public struct EventProcessor: Sendable {
     /// Whether a Click Lock is holding the primary button down.
     public var isClickLockActive: Bool { clickLock.isActive }
 
+    /// No press, hold, gesture, lock, slowed pointer or auto-scroll is under way, so a chord may own the output.
+    public var ownsNoOutput: Bool {
+        held.isEmpty && orphaned.isEmpty && swaps.isEmpty && passedDown.isEmpty && hold == nil && gesture == nil
+            && !clickLock.isActive && autoScroll == nil && slowPointer.command.factors.isEmpty
+    }
+
     public var clickLockOwner: ClickLock.Owner? { clickLock.owner }
 
     /// Why the most recent Click Lock ended, for diagnostics.
