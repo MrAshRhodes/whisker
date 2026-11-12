@@ -997,6 +997,7 @@ struct ClickFilterControls: View {
                     }
                     Button("Turn Off Filter") { model.revertClickFilter(device: id) }
                         .accessibilityHint("Stops ignoring repeated clicks from \(name)")
+                    ClickFilterTestControls(id: id, name: name, titles: Dictionary(uniqueKeysWithValues: Self.buttons.map { ($0.number, $0.title) }))
                 }
             }
             .padding(.top, 4)
@@ -1005,6 +1006,47 @@ struct ClickFilterControls: View {
 
     private func update(_ buttons: [Int], _ interval: Double) {
         model.setClickFilter(device: id, name: name, buttons: buttons, interval: interval)
+    }
+}
+
+/// The local test: counts what the filter does with this mouse's presses so its effect can be checked by hand.
+/// Counts only, in memory, for as long as the test is on.
+struct ClickFilterTestControls: View {
+    @EnvironmentObject var model: AppModel
+    let id: String
+    let name: String
+    let titles: [Int: String]
+
+    private var test: ClickFilterTally? { model.clickFilterTest?.device == id ? model.clickFilterTest : nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Count accepted and filtered clicks", isOn: Binding(
+                get: { test != nil },
+                set: { on in on ? model.startClickFilterTest(device: id) : model.stopClickFilterTest() }
+            ))
+            .accessibilityHint("Counts how many presses of \(name)'s filtered buttons get through and how many are ignored")
+            Text("Only counts are kept, in memory and never saved or logged. They start again from zero when the filter settings change, and the test stops when the mouse disconnects, the Mac sleeps or you leave this page.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let test {
+                Text("Click here to try it")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityHidden(true)
+                ForEach(test.buttons.keys.sorted(), id: \.self) { button in
+                    let counts = test[button] ?? ClickFilterTally.Counts()
+                    LabeledContent("\(titles[button] ?? "Button \(button + 1)") button") {
+                        Text("\(counts.accepted) accepted, \(counts.filtered) filtered").monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Button("Reset Counts") { model.resetClickFilterTest() }
+                    .disabled(test.isEmpty)
+                    .accessibilityHint("Sets the counts for \(name) back to zero")
+            }
+        }
+        .onDisappear { if test != nil { model.stopClickFilterTest() } }
     }
 }
 

@@ -89,6 +89,8 @@ public struct ClickDebouncer: Sendable {
     private var lastRelease: [Key: TimeInterval] = [:]
     /// Presses dropped since the last one delivered, so the count of the next one can be put right.
     private var dropped: [Key: Int64] = [:]
+    /// The local test in Devices, while one runs: what happened to one mouse's presses, counted and nothing more.
+    public private(set) var test: ClickFilterTally?
 
     public init() {}
 
@@ -124,21 +126,67 @@ public struct ClickDebouncer: Sendable {
         return deliver(due)
     }
 
-    /// Forgets everything for a settings change, bypass, disabling, sleep or a paused tap. A held press is
-    /// discarded and its button remembered, so the release that is still to come is dropped with it.
+    /// Forgets what it holds for bypass, disabling, sleep, recording a button or a paused tap, and the local test
+    /// starts again from zero. A held press is discarded whole: its button is remembered, so the release that is
+    /// still to come is dropped with it. A paused tap may have missed that release, so letting the press through
+    /// instead could leave the button down in the app.
+    ///
+    /// The system keeps counting a run of clicks across all this, so presses the app never saw still put the
+    /// count of the next press of the run right, even once the filter is off.
     public mutating func reset() {
-        for (key, phase) in phases {
-            if case .pending = phase { phases[key] = .orphaned } else if case .delivered = phase { phases[key] = nil }
-        }
-        lastRelease.removeAll()
-        dropped.removeAll()
+        discardHeld()
+        test?.clear()
     }
 
-    /// Forgets mice that are no longer connected. A mouse that is gone can't send the release, so nothing waits for it.
+    /// Settings changed: what is held is discarded as in `reset()`. The local test ends once the filter is off for
+    /// its mouse, and starts again from zero only when something that decides what the filter does with that
+    /// mouse changed.
+    public mutating func settingsChanged(from old: CompiledSettings, to new: CompiledSettings) {
+        discardHeld()
+        guard let device = test?.device else { return }
+        let scope = Self.scope(new, device)
+        guard let buttons = scope.config?.buttons, !buttons.isEmpty else {
+            test = nil
+            return
+        }
+        if scope != Self.scope(old, device) { test = ClickFilterTally(device: device, buttons: buttons) }
+    }
+
+    /// Forgets mice that are no longer connected. A mouse that is gone can't send the release, so nothing waits for
+    /// it, and a test of it ends.
     public mutating func devicesChanged(connected: Set<String>) {
         phases = phases.filter { connected.contains($0.key.device) }
         lastRelease = lastRelease.filter { connected.contains($0.key.device) }
         dropped = dropped.filter { connected.contains($0.key.device) }
+        if let device = test?.device, !connected.contains(device) { test = nil }
+    }
+
+    /// While events pass through untouched (recording a button, the tap stopping), the release of a press the
+    /// filter discarded is still dropped, so nothing ever sees an up without its down.
+    public mutating func dropsOrphanedRelease(_ event: InputEvent) -> Bool {
+        guard case .buttonUp(let button) = event.kind, let key = resolve(button, event), case .orphaned = phases[key] else { return false }
+        phases[key] = nil
+        return true
+    }
+
+    // MARK: Local test
+
+    /// Starts the local test of one mouse from zero, ending any other. Nothing is counted while the filter is off
+    /// for that mouse, so then there is no test.
+    public mutating func startTest(device: String, settings: CompiledSettings) {
+        guard let buttons = Self.scope(settings, device).config?.buttons, !buttons.isEmpty else {
+            test = nil
+            return
+        }
+        test = ClickFilterTally(device: device, buttons: buttons)
+    }
+
+    public mutating func stopTest() {
+        test = nil
+    }
+
+    public mutating func clearTest() {
+        test?.clear()
     }
 
     // MARK: Events
@@ -149,7 +197,7 @@ public struct ClickDebouncer: Sendable {
         for key in Array(phases.keys) where key.button == button && (event.device.map { $0.id == key.device } ?? true) { phases[key] = nil }
 
         guard let (key, interval) = candidate(button, event, settings) else {
-            return ClickDebounceOutcome(flushed: flushed, decision: .proceed(clickCount: event.clickCount))
+            return ClickDebounceOutcome(flushed: flushed, decision: .proceed(clickCount: unfiltered(button, event)))
         }
         if !preservingPress, let last = lastRelease[key] {
             let gap = event.timestamp - last
@@ -162,7 +210,26 @@ public struct ClickDebouncer: Sendable {
         if event.clickCount <= 1 { dropped[key] = nil }
         let count = adjusted(event.clickCount, key)
         phases[key] = .delivered(clickCount: count)
+        judge(.accepted, key)
         return ClickDebounceOutcome(flushed: flushed, decision: .proceed(clickCount: count))
+    }
+
+    /// The count for a press the filter doesn't apply to. While its button has presses dropped earlier in the same
+    /// run of clicks (the filter was switched off since, or the press no longer carries a modifier), the count is
+    /// still put right, and its release and drags carry the same count. A source that isn't known exactly keeps
+    /// its own count: the filter never guesses which mouse it is.
+    private mutating func unfiltered(_ button: Int, _ event: InputEvent) -> Int64 {
+        guard let device = event.device, device.exact else { return event.clickCount }
+        let key = Key(device: device.id, button: button)
+        judge(.accepted, key)
+        guard dropped[key] != nil else { return event.clickCount }
+        guard event.clickCount > 1 else {
+            dropped[key] = nil
+            return event.clickCount
+        }
+        let count = adjusted(event.clickCount, key)
+        phases[key] = .delivered(clickCount: count)
+        return count
     }
 
     private mutating func up(_ button: Int, _ event: InputEvent) -> ClickDebounceOutcome {
@@ -176,6 +243,7 @@ public struct ClickDebouncer: Sendable {
             if hold.isFinite, hold >= 0, hold < pending.interval {
                 phases[key] = nil
                 dropped[key, default: 0] += 1
+                judge(.filtered, key)
                 return ClickDebounceOutcome(flushed: flushed, decision: .drop)
             }
             let late = deliverPending(key).map { [$0] } ?? []
@@ -227,19 +295,64 @@ public struct ClickDebouncer: Sendable {
         return (Key(device: attribution.id, button: button), config.interval)
     }
 
-    /// The tracked press an up or drag belongs to. An exactly attributed device wins; otherwise the button has
-    /// to be tracked for exactly one device, or the event is treated as unrelated.
+    /// The tracked press an up or drag belongs to. An exactly attributed event belongs to its own mouse and never
+    /// to another's, tracked or not. Otherwise the button has to be tracked for exactly one device, or the event
+    /// is treated as unrelated: the filter never guesses between two presses.
     private func resolve(_ button: Int, _ event: InputEvent) -> Key? {
         if let device = event.device, device.exact {
             let key = Key(device: device.id, button: button)
-            if phases[key] != nil { return key }
+            return phases[key] != nil ? key : nil
         }
         let matches = phases.keys.filter { $0.button == button }
-        return matches.count == 1 ? matches[0] : nil
+        guard matches.count == 1, let key = matches.first else { return nil }
+        // A source inferred to be a different mouse is not this press's release either.
+        if let device = event.device, device.id != key.device { return nil }
+        return key
     }
 
     private func adjusted(_ count: Int64, _ key: Key) -> Int64 {
         max(1, count - (dropped[key] ?? 0))
+    }
+
+    /// Counts a press for the local test when it is one of the mouse under test.
+    private mutating func judge(_ verdict: ClickFilterTally.Verdict, _ key: Key) {
+        guard test?.device == key.device else { return }
+        test?.record(verdict, button: key.button)
+    }
+
+    /// Discards held presses whole (see `reset()`) and forgets delivered ones and when buttons were let go.
+    private mutating func discardHeld() {
+        for (key, phase) in phases {
+            switch phase {
+            case .pending:
+                phases[key] = .orphaned
+                // The system counted it, the app never sees it.
+                dropped[key, default: 0] += 1
+            case .delivered:
+                phases[key] = nil
+            case .orphaned:
+                break
+            }
+        }
+        lastRelease.removeAll()
+    }
+
+    /// Everything that decides what the filter does with one mouse's presses.
+    private struct Scope: Equatable {
+        var enabled: Bool
+        var allowPrimaryButtonRemap: Bool
+        var bypassApps: [String]
+        var deviceEnabled: Bool
+        var config: ClickDebounceSettings?
+    }
+
+    private static func scope(_ settings: CompiledSettings, _ device: String) -> Scope {
+        let general = settings.general
+        let config = settings.settings.devices[device]?.clickDebounce?.normalised
+        return Scope(
+            enabled: general.enabled, allowPrimaryButtonRemap: general.allowPrimaryButtonRemap, bypassApps: general.bypassApps,
+            deviceEnabled: settings.settings.devices[device]?.enabled != false, config: config?.isEnabled == true ? config : nil
+        )
     }
 
     private func pendingTime(_ key: Key) -> TimeInterval {
@@ -269,6 +382,7 @@ public struct ClickDebouncer: Sendable {
         guard case .pending(let pending) = phases[key] else { return nil }
         let count = adjusted(pending.clickCount, key)
         phases[key] = .delivered(clickCount: count)
+        judge(.accepted, key)
         return FlushedPress(event: pending.event, clickCount: count)
     }
 }

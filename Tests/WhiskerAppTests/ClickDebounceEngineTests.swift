@@ -203,4 +203,136 @@ struct ClickDebounceEngineTests {
         #expect(recorder.calls.map(\.phase) == [.down, .up, .down, .up])
         #expect(recorder.calls.allSatisfy { $0.action == right })
     }
+
+    // MARK: Interruptions
+
+    @Test @MainActor func syntheticEventsAreNeverFilteredOrCounted() async {
+        let recorder = EventEngineTests.Recorder()
+        let clock = FakeClock()
+        let engine = Self.makeEngine(recorder, clock)
+        let reports = Reports.watching(engine)
+        engine.setClickFilterTest(device: Self.mouse.id)
+        Self.firstClick(engine)
+        for type in [CGEventType.otherMouseDown, .otherMouseUp, .otherMouseDown, .otherMouseUp] {
+            let synthetic = Self.event(type, count: 2)
+            synthetic.setIntegerValueField(.eventSourceUserData, value: EventSynthesizer.marker)
+            #expect(engine.handle(type, synthetic) != nil)
+        }
+        #expect(clock.pending == 0)
+        // A real repeat is still measured from the real click's release.
+        #expect(engine.handle(.otherMouseDown, Self.event(.otherMouseDown, count: 2)) == nil)
+        await Self.drainMainQueue()
+        #expect(reports.latest?[3] == ClickFilterTally.Counts(accepted: 1))
+    }
+
+    @Test func aPausedTapDiscardsTheHeldPressAndSwallowsItsRelease() throws {
+        let recorder = EventEngineTests.Recorder()
+        let clock = FakeClock()
+        let engine = Self.makeEngine(recorder, clock)
+        Self.firstClick(engine)
+        #expect(engine.handle(.otherMouseDown, Self.event(.otherMouseDown, count: 2)) == nil)
+        #expect(engine.handle(.tapDisabledByTimeout, try #require(CGEvent(source: nil))) != nil)
+        #expect(clock.pending == 0)
+        clock.advance(by: 1)
+        #expect(engine.handle(.otherMouseUp, Self.event(.otherMouseUp, count: 2)) == nil)
+        #expect(recorder.calls.isEmpty)
+        // The next click is a fresh one.
+        #expect(engine.handle(.otherMouseDown, Self.event(.otherMouseDown)) != nil)
+        #expect(engine.handle(.otherMouseUp, Self.event(.otherMouseUp)) != nil)
+    }
+
+    @Test func recordingAButtonSwallowsOnlyTheReleaseOfAPressItDiscarded() {
+        let recorder = EventEngineTests.Recorder()
+        let clock = FakeClock()
+        let engine = Self.makeEngine(recorder, clock)
+        Self.firstClick(engine)
+        #expect(engine.handle(.otherMouseDown, Self.event(.otherMouseDown, count: 2)) == nil)
+        engine.setCapturing(true)
+        #expect(clock.pending == 0)
+        #expect(engine.handle(.otherMouseUp, Self.event(.otherMouseUp, count: 2)) == nil)
+        // Everything else reaches the recorder untouched.
+        #expect(engine.handle(.otherMouseDown, Self.event(.otherMouseDown)) != nil)
+        #expect(engine.handle(.otherMouseUp, Self.event(.otherMouseUp)) != nil)
+        engine.setCapturing(false)
+        #expect(recorder.calls.isEmpty)
+    }
+
+    @Test func aDroppedPairOfAMappedButtonRunsNoAction() {
+        let recorder = EventEngineTests.Recorder()
+        let engine = Self.makeEngine(recorder, FakeClock())
+        var settings = Self.settings(buttons: [3])
+        settings.profiles[0].mappings = [Mapping(trigger: .button(3), action: .click(button: 1, modifiers: []))]
+        engine.update(settings)
+        _ = engine.handle(.otherMouseDown, Self.event(.otherMouseDown))
+        _ = engine.handle(.otherMouseUp, Self.event(.otherMouseUp))
+        #expect(engine.handle(.otherMouseDown, Self.event(.otherMouseDown, count: 2)) == nil)
+        #expect(engine.handle(.otherMouseUp, Self.event(.otherMouseUp, count: 2)) == nil)
+        #expect(recorder.calls.map(\.phase) == [.down, .up])
+    }
+
+    // MARK: Local test
+
+    /// Copies of the local test as the settings window receives them.
+    @MainActor final class Reports {
+        var values: [ClickFilterTally?] = []
+        var latest: ClickFilterTally? { values.last ?? nil }
+
+        static func watching(_ engine: EventEngine) -> Reports {
+            let reports = Reports()
+            engine.onClickFilterTest = { reports.values.append($0) }
+            return reports
+        }
+    }
+
+    /// Runs everything already queued on the main queue, where the engine hands over its copies.
+    @MainActor static func drainMainQueue() async {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { done.resume() } }
+    }
+
+    @Test @MainActor func theLocalTestReachesTheMainQueueAndFollowsTheSettingsAndTheMouse() async {
+        let recorder = EventEngineTests.Recorder()
+        let clock = FakeClock()
+        let engine = Self.makeEngine(recorder, clock)
+        let reports = Reports.watching(engine)
+        let fresh = ClickFilterTally(device: Self.mouse.id, buttons: [3])
+        engine.setClickFilterTest(device: Self.mouse.id)
+        Self.firstClick(engine)
+        _ = engine.handle(.otherMouseDown, Self.event(.otherMouseDown, count: 2))
+        _ = engine.handle(.otherMouseUp, Self.event(.otherMouseUp, count: 2))
+        _ = engine.handle(.otherMouseDown, Self.event(.otherMouseDown, count: 3))
+        clock.advance(by: 1)
+        _ = engine.handle(.otherMouseUp, Self.event(.otherMouseUp, count: 3))
+        // The tap thread never waits for the settings window: copies arrive once the main queue runs.
+        #expect(reports.values.isEmpty)
+        await Self.drainMainQueue()
+        #expect(reports.latest?[3] == ClickFilterTally.Counts(accepted: 2, filtered: 1))
+
+        // A change that doesn't decide what the filter does keeps the counts.
+        var unrelated = Self.settings(buttons: [3])
+        unrelated.devices[Self.mouse.id]?.wheel.invertVertical = true
+        engine.update(unrelated)
+        await Self.drainMainQueue()
+        #expect(reports.latest?[3] == ClickFilterTally.Counts(accepted: 2, filtered: 1))
+
+        // Sleep starts them again from zero, and so does a change to the filter.
+        engine.releaseAll(because: .sleep)
+        await Self.drainMainQueue()
+        #expect(reports.latest == fresh)
+        Self.firstClick(engine)
+        var shorter = Self.settings(buttons: [3])
+        shorter.devices[Self.mouse.id]?.clickDebounce?.interval = 0.05
+        engine.update(shorter)
+        await Self.drainMainQueue()
+        #expect(reports.latest == fresh)
+
+        // Switching the filter off ends the test, and so does losing the mouse.
+        engine.update(Self.settings(buttons: nil))
+        await Self.drainMainQueue()
+        #expect(reports.values.last == .some(nil))
+        engine.update(Self.settings(buttons: [3]))
+        engine.setClickFilterTest(device: Self.mouse.id)
+        engine.devicesChanged(connected: [])
+        await Self.drainMainQueue()
+        #expect(Array(reports.values.suffix(2)) == [fresh, nil])
+    }
 }

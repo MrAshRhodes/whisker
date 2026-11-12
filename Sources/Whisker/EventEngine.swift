@@ -24,6 +24,8 @@ final class EventEngine: @unchecked Sendable {
         var debouncer = ClickDebouncer()
         /// Calls off the timer set for the oldest press the filter is holding back.
         var cancelExpiry: (@Sendable () -> Void)?
+        /// The local duplicate-click test last reported to `onClickFilterTest`.
+        var reportedClickFilterTest: ClickFilterTally?
         /// The hold-to-scroll status last reported to `onHoldStatus`.
         var reportedHold: HoldScrollStatus = .idle
         /// System Reduce Motion, snapshotted by the app outside the tap. While on, nothing is smoothed.
@@ -65,6 +67,8 @@ final class EventEngine: @unchecked Sendable {
     /// Called on the main queue with whether an auto-scroll is running, whenever that changes.
     var onAutoScrollActive: (@Sendable (Bool) -> Void)?
     var onSlowPointer: (@MainActor @Sendable (SlowPointerCommand) -> Void)?
+    /// Called on the main queue with a copy of the local duplicate-click test whenever it changes, nil once it ends.
+    var onClickFilterTest: (@MainActor @Sendable (ClickFilterTally?) -> Void)?
 
     private let tapLock = NSLock()
     private var tap: CFMachPort?
@@ -99,6 +103,7 @@ final class EventEngine: @unchecked Sendable {
         state.withLock { state in
             // A Click Lock began under the settings that are going away, so whatever changed, it ends.
             endClickLock(&state, settings.general.enabled ? .settingsChanged : .disabled, at: location)
+            let previous = state.compiled
             state.compiled = CompiledSettings(settings, nativeWheelActive: state.compiled.nativeWheelActive)
             state.processor.resetScrollRecognition()
             // An auto-scroll started under settings that are going away, and a changed mapping or profile must
@@ -108,7 +113,7 @@ final class EventEngine: @unchecked Sendable {
             // Pending smoothing was planned under settings that are going away.
             synthesizer.cancelSmoothScroll()
             // Settings that decide what to filter may have changed under a press that is being held back.
-            state.debouncer.reset()
+            state.debouncer.settingsChanged(from: previous, to: state.compiled)
             armExpiry(&state)
             if settings.general.enabled {
                 // A click gesture under way began under the settings that are going away.
@@ -461,9 +466,11 @@ final class EventEngine: @unchecked Sendable {
         syncClickLock(&state)
     }
 
-    /// Call with the state lock held. Sets a timer for the oldest press the filter is holding back, if any.
-    /// The timer runs on the clock's own queue and only ever asks the filter what has expired.
+    /// Call with the state lock held, after anything the filter does. Sets a timer for the oldest press the filter
+    /// is holding back, if any. The timer runs on the clock's own queue and only ever asks the filter what has
+    /// expired. Also reports the local test.
     private func armExpiry(_ state: inout State) {
+        reportClickFilterTest(&state)
         state.cancelExpiry?()
         state.cancelExpiry = nil
         guard let due = state.debouncer.nextDeadline else { return }
@@ -476,6 +483,31 @@ final class EventEngine: @unchecked Sendable {
             if !state.stopped, !state.capturing { replay(flushed, &state) }
             armExpiry(&state)
         }
+    }
+
+    /// Starts the local duplicate-click test in Devices for one mouse, from zero, or ends it (nil). It only counts.
+    func setClickFilterTest(device: String?) {
+        state.withLock { state in
+            if let device { state.debouncer.startTest(device: device, settings: state.compiled) } else { state.debouncer.stopTest() }
+            reportClickFilterTest(&state)
+        }
+    }
+
+    func clearClickFilterTest() {
+        state.withLock { state in
+            state.debouncer.clearTest()
+            reportClickFilterTest(&state)
+        }
+    }
+
+    /// Call with the state lock held. Hands the settings window a copy of the test when it changed. Copies leave in
+    /// the order the lock was taken, so the last one to arrive is the latest; the tap never waits on the UI.
+    private func reportClickFilterTest(_ state: inout State) {
+        let test = state.debouncer.test
+        guard test != state.reportedClickFilterTest else { return }
+        state.reportedClickFilterTest = test
+        guard let onClickFilterTest else { return }
+        DispatchQueue.main.async { MainActor.assumeIsolated { onClickFilterTest(test) } }
     }
 
     /// Lets presses the filter held back through, in order, as if they had just arrived: mapped buttons run
@@ -563,7 +595,10 @@ final class EventEngine: @unchecked Sendable {
         let input = pending
         let flags = CGEventFlags(rawValue: event.flags.rawValue & ModifierSet([.shift, .control, .option, .command]).eventFlags)
         let (plan, clickState) = state.withLock { state -> (EventPlan, Int64) in
-            guard !state.capturing, !state.stopped else { return (.passThrough, originalClickState) }
+            guard !state.capturing, !state.stopped else {
+                // Even then, the release of a press the filter discarded never arrives without its press.
+                return (state.debouncer.dropsOrphanedRelease(input) ? .swallow : .passThrough, originalClickState)
+            }
             var clickState = originalClickState
             // A Click Lock whose app, profile or mapping has gone lets go before this event is handled.
             if state.processor.releaseStaleClickLock(app: input.app, settings: state.compiled) {
