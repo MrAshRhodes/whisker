@@ -346,3 +346,30 @@ final class DeviceMonitor: ObservableObject, @unchecked Sendable {
         publishRecent(at: now)
     }
 }
+
+/// One mouse or pointer interface of a listed device, as input timing sees it.
+struct InputTimingInterface: Equatable {
+    /// The id `HIDDeviceAccess` knows the interface by; never reused for another connection.
+    var runtimeID: Int
+    /// The USB interface number, when macOS reports one, to tell one interface from another on the sheet.
+    var interfaceNumber: Int?
+}
+
+/// What input timing needs to know about connected devices, kept apart from `DeviceMonitor` so tests can
+/// supply their own.
+protocol InputTimingSource: AnyObject {
+    var devices: [ConnectedDevice] { get }
+    /// The pointing interfaces that belong to the listed device `id`, in a stable order. A keyboard interface
+    /// (a gaming mouse's macro keys, say) is never among them.
+    func pointingInterfaces(ofDevice id: String) -> [InputTimingInterface]
+}
+
+extension DeviceMonitor: InputTimingSource {
+    func pointingInterfaces(ofDevice id: String) -> [InputTimingInterface] {
+        deviceIDs.compactMap { device, owner in
+            guard owner == id, let runtimeID = runtimeIDs[device] else { return nil }
+            return InputTimingInterface(runtimeID: runtimeID, interfaceNumber: interfaces[device]?.interfaceNumber)
+        }
+        .sorted { $0.runtimeID < $1.runtimeID }
+    }
+}

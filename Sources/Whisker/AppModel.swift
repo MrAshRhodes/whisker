@@ -42,7 +42,9 @@ final class AppModel: ObservableObject {
     let store: SettingsStore
     let permission = AccessibilityPermission()
     let loginItem = LoginItemController()
-    let devices = DeviceMonitor()
+    let devices: DeviceMonitor
+    /// The opt-in Input Timing sheet in Devices. Idle, and listening to no device, until the user starts a sample.
+    let inputTiming: InputTimingController
     let frontApp = FrontAppMonitor()
     let pointer: PointerController
     let wheel: WheelController
@@ -85,7 +87,15 @@ final class AppModel: ObservableObject {
         self.store = store
         runState = store.loadRunState()
         let frontApp = self.frontApp
-        let devices = self.devices
+        // One HID access for both, so an interface's runtime id means the same thing to the monitor and to timing.
+        let hidAccess = IOKitHIDAccess()
+        let devices = DeviceMonitor(hidAccess: hidAccess)
+        self.devices = devices
+        inputTiming = InputTimingController(
+            access: hidAccess, source: devices,
+            permissionGranted: { DeviceMonitor.inputMonitoringAllowed },
+            requestAccess: { devices.requestIdentification() }
+        )
         let pointer = PointerController(originals: runState.originalPointers, store: store, connected: { devices.devices })
         self.pointer = pointer
         wheel = WheelController(records: runState.originalWheels)
@@ -238,6 +248,7 @@ final class AppModel: ObservableObject {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 self?.engine.releaseAll()
                 MainActor.assumeIsolated { self?.cancelSlowPointer() }
+                MainActor.assumeIsolated { self?.inputTiming.interrupt(.sleep) }
             })
         }
         // An auto-scroll is anchored to a spot on a display and a Space, and a change to either leaves that spot
@@ -382,6 +393,7 @@ final class AppModel: ObservableObject {
     }
 
     func shutdown() {
+        inputTiming.shutdown()
         for id in Array(clickFilterTrials.keys) { revertClickFilter(device: id) }
         for id in Array(swapTrials.keys) { revertSwap(device: id) }
         permission.stopPolling()

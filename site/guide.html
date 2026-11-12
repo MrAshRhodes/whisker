@@ -46,7 +46,7 @@
           <li><a href="#getting-started">Getting started</a></li>
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#menu-bar">Menu bar</a></li>
-          <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li><li><a href="#duplicate-clicks">Duplicate clicks</a></li></ol></li>
+          <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li><li><a href="#duplicate-clicks">Duplicate clicks</a></li><li><a href="#input-timing">Input timing</a></li></ol></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#tilt-wheel">Tilt-wheel controls</a></li><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li><li><a href="#button-gestures">Button gestures</a></li><li><a href="#auto-scroll">Auto-scroll</a></li><li><a href="#swap-buttons">Swap primary and secondary buttons</a></li></ol></li>          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#smooth-notched-scrolling">Smooth notched scrolling</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a><ol><li><a href="#pointer-presets">Speed presets</a></li><li><a href="#slow-pointer">Slow pointer while held</a></li></ol></li>
           <li><a href="#pointer-orientation">Orientation — foundation only</a></li>
@@ -91,7 +91,7 @@ make app</code></pre>
           <p>To grant it, open <span class="ui">System Settings › Privacy &amp; Security › Accessibility</span> and turn on Whisker, or choose <span class="ui">Grant Accessibility Access…</span> from Whisker's menu. Whisker checks every second while it's running, so it starts working as soon as access is on, even if you closed the welcome window.</p>
           <p>To take access away, turn Whisker off in the same list. Whisker stops changing your mouse straight away and lets go of any button or key it was holding.</p>
           <h3>Input Monitoring (optional)</h3>
-          <p>Only needed if you use two or more mice and want settings for each one. Without it, macOS doesn't say which mouse an event came from, so Whisker can only be sure when one mouse is connected. Turn it on from <span class="ui">Settings › Devices › Telling Mice Apart › Allow Input Monitoring…</span>. Opening a mouse's <a href="#device-details">details</a> never asks for it.</p>
+          <p>Only needed if you use two or more mice and want settings for each one, or want to run an <a href="#input-timing">Input timing</a> sample. Without it, macOS doesn't say which mouse an event came from, so Whisker can only be sure when one mouse is connected. Turn it on from <span class="ui">Settings › Devices › Telling Mice Apart › Allow Input Monitoring…</span>. Opening a mouse's <a href="#device-details">details</a> never asks for it, and Input timing asks for it only when you choose <span class="ui">Allow Input Monitoring…</span> in its window.</p>
           <div class="callout-note">
             <p>A copy you built yourself is signed only for your Mac, so each rebuild looks like a new app to macOS. If Whisker stops responding after a rebuild, remove it from the Accessibility list with the <kbd>−</kbd> button and add it again.</p>
           </div>
@@ -127,6 +127,7 @@ make app</code></pre>
             <li>Settings for a single mouse, such as <a href="#pointer">pointer speed</a> and <a href="#direction">scroll direction</a>, follow that mouse wherever you plug it in.</li>
             <li>Trackpads and touch mice are listed too, as <span class="ui">Trackpad — left alone</span> and <span class="ui">Touch mouse — left alone</span> (Magic Mouse is one). Whisker doesn't change their buttons, scrolling or pointer.</li>
             <li>Choose <span class="ui">Details</span> under any device to see what Whisker knows about it.</li>
+            <li>Choose <span class="ui">Input Timing…</span> beside a connected mouse to run an opt-in <a href="#input-timing">timing sample</a>.</li>
           </ul>
           <h3 id="device-details">Details</h3>
           <p>Choose <span class="ui">Details</span> under a device to open a read-only summary. Opening it changes no setting, doesn't ask for Input Monitoring and never writes to the device. For a mouse that isn't connected it shows only what its saved settings record.</p>
@@ -164,6 +165,26 @@ make app</code></pre>
             <li>Turning it on starts a 60-second trial: it switches itself off unless you press <span class="ui">Keep</span>. <span class="ui">Turn Off Filter</span> is an ordinary button, reachable with the keyboard and VoiceOver. Turning Whisker off, an app on the bypass list coming forward, changing settings, unplugging the mouse or macOS pausing Whisker clears anything being held.</li>
           </ul>
           <p>This has not yet been verified on real faulty hardware, nor for Finder double-clicks, text selection or other apps. Whisker does not diagnose or repair a mouse.</p>
+
+          <h3 id="input-timing">Input timing</h3>
+          <p>A short, opt-in diagnostic for one mouse at a time. It counts when that mouse's reports reach Whisker, so you can see whether they arrive steadily or in bursts. It does nothing until you press <span class="ui">Start</span>, changes no setting and never writes to the mouse.</p>
+          <ol>
+            <li>Choose <span class="ui">Input Timing…</span> beside a connected mouse in <span class="ui">Settings › Devices</span>. If Input Monitoring is off, the window says so and offers <span class="ui">Allow Input Monitoring…</span>; after allowing it in System Settings, come back to the window.</li>
+            <li>Press <span class="ui">Start</span>, then move the mouse in steady circles for about ten seconds. Don't click or scroll, so that the sample is only movement. A bar shows the seconds and the reports so far, and <span class="ui">Cancel</span> stops it.</li>
+            <li>Read the result, or press <span class="ui">Run Again</span>. Closing the window forgets it.</li>
+          </ol>
+          <ul>
+            <li><strong>What you see.</strong> For each stream of reports the mouse sends: how many arrived, about how many a second, and the gaps between them while the mouse was moving (shortest, median, 95th percentile and longest, with the 99th percentile only when there are enough gaps for it to mean anything). A pause of more than 100 ms is counted and kept out of the <em>while the mouse was moving</em> figures. Anything odd is listed in plain words, such as reports that repeated an earlier timestamp, arrived out of order, had no timestamp or fell outside the sample, and none of those is counted.</li>
+            <li><strong>Streams stay apart.</strong> A mouse, or a wireless receiver, can send reports on more than one interface or report ID. Each stream has its own box, labelled <span class="ui">Interface 0</span>, or <span class="ui">Interface 0 · report ID 2</span> when it has a report ID, and the figures are never added together. Two mice are never mixed: it listens to the mouse you chose.</li>
+            <li><strong>When there is nothing to show.</strong> A mouse that was hardly moved gets <span class="ui">Not enough movement to measure</span>, one that sent nothing gets <span class="ui">No reports arrived on this stream during the sample</span>, and a stream whose timestamps don't line up with the sample shows no figures at all. Whisker never shows a rate of zero, or one it had to guess.</li>
+            <li><strong>Privacy.</strong> It records when each report arrived and nothing else: not what a report contained, where the pointer went or anything you typed. The times stay in memory, and are never saved, logged or sent anywhere. Input Timing listens only while a sample runs. <span class="ui">Cancel</span>, closing the window, the Mac going to sleep or switching user, Input Monitoring being turned off, or the mouse being unplugged or changing all stop the listening and throw the sample away; the window says so instead of showing a result.</li>
+            <li><strong>Only listening.</strong> Whisker listens to the mouse's own mouse or pointer interfaces through a connection of its own, opened without taking the device over, so macOS and other apps keep receiving the mouse as before. It never reads what a report contains, writes to the device or changes a property of it, and a sample leaves Whisker's button remapping, scrolling and mouse identification as they were. A keyboard interface on the same device is never opened, and an interface whose reports mix movement with other input is skipped rather than timed as if it were movement alone.</li>
+            <li><strong>When it won't start.</strong> Trackpads and touch mice are left alone, so there is no <span class="ui">Input Timing…</span> for them. For a mouse, the window says why when it can't time it: it isn't connected, Input Monitoring is off, it is one of several identical mice with no serial number (so Whisker can't tell whose reports are whose), macOS hasn't described it, it reports nothing from a mouse or pointer, its reports mix movement with other input, or macOS wouldn't let Whisker open it.</li>
+          </ul>
+          <div class="callout-note">
+            <p><strong>It isn't a polling rate.</strong> Input timing counts only the reports macOS delivered to Whisker for that mouse, and the time macOS stamped on each. It is not the mouse's polling rate, not latency from the mouse to the screen, not packet loss and not the rate at which a game or another app reads the mouse. Whisker can't see how often the mouse could send a report, which ones never arrived, how long they took or what another app does with them. Use the figures to compare one mouse, connection or receiver with another, not as a specification.</p>
+            <p>Not yet verified on hardware: Input timing hasn't been tried on a real mouse, wired, through a wireless receiver or over Bluetooth. What the timestamps measure on each, their units and how a receiver delivers its reports are unconfirmed, and no mouse or receiver model is known to work. The sample length, the 20 short gaps it needs and the 100 ms pause limit are provisional.</p>
+          </div>
         </section>
 
         <section aria-labelledby="buttons">
@@ -487,6 +508,8 @@ make app</code></pre>
           <p>With more than one mouse connected, allow Input Monitoring so Whisker can tell them apart. See <a href="#permissions">Permissions</a>. Then open the mouse's <span class="ui">Details</span>: <span class="ui">Attribution</span> shows how sure Whisker is which clicks are its.</p>
           <h3>Two mice share one set of settings</h3>
           <p>They report the same vendor and product ids and no serial number, so Whisker can't tell them apart. Each one's <span class="ui">Details</span> says so. See <a href="#device-details">Details</a>.</p>
+          <h3>Input timing says there isn't enough movement, or won't start</h3>
+          <p>Press <span class="ui">Start</span> and move the mouse in steady circles for the whole sample, without clicking or scrolling. If it won't start, the window says why: Input Monitoring is off, the mouse isn't connected, two identical mice share one listing, or macOS didn't describe the mouse or let Whisker open it. Trackpads and touch mice have no <span class="ui">Input Timing…</span>. See <a href="#input-timing">Input timing</a>.</p>
           <h3>Details shows Unavailable for a mouse's buttons</h3>
           <p>Whisker didn't get a list from macOS. That says nothing about how many buttons the mouse has. Whisker reads buttons and wheels once Input Monitoring is allowed and doesn't ask for it just to show them, and this hasn't been verified on hardware yet. See <a href="#device-details">Details</a>.</p>
           <h3>My trackpad or Magic Mouse isn't affected</h3>

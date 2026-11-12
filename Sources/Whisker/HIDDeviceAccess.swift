@@ -9,6 +9,20 @@ struct HIDElementDescription: Hashable {
     var usage: Int
     var logicalMin: Int
     var logicalMax: Int
+    /// The report the element is part of; 0 when the device doesn't use report ids.
+    var reportID = 0
+    /// Usage of the top-level collection the element sits in (0 when macOS doesn't say), so a mouse's reports
+    /// can be told from a keyboard's on the same interface.
+    var topLevelUsagePage = 0
+    var topLevelUsage = 0
+}
+
+/// When one input report arrived, as the HID stack stamped it. Deliberately nothing else about the report:
+/// its bytes are never read, so the seam can't leak what was typed or clicked.
+struct HIDReportTiming: Equatable, Sendable {
+    var reportID: Int
+    /// Mach absolute time, as `mach_absolute_time()` counts it; 0 when macOS gave none.
+    var timestampTicks: UInt64
 }
 
 /// The small seam between Whisker and an opened HID device: describe what it declares, and read values from it.
@@ -17,8 +31,9 @@ struct HIDElementDescription: Hashable {
 /// nothing exclusively. Battery status uses it today; input timing (#13) and extra-button discovery (#25) are
 /// meant to reach devices through the same seam, so they get a fake for tests as well.
 ///
-/// Everything but `readValues` runs on the main thread. `runtimeID` identifies one connection of one device: it
-/// is never reused, so a late result can be matched to the connection it was asked of.
+/// Everything but `readValues` and `observeReports`' `onReport` runs on the main thread. `runtimeID` identifies
+/// one connection of one device: it is never reused, so a late result can be matched to the connection it was
+/// asked of.
 protocol HIDDeviceAccess: AnyObject {
     /// Remembers a device that appeared and gives it a runtime id.
     func register(_ device: IOHIDDevice) -> Int
@@ -30,12 +45,30 @@ protocol HIDDeviceAccess: AnyObject {
     /// and the event tap, then calls `completion` on the main thread with one value per index, nil for any that
     /// couldn't be read. Never calls back synchronously after the device was forgotten.
     func readValues(of runtimeID: Int, indexes: [Int], completion: @escaping ([Int?]) -> Void)
+    /// Starts listening for the input reports of one interface, handing `onReport` only when each arrived (see
+    /// `HIDReportTiming`), never their contents. The device is opened non-exclusively on its own connection, so
+    /// whoever else listens to it, Whisker's device monitor included, is unaffected. Returns false when it can't
+    /// be opened or is already being observed.
+    ///
+    /// `onReport` runs on a HID queue, not the main thread, once per report, at whatever rate the mouse sends:
+    /// keep it tiny. `onEnd` runs once on the main thread, and only when the device is forgotten while still
+    /// observed; `stopObservingReports` never calls it. Nothing is delivered once either has happened.
+    func observeReports(of runtimeID: Int, onReport: @escaping @Sendable (HIDReportTiming) -> Void, onEnd: @escaping () -> Void) -> Bool
+    /// Stops listening and releases the connection. Safe to repeat, and to call for a device never observed.
+    func stopObservingReports(of runtimeID: Int)
+}
+
+extension HIDDeviceAccess {
+    // Defaults so an implementation that only describes and reads (a test fake, say) doesn't have to listen.
+    func observeReports(of runtimeID: Int, onReport: @escaping @Sendable (HIDReportTiming) -> Void, onEnd: @escaping () -> Void) -> Bool { false }
+    func stopObservingReports(of runtimeID: Int) {}
 }
 
 /// IOKit's implementation. Reads go to a utility queue because reading a feature element can block.
 final class IOKitHIDAccess: HIDDeviceAccess {
     private var devices: [Int: IOHIDDevice] = [:]
     private var elementCache: [Int: [IOHIDElement]] = [:]
+    private var observations: [Int: (observation: HIDReportObservation, onEnd: () -> Void)] = [:]
     private var nextID = 0
     private let queue = DispatchQueue(label: "io.github.mrashrhodes.whisker.hid-read", qos: .utility)
 
@@ -48,6 +81,10 @@ final class IOKitHIDAccess: HIDDeviceAccess {
     func forget(runtimeID: Int) {
         devices[runtimeID] = nil
         elementCache[runtimeID] = nil
+        if let ended = observations.removeValue(forKey: runtimeID) {
+            ended.observation.stop()
+            DispatchQueue.main.async(execute: ended.onEnd)
+        }
     }
 
     func elements(of runtimeID: Int) -> [HIDElementDescription]? {
@@ -56,12 +93,41 @@ final class IOKitHIDAccess: HIDDeviceAccess {
         else { return nil }
         elementCache[runtimeID] = elements
         return elements.map {
-            HIDElementDescription(
+            let top = Self.topLevelCollection(of: $0)
+            return HIDElementDescription(
                 kind: HIDElementKind(ioKitType: Int(IOHIDElementGetType($0).rawValue)),
                 usagePage: Int(IOHIDElementGetUsagePage($0)), usage: Int(IOHIDElementGetUsage($0)),
-                logicalMin: IOHIDElementGetLogicalMin($0), logicalMax: IOHIDElementGetLogicalMax($0)
+                logicalMin: IOHIDElementGetLogicalMin($0), logicalMax: IOHIDElementGetLogicalMax($0),
+                reportID: Int(IOHIDElementGetReportID($0)),
+                topLevelUsagePage: top.page, topLevelUsage: top.usage
             )
         }
+    }
+
+    /// The usage of the outermost collection an element belongs to. (0, 0) when the chain doesn't end in a
+    /// collection or is implausibly deep, which reads as "not pointing" and so is never timed.
+    private static func topLevelCollection(of element: IOHIDElement) -> (page: Int, usage: Int) {
+        var current = element
+        for _ in 0..<16 {
+            guard let parent = IOHIDElementGetParent(current) else {
+                guard IOHIDElementGetType(current) == kIOHIDElementTypeCollection else { return (0, 0) }
+                return (Int(IOHIDElementGetUsagePage(current)), Int(IOHIDElementGetUsage(current)))
+            }
+            current = parent
+        }
+        return (0, 0)
+    }
+
+    func observeReports(of runtimeID: Int, onReport: @escaping @Sendable (HIDReportTiming) -> Void, onEnd: @escaping () -> Void) -> Bool {
+        guard observations[runtimeID] == nil, let device = devices[runtimeID],
+              let observation = HIDReportObservation(listeningTo: device, onReport: onReport)
+        else { return false }
+        observations[runtimeID] = (observation, onEnd)
+        return true
+    }
+
+    func stopObservingReports(of runtimeID: Int) {
+        observations.removeValue(forKey: runtimeID)?.observation.stop()
     }
 
     func readValues(of runtimeID: Int, indexes: [Int], completion: @escaping ([Int?]) -> Void) {

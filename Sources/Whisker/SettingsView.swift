@@ -815,6 +815,7 @@ struct DevicesPane: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var store: SettingsStore
     @ObservedObject var devices: DeviceMonitor
+    @StateObject private var timingSheet = InputTimingSheetState()
 
     private var remembered: [(id: String, settings: DeviceSettings)] {
         let connected = Set(devices.devices.map(\.id))
@@ -835,7 +836,10 @@ struct DevicesPane: View {
                             DeviceDetailsDisclosure(details: details, onOpen: { devices.refreshControls() })
                         }
                     } else {
-                        deviceRow(details, name: details.name, onOpen: { devices.refreshControls() })
+                        deviceRow(
+                            details, name: details.name, onOpen: { devices.refreshControls() },
+                            onTiming: { timingSheet.present(deviceID: details.id, name: details.name) }
+                        )
                     }
                 }
             }
@@ -862,11 +866,19 @@ struct DevicesPane: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $timingSheet.isPresented, onDismiss: { model.inputTiming.sheetClosed() }) {
+            InputTimingSheet(
+                timing: model.inputTiming, deviceID: timingSheet.deviceID, deviceName: timingSheet.deviceName,
+                onClose: { timingSheet.isPresented = false }
+            )
+        }
     }
 
     /// `name` is what a new profile or first saved setting for the mouse is called; the row shows `details.name`.
+    /// `onTiming` is only given for a connected mouse Whisker doesn't leave alone: it opens the opt-in Input Timing sheet.
     @ViewBuilder private func deviceRow(
-        _ details: DeviceDetails, name: String, onOpen: @escaping () -> Void = {}, forget: (() -> Void)? = nil
+        _ details: DeviceDetails, name: String, onOpen: @escaping () -> Void = {}, onTiming: (() -> Void)? = nil,
+        forget: (() -> Void)? = nil
     ) -> some View {
         let id = details.id
         let binding = model.deviceBinding(id, name: name)
@@ -891,6 +903,10 @@ struct DevicesPane: View {
                         model.selectedProfileID = profile.id
                     }
                     model.selectedPane = .buttons
+                }
+                if let onTiming {
+                    Button("Input Timing…", action: onTiming)
+                        .help("Counts how often this mouse's reports reach Whisker over a short sample. A diagnostic, not a speed test.")
                 }
                 if let forget {
                     Button(action: forget) { Image(systemName: "trash") }

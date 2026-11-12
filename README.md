@@ -137,6 +137,14 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   as Magic Mouse are listed but left alone. Open **Details** under any of them to see how Whisker
   identifies it, the buttons and wheels it reports and how sure Whisker is which clicks are its.
   See [Device details](#device-details).
+- **Input timing (opt-in diagnostic).** **Input Timing…** under a connected mouse in Devices
+  counts when that mouse's reports reach Whisker during a ten-second sample, while you move it in
+  steady circles, and shows how many arrived, about how many a second and the gaps between them.
+  Nothing is read until you press **Start**. It needs Input Monitoring for the sample only, notes
+  when each report arrived and nothing that was in it, saves nothing and throws the sample away
+  if you cancel or close the window. It is not the mouse's polling rate, latency, packet loss or
+  the rate a game sees, and it has not yet been verified on hardware, wired or with a wireless
+  receiver. See [Input timing](#input-timing).
 - **Duplicate clicks (advanced, off by default).** For one mouse and the buttons you choose,
   Whisker can ignore a press that follows the previous click within a very short time (20 to
   100 ms, 50 ms to start) and is let go just as quickly, dropping the press and its release
@@ -179,8 +187,9 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   can replace them with the actions you choose, and macOS only allows that for apps you have
   approved under Accessibility. Whisker does not read what you type.
 - Optionally, **Input Monitoring**, only if you want different settings for several mice that
-  are connected at the same time. With one mouse, Whisker does not need it, and opening a
-  mouse's details never asks for it.
+  are connected at the same time, or to run the opt-in [Input timing](#input-timing) sample,
+  which asks for it only when you choose **Allow Input Monitoring…** in its window. With one
+  mouse, Whisker does not need it, and opening a mouse's details never asks for it.
 
 ## Install
 
@@ -390,6 +399,63 @@ the device. A mouse that is not connected shows only what its saved settings rec
   Mouse (which Whisker leaves alone and whose battery macOS shows in its own menus), so do not
   expect a reading from any particular model.
 
+## Input timing
+
+**Input Timing…**, beside a connected mouse in **Settings › Devices**, is a short, opt-in
+diagnostic for one mouse at a time. It counts when that mouse's reports reach Whisker, so you can
+see whether they arrive steadily or in bursts. It does nothing until you press **Start**, changes
+no setting and never writes to the mouse.
+
+- **How to run it.** Press **Start**, then move the mouse in steady circles for about ten
+  seconds. Don't click or scroll, so that the sample is only movement. A bar shows the seconds and
+  the reports so far, and **Cancel** stops it. **Run Again** repeats it.
+- **What you see.** For each stream of reports the mouse sends, how many arrived, about how many
+  a second, and the gaps between them while the mouse was moving: shortest, median, 95th
+  percentile and longest, with the 99th percentile only when there are enough gaps for it to mean
+  anything. A pause of more than 100 ms is counted and kept out of the "while the mouse was
+  moving" figures. Anything odd is listed in plain words, such as reports that repeated an earlier
+  timestamp, arrived out of order, had no timestamp or fell outside the sample; none of them is
+  counted.
+- **Streams stay apart.** A mouse, or a wireless receiver, can send reports on more than one
+  interface or report ID. Each stream is shown on its own as **Interface 0**, or **Interface 0 ·
+  report ID 2** when it has one, and the figures are never added together. Two mice are never
+  mixed: it listens to the mouse you chose.
+- **When there is nothing to show.** A mouse that was hardly moved gets "Not enough movement to
+  measure", one that sent nothing gets "No reports arrived on this stream during the sample", and
+  a stream whose timestamps don't line up with the sample shows no figures at all. Whisker never
+  shows a rate of zero or one it had to guess.
+- **What it measures, and what it doesn't.** Only the reports macOS delivered to Whisker for that
+  mouse, and the time macOS stamped on each. It is **not** the mouse's polling rate, **not**
+  latency from the mouse to the screen, **not** packet loss and **not** the rate at which a game
+  or another app reads the mouse. Whisker can't see how often the mouse could send a report, which
+  ones never arrived, how long they took or what another app does with them. Use the figures to
+  compare one mouse, connection or receiver with another, not as a specification.
+- **Input Monitoring and privacy.** macOS needs Input Monitoring before Whisker can receive a
+  mouse's reports. The window asks for it only when you choose **Allow Input Monitoring…**, and
+  Input Timing listens only while a sample runs. It records when each report arrived and nothing
+  else: not what a report contained, where the pointer went or anything you typed. The times stay
+  in memory, and are never saved, logged or sent anywhere. Cancelling, closing the window, the Mac
+  going to sleep or switching user, Input Monitoring being turned off, or the mouse being
+  unplugged or changing stops the listening and throws the sample away, and the window then says
+  so rather than showing a result. Closing the window also forgets a finished one.
+- **Only that mouse, only listening.** Whisker listens to the mouse's own mouse or pointer
+  interfaces through a connection of its own, opened without taking the device over, so macOS and
+  other apps keep receiving the mouse as before. It never reads what a report contains, writes to
+  the device or changes a property of it, and a sample leaves Whisker's button remapping,
+  scrolling and mouse identification as they were. A keyboard interface on the same device is
+  never opened, and an interface whose reports mix movement with other input is skipped rather
+  than timed as if it were movement alone.
+- **When it won't start.** Trackpads and touch mice are left alone, so there is no **Input
+  Timing…** for them. For a mouse, the window says why when it can't time it: it isn't connected,
+  Input Monitoring is off, it is one of several identical mice with no serial number (so Whisker
+  can't tell whose reports are whose), macOS hasn't described it, it reports nothing from a mouse
+  or pointer, its reports mix movement with other input, or macOS wouldn't let Whisker open it.
+- **Not yet verified on hardware.** Input Timing has not been tried on a real mouse: not wired,
+  not through a wireless receiver and not over Bluetooth. What the timestamps measure on each,
+  their units and how a receiver delivers its reports are unconfirmed, and no mouse or receiver
+  model is known to work. The sample length, the 20 short gaps it needs and the 100 ms pause limit
+  are provisional.
+
 ## Privacy
 
 Whisker works entirely on your Mac. It has no accounts, analytics or telemetry, and it makes no
@@ -447,6 +513,11 @@ brew update && brew upgrade --cask whisker
   mouse's **Details** to see how sure Whisker is which clicks are its.
 - **Two mice share one set of settings.** They report the same vendor and product ids and no
   serial number, so Whisker cannot tell them apart. Their **Details** say so.
+- **Input Timing shows "Not enough movement to measure", or will not start.** Press **Start** and
+  move the mouse in steady circles for the whole sample, without clicking or scrolling. If it
+  will not start, the window says why: Input Monitoring is off, the mouse is not connected, two
+  identical mice share one listing, or macOS did not describe the mouse or let Whisker open it.
+  Trackpads and touch mice have no **Input Timing…**. See [Input timing](#input-timing).
 - **The pointer is suddenly too fast.** Wait a few seconds without confirming and Whisker reverts
   the change, or press Esc in Settings or choose **Revert Pointer Speed** in the menu. **Use
   System Settings** hands that mouse back to the system at once, and quitting Whisker also
