@@ -38,7 +38,10 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   wheel notch scrolls, add scroll acceleration, choose a modifier key that scrolls sideways and
   scroll faster or slower, from ×0.25 to ×8, while modifier keys you choose are held. The speed
   change applies to wheel notches, not trackpads or smooth scrolling, and is not yet verified on
-  hardware.
+  hardware. An opt-in native wheel speed and acceleration setting, per mouse, writes to the
+  mouse's own driver settings instead; it is offered only when Whisker can read and restore the
+  values, replaces Whisker's lines per notch and acceleration for that mouse, and is not yet
+  verified on hardware.
 - **Hold to Scroll (experimental).** Hold a button and roll the ball to scroll instead of moving
   the pointer, which stays where it was and does not jump when you let go. Choose the axes,
   speed and direction. It needs Input Monitoring, is not yet verified on hardware, and falls
@@ -268,7 +271,7 @@ Planned after 0.1, in no particular order:
 - Tilt-wheel buttons and two-button chords.
 - Auto-scroll and click lock.
 - Keyboard shortcut sequences and quick-switch pointer speed presets.
-- Native per-device wheel speed and acceleration, and smooth scrolling for notched wheels.
+- Smooth scrolling for notched wheels.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
 
 ## Contributing

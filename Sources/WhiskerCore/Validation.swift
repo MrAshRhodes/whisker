@@ -72,6 +72,17 @@ extension WhiskerSettings {
                 }
                 result.devices[id]?.pointer = fixed
             }
+            if var native = device.wheel.native {
+                if let speed = native.speed, !NativeWheelMath.speedRange.contains(speed) {
+                    issues.append(ValidationIssue("\(path).wheel.native.speed", "Must be between \(NativeWheelMath.speedRange.lowerBound) and \(NativeWheelMath.speedRange.upperBound)."))
+                    native.speed = speed.isFinite ? NativeWheelMath.speedRange.clamp(speed) : nil
+                }
+                if let acceleration = native.acceleration, !NativeWheelMath.accelerationRange.contains(acceleration) {
+                    issues.append(ValidationIssue("\(path).wheel.native.acceleration", "Must be between \(NativeWheelMath.accelerationRange.lowerBound) and \(NativeWheelMath.accelerationRange.upperBound)."))
+                    native.acceleration = acceleration.isFinite ? NativeWheelMath.accelerationRange.clamp(acceleration) : nil
+                }
+                result.devices[id]?.wheel.native = native
+            }
         }
 
         // Profiles.

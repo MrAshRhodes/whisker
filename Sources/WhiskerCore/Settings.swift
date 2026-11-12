@@ -122,10 +122,13 @@ public struct PointerSettings: Equatable, Sendable {
 public struct WheelSettings: Equatable, Sendable {
     public var invertVertical: Bool
     public var invertHorizontal: Bool
+    /// Opt-in change of the mouse's own wheel speed and acceleration. `nil` keeps the system behaviour.
+    public var native: NativeWheelSettings?
 
-    public init(invertVertical: Bool = false, invertHorizontal: Bool = false) {
+    public init(invertVertical: Bool = false, invertHorizontal: Bool = false, native: NativeWheelSettings? = nil) {
         self.invertVertical = invertVertical
         self.invertHorizontal = invertHorizontal
+        self.native = native
     }
 }
 
@@ -353,12 +356,38 @@ extension PointerSettings: Codable {
 }
 
 extension WheelSettings: Codable {
-    private enum CodingKeys: String, CodingKey { case invertVertical, invertHorizontal }
+    private enum CodingKeys: String, CodingKey { case invertVertical, invertHorizontal, native }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         invertVertical = try c.decodeIfPresent(Bool.self, forKey: .invertVertical) ?? false
         invertHorizontal = try c.decodeIfPresent(Bool.self, forKey: .invertHorizontal) ?? false
+        native = try c.decodeIfPresent(NativeWheelSettings.self, forKey: .native)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(invertVertical, forKey: .invertVertical)
+        try c.encode(invertHorizontal, forKey: .invertHorizontal)
+        try c.encodeIfPresent(native, forKey: .native)
+    }
+}
+
+extension NativeWheelSettings: Codable {
+    private enum CodingKeys: String, CodingKey { case enabled, speed, acceleration }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        speed = try c.decodeIfPresent(Double.self, forKey: .speed)
+        acceleration = try c.decodeIfPresent(Double.self, forKey: .acceleration)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(speed, forKey: .speed)
+        try c.encodeIfPresent(acceleration, forKey: .acceleration)
     }
 }
 

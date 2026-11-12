@@ -48,7 +48,7 @@
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li></ol></li>
           <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li></ol></li>
-          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
+          <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
           <li><a href="#application-bypass">Application bypass</a></li>
@@ -206,6 +206,16 @@ make app</code></pre>
             <li>Like the distance settings, it works on wheels that click from notch to notch. Trackpads and smooth scrolling are left alone.</li>
           </ul>
           <p>This has not yet been verified on hardware, including the wheel modes and connection types of mice such as the Logitech Lift and MX Master 3S. The ×0.25 and ×8 limits may change once it has been tried on real mice.</p>
+          <h3 id="native-wheel-settings">Native wheel settings</h3>
+          <p>Instead of Whisker adjusting each scroll event, you can ask macOS to change the mouse's own wheel speed and acceleration. In <span class="ui">Settings › Scrolling</span>, turn on <span class="ui">Use this mouse’s own wheel settings</span> for a mouse. It is off by default.</p>
+          <ul>
+            <li>It is offered only for a mouse whose current values Whisker can read and put back. Otherwise the option is unavailable, and a mouse that can't be told apart from another of the same kind is left alone.</li>
+            <li>Some mice accept the values but ignore them. Whisker can't check the effect on the wheel, so if nothing changes, turn the option off.</li>
+            <li>While it is on for a mouse, Whisker's lines per notch and acceleration are suspended for that mouse. Direction, sideways scrolling and <a href="#speed-while-holding-keys">speed while holding keys</a> still work.</li>
+            <li>Switching it off, switching Whisker off, quitting, or bringing an app on your <a href="#application-bypass">bypass list</a> to the front puts the mouse's original values back. If Whisker stops unexpectedly, it does this the next time it opens. It doesn't overwrite a change made by something else in the meantime.</li>
+            <li>If any of the values can't be written, read back or restored, Whisker undoes the whole change for that mouse and doesn't retry by itself.</li>
+          </ul>
+          <p>This has not yet been verified on hardware, so the accepted ranges and the real effect on mice such as the Logitech Lift and MX Master 3S are untested. If a mouse won't take its values back, see <a href="#troubleshooting">Troubleshooting</a>.</p>
           <h3 id="wheel-actions">Wheel actions</h3>
           <p>The wheel can trigger actions too. In <span class="ui">Settings › Buttons</span>, choose <span class="ui">Record Button…</span> and turn the wheel: each direction (up, down, left and right) is its own trigger, with any modifier keys. <kbd>⌥</kbd> + wheel up for Volume Up is a common one. Most people keep a modifier on wheel mappings so that plain scrolling still works.</p>
           <p><span class="ui">Repeat for every notch</span> runs the action once per notch. With it off, the action runs once for each burst of turning.</p>

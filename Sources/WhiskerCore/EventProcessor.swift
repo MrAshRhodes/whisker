@@ -347,7 +347,10 @@ public struct EventProcessor: Sendable {
             changed = true
         }
 
-        if let base = scroll.linesPerNotch {
+        // Native mode owns distance and acceleration for this mouse; the saved software values are kept, not used.
+        let nativeActive = event.device.map { settings.nativeWheelActive.contains($0.id) } ?? false
+        let softwareLines = ScrollModeResolver.mode(scroll: scroll, nativeActive: nativeActive) == .native ? nil : scroll.linesPerNotch
+        if let base = softwareLines {
             notchTimes.append(event.timestamp)
             notchTimes.removeAll { event.timestamp - $0 > ScrollMath.rateWindow }
             let rate = ScrollMath.notchRate(times: notchTimes, now: event.timestamp)

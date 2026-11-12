@@ -66,11 +66,10 @@ final class EventEngine: @unchecked Sendable {
     }
 
     func update(_ settings: WhiskerSettings) {
-        let compiled = CompiledSettings(settings)
         let app = frontmostApp()
         let location = Self.cursorLocation()
         state.withLock { state in
-            state.compiled = compiled
+            state.compiled = CompiledSettings(settings, nativeWheelActive: state.compiled.nativeWheelActive)
             state.processor.resetScrollRecognition()
             if settings.general.enabled {
                 // A click gesture under way began under the settings that are going away.
@@ -79,9 +78,17 @@ final class EventEngine: @unchecked Sendable {
                 release(&state, at: location)
             }
             // A hold whose mapping was removed ends now; one that is merely edited keeps the settings it started with.
-            if !compiled.needsMotion { state.processor.cancelHold() }
+            if !state.compiled.needsMotion { state.processor.cancelHold() }
             syncBypass(&state, app: app, at: location)
             reportHold(&state)
+        }
+    }
+
+    /// Mice whose own wheel service Whisker has changed: their software distance and acceleration stand aside.
+    func setNativeWheelActive(_ devices: Set<String>) {
+        state.withLock { state in
+            guard state.compiled.nativeWheelActive != devices else { return }
+            state.compiled = CompiledSettings(state.compiled.settings, nativeWheelActive: devices)
         }
     }
 

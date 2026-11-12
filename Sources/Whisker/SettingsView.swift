@@ -244,6 +244,7 @@ struct ScrollingPane: View {
                     }
                 }
             }
+            NativeWheelSection(store: store, devices: model.devices, wheel: model.wheel)
             Section {
                 Text("Reverse the wheel direction for a single mouse in Devices. Trackpads are never changed.")
                     .font(.footnote).foregroundStyle(.secondary)

@@ -101,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var tip = active ? "Whisker" : model.engineRunning ? "Whisker (off)" : "Whisker needs Accessibility access"
         if active, let app = model.bypassedAppName { tip = "Whisker (bypassed for \(app))" }
         if !model.pointer.restoreFailures.isEmpty { tip += "\nPointer settings couldn’t be restored" }
+        if !model.wheel.restoreFailures.isEmpty { tip += "\nWheel settings couldn’t be restored" }
         button.toolTip = tip
     }
 
@@ -126,6 +127,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if !model.pointer.restoreFailures.isEmpty {
             let warning = NSMenuItem(title: "Pointer settings couldn’t be restored…", action: #selector(showPointerSettings), keyEquivalent: "")
+            warning.target = self
+            menu.addItem(warning)
+        }
+        if !model.wheel.restoreFailures.isEmpty {
+            let warning = NSMenuItem(title: "Wheel settings couldn’t be restored…", action: #selector(showWheelSettings), keyEquivalent: "")
             warning.target = self
             menu.addItem(warning)
         }
@@ -158,6 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showPointerSettings() {
         model.selectedPane = .pointer
+        settingsWindow.show()
+    }
+
+    @objc private func showWheelSettings() {
+        model.selectedPane = .scrolling
         settingsWindow.show()
     }
 

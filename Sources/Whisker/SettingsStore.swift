@@ -14,6 +14,17 @@ struct OriginalPointer: Codable, Equatable {
 struct RunState: Codable, Equatable {
     var cleanExit = true
     var originalPointers: [String: OriginalPointer] = [:]
+    /// Wheel values Whisker changed and has not yet put back, by device.
+    var originalWheels: [String: WheelRecord] = [:]
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cleanExit = try c.decodeIfPresent(Bool.self, forKey: .cleanExit) ?? true
+        originalPointers = try c.decodeIfPresent([String: OriginalPointer].self, forKey: .originalPointers) ?? [:]
+        originalWheels = try c.decodeIfPresent([String: WheelRecord].self, forKey: .originalWheels) ?? [:]
+    }
 }
 
 /// Owns `settings.json`: loads it at launch (repairing what it can), saves changes shortly after they're

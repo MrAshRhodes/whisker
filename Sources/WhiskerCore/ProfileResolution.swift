@@ -112,6 +112,7 @@ public final class CompiledSettings: @unchecked Sendable {
     public let settings: WhiskerSettings
     private let resolvedByID: [String: ResolvedProfile]
     private let bypassApps: Set<String>
+    public let nativeWheelActive: Set<String>
     /// Whether any mapping needs pointer movement. When false, nothing in the app reads movement at all.
     public let needsMotion: Bool
     private var cache: [CacheKey: String] = [:]
@@ -122,8 +123,9 @@ public final class CompiledSettings: @unchecked Sendable {
         var app: String?
     }
 
-    public init(_ settings: WhiskerSettings) {
+    public init(_ settings: WhiskerSettings, nativeWheelActive: Set<String> = []) {
         self.settings = settings
+        self.nativeWheelActive = nativeWheelActive
         var resolved: [String: ResolvedProfile] = [:]
         for profile in settings.profiles {
             resolved[profile.id] = settings.resolvedProfile(id: profile.id)
@@ -152,6 +154,14 @@ public final class CompiledSettings: @unchecked Sendable {
         let id = settings.matchingProfile(device: device, app: app).id
         cache[key] = id
         return resolvedByID[id] ?? resolvedByID[Profile.defaultID]!
+    }
+
+    /// How the wheel is being changed for an event from `device` in `app`.
+    public func scrollMode(device: String?, app: String?) -> ScrollMode {
+        ScrollModeResolver.mode(
+            scroll: profile(device: device, app: app).scroll,
+            nativeActive: device.map { nativeWheelActive.contains($0) } ?? false
+        )
     }
 
     public func device(_ id: String?) -> DeviceSettings? {

@@ -45,6 +45,7 @@ final class AppModel: ObservableObject {
     let devices = DeviceMonitor()
     let frontApp = FrontAppMonitor()
     let pointer: PointerController
+    let wheel: WheelController
     let engine: EventEngine
 
     @Published private(set) var engineRunning = false
@@ -70,6 +71,7 @@ final class AppModel: ObservableObject {
         self.store = store
         runState = store.loadRunState()
         pointer = PointerController(originals: runState.originalPointers)
+        wheel = WheelController(records: runState.originalWheels)
         let frontApp = self.frontApp
         let devices = self.devices
         let synthesizer = EventSynthesizer(switchApp: { frontApp.switchApp($0) })
@@ -105,12 +107,18 @@ final class AppModel: ObservableObject {
 
     func start() {
         let leftovers = !runState.cleanExit && !runState.originalPointers.isEmpty
+        let wheelLeftovers = !runState.originalWheels.isEmpty
         runState.cleanExit = false
         store.saveRunState(runState)
 
         pointer.onOriginalsChange = { [weak self] originals in
             guard let self else { return }
             self.runState.originalPointers = originals
+            self.store.saveRunState(self.runState)
+        }
+        wheel.onRecordsChange = { [weak self] records in
+            guard let self else { return }
+            self.runState.originalWheels = records
             self.store.saveRunState(self.runState)
         }
         pointer.revert = { [weak self] deviceID, previous in
@@ -137,6 +145,10 @@ final class AppModel: ObservableObject {
             Log.pointer.notice("Last run didn’t quit cleanly; restoring pointer settings it changed")
             pointer.restoreLeftovers(connected: devices.devices)
         }
+        if wheelLeftovers {
+            Log.devices.notice("Wheel values from an earlier run are still on record; restoring them")
+            wheel.restoreLeftovers(connected: devices.devices)
+        }
 
         store.$settings
             .removeDuplicates()
@@ -148,6 +160,17 @@ final class AppModel: ObservableObject {
                 self.applyPointers(settings)
                 self.onStatusChange?()
             }
+            .store(in: &cancellables)
+
+        wheel.$activeDevices
+            .removeDuplicates()
+            .sink { [weak self] active in self?.engine.setNativeWheelActive(active) }
+            .store(in: &cancellables)
+        wheel.$restoreFailures
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.onStatusChange?() }
             .store(in: &cancellables)
 
         // `@Published` announces before it stores, so wait a turn for the menu to read the new value.
@@ -209,9 +232,11 @@ final class AppModel: ObservableObject {
         permission.stopPolling()
         engine.stop()
         pointer.restoreAll()
+        wheel.restoreAll()
         // A mouse that wouldn't take its values back keeps its record, so the next launch tries again.
         runState.originalPointers = pointer.originals
-        runState.cleanExit = pointer.originals.isEmpty
+        runState.originalWheels = wheel.records
+        runState.cleanExit = pointer.originals.isEmpty && wheel.records.isEmpty
         store.saveRunState(runState)
         store.saveNow()
         Log.app.info("Whisker quit")
@@ -232,7 +257,9 @@ final class AppModel: ObservableObject {
     }
 
     private func applyPointers(_ settings: WhiskerSettings, connected: [ConnectedDevice]? = nil) {
-        pointer.apply(settings, connected: connected ?? devices.devices, bypassed: bypassedApp != nil)
+        let connected = connected ?? devices.devices
+        pointer.apply(settings, connected: connected, bypassed: bypassedApp != nil)
+        wheel.apply(settings, connected: connected, bypassed: bypassedApp != nil)
     }
 
     // MARK: Editing helpers
