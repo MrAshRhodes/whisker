@@ -17,11 +17,13 @@ struct EventEngineTests {
         private let lock = NSLock()
         private var _calls: [Call] = []
         private var _releases = 0
+        private var _sequenceCancellations: [SequenceStop] = []
         var gate: DispatchSemaphore?
         let enteredDown = DispatchSemaphore(value: 0)
 
         var calls: [Call] { lock.withLock { _calls } }
         var releases: Int { lock.withLock { _releases } }
+        var sequenceCancellations: [SequenceStop] { lock.withLock { _sequenceCancellations } }
 
         func perform(_ action: Action, phase: ActionPhase, at location: CGPoint, flags: CGEventFlags, clickState: Int64) {
             if phase == .down, let gate {
@@ -32,6 +34,7 @@ struct EventEngineTests {
         }
 
         func cancelPendingClicks() {}
+        func cancelSequence(_ reason: SequenceStop) { lock.withLock { _sequenceCancellations.append(reason) } }
 
         func releaseAll() {
             lock.withLock { _releases += 1 }
@@ -65,6 +68,21 @@ struct EventEngineTests {
         event.setIntegerValueField(.mouseEventButtonNumber, value: 3)
         event.setIntegerValueField(.mouseEventClickState, value: clickState)
         return event
+    }
+
+    @Test func settingsFrontAppAndActivationChangesCallOffASequence() {
+        let recorder = Recorder()
+        let engine = Self.makeEngine(recorder)
+        #expect(recorder.sequenceCancellations == [.lifecycle])
+
+        engine.frontmostAppChanged()
+        engine.applicationActivated()
+        #expect(recorder.sequenceCancellations == [.lifecycle, .applicationChanged, .applicationChanged])
+
+        var disabled = WhiskerSettings()
+        disabled.general.enabled = false
+        engine.update(disabled)
+        #expect(recorder.releases == 1)
     }
 
     @Test func cleanupWaitsForAPressThatIsBeingPosted() {

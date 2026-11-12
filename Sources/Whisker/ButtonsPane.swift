@@ -307,6 +307,8 @@ struct ActionEditor: View {
                 get: { repeats },
                 set: { action = .shortcut(shortcut, repeatWhileHeld: $0) }
             ))
+        case .shortcutSequence(let steps):
+            SequenceEditor(steps: Binding(get: { steps }, set: { action = .shortcutSequence($0) }))
         case .navigate(let direction):
             Picker("Direction", selection: Binding(get: { direction }, set: { action = .navigate($0) })) {
                 ForEach(NavigationDirection.allCases, id: \.self) { Label($0.title, systemImage: $0.symbolName).tag($0) }
@@ -430,6 +432,86 @@ struct ShortcutField: View {
                 Text("Sends \(shortcut.displayString)").font(.footnote).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// An ordered list of shortcuts, each with the wait before the next. The limits are the ones settings files are held to.
+final class RowIdentities: ObservableObject {
+    var ids: [UUID] = []
+}
+
+struct SequenceEditor: View {
+    @Binding var steps: [SequenceStep]
+    /// Gives each row a stable identity so moving or removing a row doesn't leave another's half-typed text behind.
+    @StateObject private var identities = RowIdentities()
+
+    private var limits: ShortcutSequenceLimits.Type { ShortcutSequenceLimits.self }
+
+    var body: some View {
+        syncRowIDs()
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(steps.indices), id: \.self) { index in
+                row(index)
+                    .id(identities.ids[index])
+            }
+            HStack {
+                Button {
+                    steps.append(SequenceStep(shortcut: steps.last?.shortcut ?? KeyShortcut(keyCode: 0x08, modifiers: .command)))
+                } label: {
+                    Label("Add Shortcut", systemImage: "plus")
+                }
+                .disabled(steps.count >= limits.stepCount.upperBound)
+                Text("\(steps.count) of \(limits.stepCount.lowerBound)–\(limits.stepCount.upperBound) shortcuts, \(String(format: "%g", Double(limits.totalDelayMs(of: steps)) / 1000)) of \(limits.totalDelayMs / 1000) s waiting")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let problem = limits.problem(with: steps) {
+                Label(problem, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
+            }
+            Text("Runs once per press, not while held. Using the same button again, switching app or turning Whisker off stops it. Delays can't make an app ready in time.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    private func syncRowIDs() {
+        if identities.ids.count > steps.count { identities.ids.removeLast(identities.ids.count - steps.count) }
+        while identities.ids.count < steps.count { identities.ids.append(UUID()) }
+    }
+
+    @ViewBuilder private func row(_ index: Int) -> some View {
+        HStack(alignment: .top) {
+            Text("\(index + 1).").monospacedDigit().frame(width: 24, alignment: .trailing)
+            ShortcutField(shortcut: Binding(
+                get: { index < steps.count ? steps[index].shortcut : KeyShortcut(keyCode: 0) },
+                set: { if index < steps.count { steps[index].shortcut = $0 } }
+            ))
+            if index < steps.count - 1 {
+                Stepper("then wait \(steps[index].delayAfterMs) ms", value: Binding(
+                    get: { index < steps.count ? steps[index].delayAfterMs : 0 },
+                    set: { if index < steps.count { steps[index].delayAfterMs = min(max($0, limits.delayMs.lowerBound), limits.delayMs.upperBound) } }
+                ), in: limits.delayMs, step: 50)
+                .fixedSize()
+            }
+            Button { move(index, by: -1) } label: { Image(systemName: "arrow.up") }
+                .disabled(index == 0).help("Move up")
+            Button { move(index, by: 1) } label: { Image(systemName: "arrow.down") }
+                .disabled(index >= steps.count - 1).help("Move down")
+            Button(role: .destructive) { remove(index) } label: { Image(systemName: "minus.circle") }
+                .disabled(steps.count <= limits.stepCount.lowerBound).help("Remove this shortcut")
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func move(_ index: Int, by offset: Int) {
+        let target = index + offset
+        guard steps.indices.contains(index), steps.indices.contains(target) else { return }
+        steps.swapAt(index, target)
+        if identities.ids.count == steps.count { identities.ids.swapAt(index, target) }
+    }
+
+    private func remove(_ index: Int) {
+        guard steps.indices.contains(index), steps.count > limits.stepCount.lowerBound else { return }
+        steps.remove(at: index)
+        if identities.ids.indices.contains(index) { identities.ids.remove(at: index) }
     }
 }
 

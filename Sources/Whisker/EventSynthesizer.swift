@@ -17,7 +17,10 @@ protocol ActionPerforming: AnyObject, Sendable {
     func perform(_ action: Action, phase: ActionPhase, at location: CGPoint, flags: CGEventFlags, clickState: Int64)
     /// Calls off a click gesture that is still posting its clicks (a triple click spread out over time).
     func cancelPendingClicks()
-    /// Lets go of everything held and stops repeating keys. Calls off a pending click gesture too.
+    /// Calls off a keyboard shortcut sequence that is still running; steps already posted stay posted.
+    func cancelSequence(_ reason: SequenceStop)
+    /// Lets go of everything held and stops repeating keys. Calls off a pending click gesture and a running
+    /// shortcut sequence too.
     func releaseAll()
     /// Scrolls by whole pixels and puts the pointer back on `anchor`.
     func holdScroll(_ pixels: ScrollPixels, anchor: CGPoint)
@@ -40,6 +43,7 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
     private let switchApp: @MainActor (AppSwitchDirection) -> Void
     private let clicks: ClickScheduler
     private let tripleClickTiming: @Sendable () -> ClickTiming
+    private let sequences: ShortcutSequenceRunner
     private var repeatTimer: DispatchSourceTimer?
 
     /// `tripleClickTiming` is asked at every activation. It posts all three clicks back to back, like Double Click
@@ -48,12 +52,16 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
         shortcuts: SystemShortcutProviding = SystemShortcutReader(),
         switchApp: @escaping @MainActor (AppSwitchDirection) -> Void,
         clicks: ClickScheduler = ClickScheduler(post: { EventSynthesizer.postClick($0, at: $1, flags: $2) }),
-        tripleClickTiming: @escaping @Sendable () -> ClickTiming = { .immediate }
+        tripleClickTiming: @escaping @Sendable () -> ClickTiming = { .immediate },
+        sequences: ShortcutSequenceRunner = ShortcutSequenceRunner(
+            environment: SystemSequenceEnvironment(frontmost: { nil }, marker: EventSynthesizer.marker), stopped: { _ in }
+        )
     ) {
         self.shortcuts = shortcuts
         self.switchApp = switchApp
         self.clicks = clicks
         self.tripleClickTiming = tripleClickTiming
+        self.sequences = sequences
     }
 
     /// Runs on the event tap thread.
@@ -85,6 +93,10 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
             clicks.start(.tripleClick, timing: tripleClickTiming(), at: location, flags: held)
         case let .shortcut(shortcut, repeats):
             runRepeating(phase: phase, repeats: repeats) { [weak self] in self?.postKey(shortcut) }
+        case .shortcutSequence(let steps):
+            // One press is one run; the release doesn't end it. The runner posts from its own queue.
+            guard phase != .up else { return }
+            sequences.activate(steps)
         case .media(let key):
             runRepeating(phase: phase, repeats: key.repeats) { [weak self] in self?.postMedia(key) }
         case .scroll(let direction, let lines):
@@ -133,9 +145,14 @@ final class EventSynthesizer: ActionPerforming, @unchecked Sendable {
         clicks.cancel()
     }
 
-    /// Stops a repeating key and lets go of anything held.
+    func cancelSequence(_ reason: SequenceStop) {
+        sequences.cancel(reason)
+    }
+
+    /// Stops a repeating key, calls off a sequence and lets go of anything held.
     func releaseAll() {
         clicks.cancel()
+        sequences.cancel(.lifecycle)
         queue.async { [weak self] in self?.stopRepeat() }
     }
 

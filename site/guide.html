@@ -47,7 +47,7 @@
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#menu-bar">Menu bar</a></li>
           <li><a href="#devices">Devices</a><ol><li><a href="#device-details">Details</a></li></ol></li>
-          <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li></ol></li>
+          <li><a href="#buttons">Buttons</a><ol><li><a href="#actions">Actions</a></li><li><a href="#triple-click">Triple Click</a></li><li><a href="#shortcut-sequences">Shortcut Sequences</a></li></ol></li>
           <li><a href="#scrolling">Scrolling</a><ol><li><a href="#direction">Direction</a></li><li><a href="#lines-per-notch">Lines per notch</a></li><li><a href="#speed-while-holding-keys">Speed while holding keys</a></li><li><a href="#native-wheel-settings">Native wheel settings</a></li><li><a href="#wheel-actions">Wheel actions</a></li><li><a href="#smooth-horizontal-scrolling">Smooth sideways scrolling</a></li></ol></li>
           <li><a href="#pointer">Pointer</a></li>
           <li><a href="#profiles">Profiles</a></li>
@@ -167,6 +167,7 @@ make app</code></pre>
               <tr><th scope="row">Keyboard Shortcut</th><td>Presses a key combination. Turn on <span class="ui">Repeat while held</span> to repeat it like a held key.</td></tr>
               <tr><th scope="row">Back or Forward</th><td>Presses <kbd>⌘[</kbd> or <kbd>⌘]</kbd>, which most apps understand.</td></tr>
               <tr><th scope="row">Media Key</th><td>Play/Pause, Next Track, Previous Track, Volume Up, Volume Down, Mute, Brightness Up or Brightness Down. Volume and brightness keep changing while you hold the button.</td></tr>
+              <tr><th scope="row">Keyboard Shortcut Sequence</th><td>Presses two to sixteen key combinations in order, with a delay after each. See <a href="#shortcut-sequences">Shortcut Sequences</a>.</td></tr>
               <tr><th scope="row">Mission Control</th><td>Mission Control, Application Windows, Show Desktop, Launchpad or Notification Centre, using the shortcut set in <span class="ui">System Settings › Keyboard › Keyboard Shortcuts</span>. If that shortcut is off, Mission Control and Launchpad open the app instead (Apps on newer macOS); the others need their shortcut switched on.</td></tr>
               <tr><th scope="row">Switch Space</th><td>Moves one Space left or right, using the <span class="ui">Move left a space</span> and <span class="ui">Move right a space</span> shortcuts.</td></tr>
               <tr><th scope="row">Switch App</th><td>Brings forward the app you used last, or the one you've used least recently.</td></tr>
@@ -184,6 +185,17 @@ make app</code></pre>
             <li>If something cuts a triple click short, such as a click, scroll or button press of your own, a change of app or profile, Whisker being switched off or quit, Whisker losing Accessibility access, the mouse you used being unplugged, your Mac going to sleep or macOS pausing Whisker, Whisker sends no more clicks and doesn't try again. Clicks already sent can't be taken back, so an app may see fewer than three.</li>
           </ul>
           <p>This has not yet been verified in TextEdit, Safari or any other app, so which apps respond to it as a triple click is not yet known.</p>
+
+          <h3 id="shortcut-sequences">Shortcut Sequences</h3>
+          <p>A Keyboard Shortcut Sequence runs two to sixteen key combinations in order each time you press the button, such as <span class="ui">⌘A</span> then <span class="ui">⌘C</span>. Each step has a delay after it of 0 to 2,000 ms, and the whole sequence can take at most 10 seconds. The delay after the last step is ignored.</p>
+          <ul>
+            <li>It runs once per press and never overlaps. Pressing the same mapping again cancels it; pressing a different mapping is ignored until it finishes. Choose <span class="ui">Cancel Sequence</span> in the menu to stop it.</li>
+            <li>It is also cancelled by a change of frontmost app (including leaving and coming back), changed settings, Whisker being switched off, bypassed, asleep or quit, Whisker losing Accessibility access, or a reset of the event tap. Keys are never left held down.</li>
+            <li>If you are holding modifier keys that a step doesn't include, or the step's own key, Whisker stops the sequence with a beep rather than send a different shortcut.</li>
+            <li>Delivery is best-effort. Whisker checks the frontmost app before each step, but the app can change between the check and the keystroke, and a change of window within the same app isn't detected.</li>
+            <li>Settings are now saved with schema 2, so Whisker 0.1.0 refuses a file saved by this version.</li>
+          </ul>
+          <p>This has not yet been verified in any real app.</p>
         </section>
 
         <section aria-labelledby="scrolling">

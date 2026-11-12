@@ -219,6 +219,8 @@ extension WhiskerSettings {
             guard config.isValid else { return "Hold to Scroll sensitivity must be between \(String(format: "%g", range.lowerBound)) and \(String(format: "%g", range.upperBound))." }
         case .shortcut(let shortcut, _):
             guard shortcut.keyCode < 0x80 else { return "Key code \(shortcut.keyCode) is not a key." }
+        case .shortcutSequence(let steps):
+            if let problem = ShortcutSequenceLimits.problem(with: steps) { return problem }
         case .open(let url):
             guard Action.openURL(for: url) != nil else { return "“\(url)” is not an app, file or web address." }
         default:

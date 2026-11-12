@@ -47,6 +47,7 @@ final class AppModel: ObservableObject {
     let pointer: PointerController
     let wheel: WheelController
     let engine: EventEngine
+    private let sequences: ShortcutSequenceRunner
 
     @Published private(set) var engineRunning = false
     /// Why the latest Hold to Scroll fell back or could not start, for the Buttons pane.
@@ -74,7 +75,16 @@ final class AppModel: ObservableObject {
         wheel = WheelController(records: runState.originalWheels)
         let frontApp = self.frontApp
         let devices = self.devices
-        let synthesizer = EventSynthesizer(switchApp: { frontApp.switchApp($0) })
+        let sequences = ShortcutSequenceRunner(
+            environment: SystemSequenceEnvironment(frontmost: { frontApp.frontmostInstance }, marker: EventSynthesizer.marker),
+            stopped: { reason in
+                guard reason.needsFeedback else { return }
+                Log.events.notice("Shortcut sequence stopped: \(String(describing: reason), privacy: .public)")
+                DispatchQueue.main.async { NSSound.beep() }
+            }
+        )
+        self.sequences = sequences
+        let synthesizer = EventSynthesizer(switchApp: { frontApp.switchApp($0) }, sequences: sequences)
         engine = EventEngine(
             synthesizer: synthesizer,
             attribute: { devices.attribute($0, at: $1) },
@@ -135,6 +145,7 @@ final class AppModel: ObservableObject {
             self.applyPointers(self.store.settings)
             self.onStatusChange?()
         }
+        frontApp.onActivation = { [weak self] in self?.engine.applicationActivated() }
         devices.onChange = { [weak self] connected in
             guard let self else { return }
             self.applyPointers(self.store.settings, connected: connected)
@@ -206,6 +217,14 @@ final class AppModel: ObservableObject {
         engine.stop()
         engineRunning = false
         onStatusChange?()
+    }
+
+    /// Whether a keyboard shortcut sequence is running, for the menu.
+    var isSequenceRunning: Bool { sequences.isRunning }
+
+    /// Stops a running keyboard shortcut sequence; steps already posted stay posted.
+    func cancelSequence() {
+        sequences.cancel(.userCancelled)
     }
 
     func setEnabled(_ enabled: Bool) {

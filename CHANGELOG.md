@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Triple Click action: one press of a mouse button, or one burst of wheel turning, sends three left clicks at the pointer, with optional modifier keys like Double Click. It is a mouse gesture rather than a "select paragraph" command, because what three clicks do is up to the app, and a gesture that is cut short can reach an app as fewer than three clicks. It has not yet been verified in TextEdit, Safari or any other app ([#20]).
 - Device details: every device under Settings › Devices has a read-only Details disclosure with its name, connection, vendor and product ids, whether it reports a serial number (shown only when you choose Show), the buttons and wheels it reports to macOS, and why Whisker leaves a device alone or treats several as one. Input Monitoring status is kept separate from how sure Whisker is which mouse a click came from. Nothing new is saved, and reported buttons and wheels are read only once Input Monitoring is allowed and have not yet been verified on hardware ([#10]).
 
+- Keyboard Shortcut Sequence action: one press runs two to sixteen shortcuts in order, each with a delay of up to 2,000 ms (10 seconds in total). It never overlaps, the same mapping cancels it, and it is also cancelled from the menu, by a change of frontmost app, changed settings, Whisker being switched off, bypassed, asleep or quit, or lost permission. A step is refused if conflicting modifier keys are held. Delivery is best-effort, with a small race between the focus check and each keystroke, and it has not yet been verified in any real app. Settings move to schema 2, which Whisker 0.1.0 refuses to open ([#22]).
+
 ## [0.1.0] - 2026-11-12
 
 ### Added
@@ -37,5 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#16]: https://github.com/MrAshRhodes/whisker/issues/16
 [#17]: https://github.com/MrAshRhodes/whisker/issues/17
 [#20]: https://github.com/MrAshRhodes/whisker/issues/20
+[#22]: https://github.com/MrAshRhodes/whisker/issues/22
 [#26]: https://github.com/MrAshRhodes/whisker/issues/26
 [#31]: https://github.com/MrAshRhodes/whisker/issues/31

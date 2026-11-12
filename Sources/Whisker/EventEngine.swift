@@ -74,6 +74,7 @@ final class EventEngine: @unchecked Sendable {
             if settings.general.enabled {
                 // A click gesture under way began under the settings that are going away.
                 synthesizer.cancelPendingClicks()
+                synthesizer.cancelSequence(.lifecycle)
             } else {
                 release(&state, at: location)
             }
@@ -100,11 +101,18 @@ final class EventEngine: @unchecked Sendable {
         let location = Self.cursorLocation()
         state.withLock { state in
             synthesizer.cancelPendingClicks()
+            synthesizer.cancelSequence(.applicationChanged)
             // The pointer is anchored in the window that was in front, so a hold never carries over to another app.
             state.processor.cancelHold()
             syncBypass(&state, app: app, at: location)
             reportHold(&state)
         }
+    }
+
+    /// An app came to the front, even the one that already was (leaving an app and coming back counts).
+    /// A shortcut sequence was aimed at the app as it was, so it is called off.
+    func applicationActivated() {
+        state.withLock { _ in synthesizer.cancelSequence(.applicationChanged) }
     }
 
     func setCapturing(_ capturing: Bool) {

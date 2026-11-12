@@ -135,6 +135,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             warning.target = self
             menu.addItem(warning)
         }
+        let cancel = NSMenuItem(title: "Cancel Sequence", action: model.isSequenceRunning ? #selector(cancelSequence) : nil, keyEquivalent: "")
+        cancel.target = self
+        menu.addItem(cancel)
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
         settings.target = self
@@ -147,6 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(about)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Whisker", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    }
+
+    @objc private func cancelSequence() {
+        model.cancelSequence()
     }
 
     @objc private func toggleEnabled(_ sender: Any?) {

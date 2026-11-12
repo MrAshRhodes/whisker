@@ -137,6 +137,8 @@ public enum Action: Hashable, Sendable {
     /// select a line or paragraph) is up to the app.
     case tripleClick(modifiers: ModifierSet)
     case shortcut(KeyShortcut, repeatWhileHeld: Bool)
+    /// Several shortcuts one after another, run once per activation within `ShortcutSequenceLimits`.
+    case shortcutSequence([SequenceStep])
     case scroll(direction: WheelDirection, lines: Int)
     case media(MediaKey)
     case navigate(NavigationDirection)
@@ -156,6 +158,7 @@ public enum Action: Hashable, Sendable {
         case .doubleClick: return .doubleClick
         case .tripleClick: return .tripleClick
         case .shortcut: return .shortcut
+        case .shortcutSequence: return .shortcutSequence
         case .scroll: return .scroll
         case .media: return .media
         case .navigate: return .navigate
@@ -225,6 +228,7 @@ public enum Action: Hashable, Sendable {
         case .doubleClick(let modifiers): return modifiers.isEmpty ? "Double Click" : "\(modifiers.symbols) Double Click"
         case .tripleClick(let modifiers): return modifiers.isEmpty ? "Triple Click" : "\(modifiers.symbols) Triple Click"
         case let .shortcut(shortcut, _): return "Keyboard Shortcut \(shortcut.displayString)"
+        case .shortcutSequence(let steps): return "Shortcut Sequence \(steps.map(\.shortcut.displayString).joined(separator: " → "))"
         case let .scroll(direction, lines): return "\(direction.title) \(lines) \(lines == 1 ? "Line" : "Lines")"
         case .media(let key): return key.title
         case .navigate(let direction): return direction.title
@@ -271,7 +275,7 @@ public enum Action: Hashable, Sendable {
 
 /// The action families offered in the action picker, in menu order.
 public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
-    case passthrough, none, click, doubleClick, tripleClick, shortcut, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, open
+    case passthrough, none, click, doubleClick, tripleClick, shortcut, shortcutSequence, navigate, media, missionControl, space, appSwitch, scroll, holdToScroll, open
 
     public var id: String { rawValue }
 
@@ -283,6 +287,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .doubleClick: return "Double Click"
         case .tripleClick: return "Triple Click"
         case .shortcut: return "Keyboard Shortcut"
+        case .shortcutSequence: return "Keyboard Shortcut Sequence"
         case .navigate: return "Back or Forward"
         case .media: return "Media Key"
         case .missionControl: return "Mission Control"
@@ -302,6 +307,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .doubleClick: return "cursorarrow.click.2"
         case .tripleClick: return "cursorarrow.motionlines.click"
         case .shortcut: return "keyboard"
+        case .shortcutSequence: return "list.number"
         case .navigate: return "arrow.left.arrow.right"
         case .media: return "playpause"
         case .missionControl: return "rectangle.3.group"
@@ -322,6 +328,11 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
         case .doubleClick: return .doubleClick(modifiers: [])
         case .tripleClick: return .tripleClick(modifiers: [])
         case .shortcut: return .shortcut(KeyShortcut(keyCode: 0x11, modifiers: .command), repeatWhileHeld: false)
+        case .shortcutSequence:
+            return .shortcutSequence([
+                SequenceStep(shortcut: KeyShortcut(keyCode: 0x00, modifiers: .command)),
+                SequenceStep(shortcut: KeyShortcut(keyCode: 0x08, modifiers: .command)),
+            ])
         case .navigate: return .navigate(.back)
         case .media: return .media(.playPause)
         case .missionControl: return .missionControl(.missionControl)
@@ -336,7 +347,7 @@ public enum ActionKind: String, CaseIterable, Identifiable, Sendable {
 
 extension Action: Codable {
     private enum CodingKeys: String, CodingKey {
-        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, axes, sensitivity, invertVertical, invertHorizontal
+        case kind, button, modifiers, keyCode, repeatWhileHeld, direction, lines, key, target, url, steps, axes, sensitivity, invertVertical, invertHorizontal
     }
 
     public init(from decoder: Decoder) throws {
@@ -356,6 +367,7 @@ extension Action: Codable {
                 KeyShortcut(keyCode: try container.decode(UInt16.self, forKey: .keyCode), modifiers: try modifiers()),
                 repeatWhileHeld: try container.decodeIfPresent(Bool.self, forKey: .repeatWhileHeld) ?? false
             )
+        case "shortcutSequence": self = .shortcutSequence(try container.decode([SequenceStep].self, forKey: .steps))
         case "scroll":
             self = .scroll(
                 direction: try container.decode(WheelDirection.self, forKey: .direction),
@@ -399,6 +411,9 @@ extension Action: Codable {
             try container.encode(shortcut.keyCode, forKey: .keyCode)
             try container.encode(shortcut.modifiers, forKey: .modifiers)
             try container.encode(repeats, forKey: .repeatWhileHeld)
+        case .shortcutSequence(let steps):
+            try container.encode("shortcutSequence", forKey: .kind)
+            try container.encode(steps, forKey: .steps)
         case let .scroll(direction, lines):
             try container.encode("scroll", forKey: .kind)
             try container.encode(direction, forKey: .direction)

@@ -26,6 +26,18 @@ Product site and user guide: <https://mrashrhodes.github.io/whisker/>
   Whisker being switched off, Whisker sends no more clicks and does not retry, but clicks already
   sent cannot be taken back, so an app may see fewer than three. Not yet verified in TextEdit,
   Safari or any other app.
+- **Keyboard shortcut sequence.** One press runs two to sixteen shortcuts in order, each with
+  its own delay (0 to 2,000 ms, 10 seconds in total), such as ⌘A then ⌘C. It runs once per
+  press and never overlaps: pressing the same mapping again cancels it, and any other mapping is
+  ignored until it ends. Choose **Cancel Sequence** in the menu to stop it. It is also cancelled
+  by a change of frontmost app (including leaving and returning), changed settings, Whisker being
+  switched off, bypassed, asleep or quit, a lost Accessibility permission, or a tap reset. No key
+  is left held down. Delivery is best-effort: Whisker checks the frontmost app before each step
+  but an app can still change in the instant between the check and the keystroke, and a change of
+  window within the same app is not detected. A step is refused, and the sequence stopped with a
+  beep, if you are holding modifier keys the step does not include, or the step's own key. Not yet
+  verified in any real app. Because settings now use schema 2, Whisker 0.1.0 will refuse files
+  saved by this version.
 - **Wheel actions.** Turning the wheel runs its action once per burst of notches, or once for
   every notch if you choose **Repeat for every notch**. For Scroll Left and Scroll Right,
   **Also act on smooth scrolling from this mouse** adds an opt-in mode for sideways movement that
@@ -270,7 +282,7 @@ Planned after 0.1, in no particular order:
 
 - Tilt-wheel buttons and two-button chords.
 - Auto-scroll and click lock.
-- Keyboard shortcut sequences and quick-switch pointer speed presets.
+- Quick-switch pointer speed presets.
 - Smooth scrolling for notched wheels.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
 

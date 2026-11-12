@@ -31,6 +31,10 @@ public enum SettingsCodec {
             // Files written before the schema was versioned. Their sections already have the version 1
             // shape; anything missing takes its default when decoded, and an empty file gets the default profile.
             if json["profiles"] == nil { json["profiles"] = [] as [Any] }
+        case 1:
+            // Version 2 only adds the shortcutSequence action, which a version 1 file can't contain. The bump
+            // makes a Whisker that predates it leave a file that uses one alone instead of failing to read it.
+            break
         default:
             throw Failure.unreadable("No upgrade from schema \(version).")
         }

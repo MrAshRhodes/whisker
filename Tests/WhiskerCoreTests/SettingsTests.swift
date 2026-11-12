@@ -47,6 +47,10 @@ struct SettingsTests {
             .missionControl(.appWindows), .space(.right), .appSwitch(.previous),
             .holdToScroll(HoldScroll(axes: .free, sensitivity: 2.5, invertVertical: true, invertHorizontal: false)),
             .open(url: "https://example.com"),
+            .shortcutSequence([
+                SequenceStep(shortcut: KeyShortcut(keyCode: 0x00, modifiers: .command), delayAfterMs: 150),
+                SequenceStep(shortcut: KeyShortcut(keyCode: 0x08, modifiers: [.command, .shift])),
+            ]),
         ]
         for action in actions {
             let data = try JSONEncoder().encode(action)
@@ -168,7 +172,7 @@ struct SettingsTests {
 
     @Test func unversionedFilesUpgrade() throws {
         let settings = try SettingsCodec.decode(Data(#"{"general":{"enabled":false}}"#.utf8))
-        #expect(settings.schemaVersion == 1)
+        #expect(settings.schemaVersion == WhiskerSettings.currentSchemaVersion)
         #expect(settings.general.enabled == false)
         #expect(settings.profiles == [.makeDefault()])
     }
@@ -178,7 +182,7 @@ struct SettingsTests {
         let settings = try SettingsCodec.decode(Data(json.utf8))
         #expect(settings.general == GeneralSettings(enabled: false, showMenuBarIcon: false, allowPrimaryButtonRemap: true))
         #expect(settings.general.bypassApps.isEmpty)
-        #expect(settings.schemaVersion == 1)
+        #expect(settings.schemaVersion == WhiskerSettings.currentSchemaVersion)
         #expect(settings.unknownKeys["future"] == .number(1))
     }
 

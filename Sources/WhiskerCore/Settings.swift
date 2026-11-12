@@ -2,7 +2,7 @@ import Foundation
 
 /// The whole settings file (`~/Library/Application Support/Whisker/settings.json`).
 public struct WhiskerSettings: Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var general: GeneralSettings
