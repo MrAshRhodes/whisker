@@ -719,7 +719,7 @@ builds cannot update themselves. See [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 
 ## Roadmap
 
-Planned after 0.1, in no particular order:
+Planned after 0.2, in no particular order:
 
 - Taking Auto-scroll and Click Lock out of experimental once they have been verified on
   hardware.
