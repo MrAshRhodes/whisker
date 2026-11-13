@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Make common actions easier to find with grouped choices for Left, Right and Middle Click, Back, Forward and desktop actions. Hide actions a wheel trigger cannot run, explain gesture restrictions, and preserve the button action when toggling gestures ([#36]).
+- Create app profiles directly from Buttons and Scrolling, show what the selected profile applies to and inherits, put inherited mappings next to overrides, add Edit Scrolling in Applications, and confirm before deleting an app profile ([#36]).
 - Retire slow-pointer holds when their releases lack a fresh device report, so the next hold can slow the pointer again ([#14]).
 - Keep overlapping mapped and swapped button presses owned by their originating mice, rather than consuming another mouse's release and leaving a synthetic button held ([#11]).
 - Let the primary-button Click Lock escape bypass duplicate-click filtering, including its matching release ([#9], [#19]).
@@ -82,3 +84,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#30]: https://github.com/MrAshRhodes/whisker/issues/30
 [#31]: https://github.com/MrAshRhodes/whisker/issues/31
 [#32]: https://github.com/MrAshRhodes/whisker/issues/32
+[#36]: https://github.com/MrAshRhodes/whisker/issues/36

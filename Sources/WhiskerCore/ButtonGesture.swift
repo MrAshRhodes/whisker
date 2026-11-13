@@ -121,6 +121,21 @@ extension ButtonGestures: Codable {
     }
 }
 
+extension Mapping {
+    /// Keep a normal button action available when gestures are switched off again.
+    public mutating func setGesturesEnabled(_ enabled: Bool) {
+        guard case .button = trigger, enabled != (gestures != nil) else { return }
+        if enabled {
+            var added = ButtonGestures()
+            added.tap = action.allowedInGestures ? action : nil
+            gestures = added
+        } else {
+            action = gestures?.tap ?? action
+            gestures = nil
+        }
+    }
+}
+
 extension Action {
     /// Whether a gesture can run the action: it is one step that is done once it is performed, so it can run when
     /// the button comes up. Actions that last as long as the trigger is held (Click, Hold to Scroll, Slow pointer while

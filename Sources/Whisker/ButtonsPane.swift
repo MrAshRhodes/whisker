@@ -67,11 +67,13 @@ struct ButtonsPane: View {
         let inherited = resolved.sortedMappings.filter(\.inherited)
         Form {
             Section {
-                ProfilePicker(store: store)
+                ProfileHeader(store: store)
             }
             Section {
                 if profile.wrappedValue.mappings.isEmpty {
-                    Text("No mappings yet. Record a button or pick one from Add to change what it does.")
+                    Text(inherited.isEmpty
+                         ? "Nothing changed in this profile yet. Record a button or pick one from Add to change what it does."
+                         : "Nothing changed in this profile yet. The \(inherited.count) inherited mappings below still apply. Choose Override to change one, or record another button.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(profile.wrappedValue.mappings.indices, id: \.self) { index in
@@ -120,15 +122,6 @@ struct ButtonsPane: View {
                 Text("Hold modifier keys while recording to map a combination, like ⌥ + Button 4.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            if let deviceID = Self.mouseID(of: profile.wrappedValue) {
-                Section("Primary and Secondary Buttons") {
-                    ButtonSwapControls(
-                        store: store, devices: model.devices, id: deviceID,
-                        name: store.settings.devices[deviceID]?.name ?? profile.wrappedValue.name
-                    )
-                }
-            }
-            ChordSection(store: store, devices: model.devices, profile: profile, resolved: resolved.chords)
             if !inherited.isEmpty {
                 Section("Inherited") {
                     ForEach(inherited, id: \.mapping.key) { item in
@@ -147,6 +140,15 @@ struct ButtonsPane: View {
                     }
                 }
             }
+            if let deviceID = Self.mouseID(of: profile.wrappedValue) {
+                Section("Primary and Secondary Buttons") {
+                    ButtonSwapControls(
+                        store: store, devices: model.devices, id: deviceID,
+                        name: store.settings.devices[deviceID]?.name ?? profile.wrappedValue.name
+                    )
+                }
+            }
+            ChordSection(store: store, devices: model.devices, profile: profile, resolved: resolved.chords)
         }
         .formStyle(.grouped)
         .sheet(isPresented: $tilt.isPresented) {
@@ -240,17 +242,16 @@ struct MappingRow: View {
                 Toggle("Gestures", isOn: Binding(
                     get: { mapping.gestures != nil },
                     set: { on in
-                        guard on != (mapping.gestures != nil) else { return }
                         var updated = mapping
-                        updated.gestures = on ? ButtonGestures() : nil
-                        // The button's own action isn't used while it has gestures; older versions of Whisker leave it alone.
-                        if on { updated.action = .passthrough }
+                        updated.setGesturesEnabled(on)
                         mapping = updated
                     }
                 ))
                 .help("Hold the button, move the mouse up, down, left or right and let go to run an action for each direction; letting go without moving can run one too. Not yet verified on hardware.")
             }
             if mapping.gestures != nil {
+                Text("Single clicks and actions that stay held cannot run as gestures. Turn Gestures off to make this button a Left, Right or Middle Click.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 GestureEditor(gestures: Binding(
                     get: { mapping.gestures ?? ButtonGestures() },
                     set: { mapping.gestures = $0 }
@@ -296,6 +297,27 @@ struct MappingRow: View {
 
 // MARK: - Action editor
 
+struct ActionChoiceItems<Tag: Hashable>: View {
+    let sections: [ActionMenuSection]
+    let tag: (ActionChoice) -> Tag
+
+    var body: some View {
+        ForEach(sections) { section in
+            if let title = section.title {
+                Section(title) { choices(section.choices) }
+            } else {
+                choices(section.choices)
+            }
+        }
+    }
+
+    private func choices(_ choices: [ActionChoice]) -> some View {
+        ForEach(choices) { choice in
+            Label(choice.title, systemImage: choice.symbolName).tag(tag(choice))
+        }
+    }
+}
+
 struct ActionEditor: View {
     @EnvironmentObject private var model: AppModel
     @Binding var action: Action
@@ -310,35 +332,37 @@ struct ActionEditor: View {
 
     /// Pointer speed presets are offered once there is a preset to switch to, and Click Lock once it is switched on
     /// in General. A mapping that already has either keeps showing it.
-    private var kinds: [ActionKind] {
-        ActionKind.allCases.filter { kind in
-            guard !inGesture || kind.defaultAction.allowedInGestures else { return false }
-            guard !inChord || kind.defaultAction.allowedInChords else { return false }
-            if let trigger, case .wheel = trigger, kind == .holdToScroll { return false }
-            switch kind {
-            case .pointerPreset: return action.kind == .pointerPreset || settings.firstPointerPreset() != nil
-            case .clickLock: return action.kind == .clickLock || settings.general.experimentalClickLock
+    private var sections: [ActionMenuSection] {
+        ActionMenu.sections { choice in
+            if choice == ActionChoice(action) { return true }
+            guard !inGesture || choice.defaultAction.allowedInGestures else { return false }
+            guard !inChord || choice.defaultAction.allowedInChords else { return false }
+            if let trigger, WhiskerSettings.problem(with: choice.defaultAction, triggeredBy: trigger) != nil { return false }
+            switch choice.kind {
+            case .pointerPreset: return settings.firstPointerPreset() != nil
+            case .clickLock: return settings.general.experimentalClickLock
             default: return true
             }
         }
     }
 
-    private func newAction(for kind: ActionKind) -> Action {
-        if kind == .pointerPreset, let first = settings.firstPointerPreset() {
+    private func newAction(for choice: ActionChoice) -> Action {
+        if choice.kind == .pointerPreset, let first = settings.firstPointerPreset() {
             return .pointerPreset(deviceID: first.deviceID, presetID: first.presetID)
         }
-        return kind.defaultAction
+        if case .click(let button, _) = choice.defaultAction, case .click(_, let modifiers) = action {
+            return .click(button: button, modifiers: modifiers)
+        }
+        return choice.defaultAction
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if showsKindPicker {
                 Picker("Action", selection: Binding(
-                    get: { action.kind },
-                    set: { kind in if kind != action.kind { action = newAction(for: kind) } }
+                    get: { ActionChoice(action) },
+                    set: { choice in if choice != ActionChoice(action) { action = newAction(for: choice) } }
                 )) {
-                    ForEach(kinds) { kind in
-                        Label(kind.title, systemImage: kind.symbolName).tag(kind)
-                    }
+                    ActionChoiceItems(sections: sections, tag: { $0 })
                 }
             }
             details
@@ -352,12 +376,14 @@ struct ActionEditor: View {
         case .none:
             Text("The button is ignored.").font(.footnote).foregroundStyle(.secondary)
         case let .click(button, modifiers):
-            Picker("Button", selection: Binding(
-                get: { button },
-                set: { action = .click(button: $0, modifiers: modifiers) }
-            )) {
-                ForEach(0...7, id: \.self) { number in
-                    Text(Trigger.buttonTitle(number)).tag(number)
+            if !(0...2).contains(button) {
+                Picker("Button", selection: Binding(
+                    get: { button },
+                    set: { action = .click(button: $0, modifiers: modifiers) }
+                )) {
+                    ForEach(Array(Set(Array(3...7) + [button])).sorted(), id: \.self) { number in
+                        Text(Trigger.buttonTitle(number)).tag(number)
+                    }
                 }
             }
             ModifierToggles(modifiers: Binding(
@@ -396,19 +422,13 @@ struct ActionEditor: View {
             }
         case .shortcutSequence(let steps):
             SequenceEditor(steps: Binding(get: { steps }, set: { action = .shortcutSequence($0) }))
-        case .navigate(let direction):
-            Picker("Direction", selection: Binding(get: { direction }, set: { action = .navigate($0) })) {
-                ForEach(NavigationDirection.allCases, id: \.self) { Label($0.title, systemImage: $0.symbolName).tag($0) }
-            }
-            .pickerStyle(.segmented)
+        case .navigate:
+            EmptyView()
         case .media(let key):
             Picker("Key", selection: Binding(get: { key }, set: { action = .media($0) })) {
                 ForEach(MediaKey.allCases, id: \.self) { Label($0.title, systemImage: $0.symbolName).tag($0) }
             }
-        case .missionControl(let target):
-            Picker("Show", selection: Binding(get: { target }, set: { action = .missionControl($0) })) {
-                ForEach(MissionControlTarget.allCases, id: \.self) { Label($0.title, systemImage: $0.symbolName).tag($0) }
-            }
+        case .missionControl:
             SystemShortcutNote(action: action)
         case .space(let direction):
             Picker("Direction", selection: Binding(get: { direction }, set: { action = .space($0) })) {

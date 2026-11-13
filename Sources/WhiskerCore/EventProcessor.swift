@@ -276,7 +276,9 @@ public struct EventProcessor: Sendable {
             let profile = settings.profile(device: owner.device?.id, app: app)
             if profile.profileID != owner.profile {
                 reason = .profileChanged
-            } else if profile.mappings.values.contains(where: { $0.mapping.trigger == .button(owner.trigger) && $0.mapping.action == .clickLock }) {
+            } else if profile.mappings.values.contains(where: {
+                $0.mapping.trigger == .button(owner.trigger) && $0.mapping.action == .clickLock && $0.mapping.gestures == nil
+            }) {
                 return false
             } else {
                 reason = .settingsChanged

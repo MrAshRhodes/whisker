@@ -48,22 +48,20 @@ private struct GestureSlot: View {
     let settings: WhiskerSettings
     @Binding var action: Action?
 
-    private static let kinds = ActionKind.allCases.filter { $0.defaultAction.allowedInGestures }
+    private static let sections = ActionMenu.sections { $0.defaultAction.allowedInGestures }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Picker(selection: Binding(
-                get: { action?.kind },
-                set: { kind in
-                    guard kind != action?.kind else { return }
-                    action = kind?.defaultAction
+                get: { action.map(ActionChoice.init) },
+                set: { choice in
+                    guard choice != action.map(ActionChoice.init) else { return }
+                    action = choice?.defaultAction
                 }
             )) {
-                Text("Nothing").tag(ActionKind?.none)
+                Text("Nothing").tag(ActionChoice?.none)
                 Divider()
-                ForEach(Self.kinds) { kind in
-                    Label(kind.title, systemImage: kind.symbolName).tag(ActionKind?.some(kind))
-                }
+                ActionChoiceItems(sections: Self.sections, tag: { ActionChoice?.some($0) })
             } label: {
                 Label(title, systemImage: symbolName)
             }

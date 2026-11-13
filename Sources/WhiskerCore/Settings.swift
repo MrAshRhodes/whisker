@@ -366,7 +366,7 @@ public struct Mapping: Equatable, Sendable {
     /// scrolling also fires the action once per burst, leaving any vertical movement alone.
     public var continuousInput: ContinuousWheelInput?
     /// Button triggers only: opt-in directional gestures. When set the button is a gesture button and `action` is
-    /// not used (the Buttons pane stores Default there).
+    /// not used (the Buttons pane keeps the button's earlier action there, for when gestures are turned off again).
     public var gestures: ButtonGestures?
 
     public init(

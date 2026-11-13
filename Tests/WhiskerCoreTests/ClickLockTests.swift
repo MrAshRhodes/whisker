@@ -454,6 +454,7 @@ struct ClickLockTests {
             ("the opt-in was turned off", Self.app, compiled(optIn: false), .disabled),
             ("the trigger lost its mapping", Self.app, compiled([]), .settingsChanged),
             ("the trigger now does something else", Self.app, compiled([Mapping(trigger: .button(5), action: .none)]), .settingsChanged),
+            ("the trigger gained gestures", Self.app, compiled([Mapping(trigger: .button(5), action: .clickLock, gestures: ButtonGestures())]), .settingsChanged),
             ("a profile began to apply", Self.app, compiled { $0.profiles.append(appProfile) }, .profileChanged),
         ]
         for (reason, app, settings, expected) in cases {
