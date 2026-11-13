@@ -199,3 +199,217 @@ struct PointerOrientationTests {
         #expect(opposed.correctionDegrees == nil)
     }
 }
+
+@Suite("Pointer orientation routing")
+struct PointerOrientationRoutingTests {
+    static let screen = PointerRect(x: 0, y: 0, width: 1000, height: 1000)
+    static let mouse = DeviceAttribution(id: "mouse", exact: true)
+
+    static func router(_ angles: [String: Double] = ["mouse": 90]) -> PointerOrientationRouter {
+        var router = PointerOrientationRouter()
+        router.setAngles(angles)
+        router.setDisplays([screen])
+        return router
+    }
+
+    @Test func clampKeepsThePointerOnTheNearestDisplay() {
+        let displays = [Self.screen, PointerRect(x: 1000, y: 0, width: 500, height: 400)]
+        #expect(PointerOrientationMath.clamp(PointerPoint(x: 1200, y: 300), to: displays) == PointerPoint(x: 1200, y: 300))
+        #expect(PointerOrientationMath.clamp(PointerPoint(x: -5, y: 2000), to: displays) == PointerPoint(x: 0, y: 999))
+        #expect(PointerOrientationMath.clamp(PointerPoint(x: 1600, y: 500), to: displays) == PointerPoint(x: 1499, y: 399))
+        #expect(PointerOrientationMath.clamp(PointerPoint(x: -5, y: -5), to: []) == PointerPoint(x: -5, y: -5))
+    }
+
+    @Test func effectiveAnglesHonourEnabledDevicesAndPreview() {
+        let devices = [
+            "a": DeviceSettings(rotationDegrees: 90),
+            "b": DeviceSettings(enabled: false, rotationDegrees: 45),
+            "c": DeviceSettings(rotationDegrees: 360),
+        ]
+        #expect(PointerOrientationMath.effectiveAngles(devices: devices, enabled: true) == ["a": 90])
+        #expect(PointerOrientationMath.effectiveAngles(devices: devices, enabled: false).isEmpty)
+        let preview = PointerOrientationPreview(deviceID: "c", previous: 0, proposed: -30, deadline: .distantFuture)
+        #expect(PointerOrientationMath.effectiveAngles(devices: devices, enabled: true, preview: preview) == ["a": 90, "c": -30])
+        let back = PointerOrientationPreview(deviceID: "a", previous: 90, proposed: 0, deadline: .distantFuture)
+        #expect(PointerOrientationMath.effectiveAngles(devices: devices, enabled: true, preview: back).isEmpty)
+        let disabled = PointerOrientationPreview(deviceID: "b", previous: 45, proposed: 10, deadline: .distantFuture)
+        #expect(PointerOrientationMath.effectiveAngles(devices: devices, enabled: true, preview: disabled) == ["a": 90])
+    }
+
+    @Test func rotatesAttributedMovementAndCarriesPosition() {
+        var router = Self.router()
+        #expect(router.isActive)
+        let first = router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 10, dy: 0), precise: PointerVector(dx: 10, dy: 0),
+            location: PointerPoint(x: 510, y: 500), at: 1
+        )
+        #expect(first == .rewrite(delta: PointerMotion(dx: 0, dy: 10), location: PointerPoint(x: 500, y: 510)))
+        // The system reports where the unrotated movement would have put the pointer; the written position wins.
+        let second = router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 10, dy: 0), precise: PointerVector(dx: 10, dy: 0),
+            location: PointerPoint(x: 510, y: 510), at: 1.05
+        )
+        #expect(second == .rewrite(delta: PointerMotion(dx: 0, dy: 10), location: PointerPoint(x: 500, y: 520)))
+        // After a pause the event's own position is trusted again.
+        let later = router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 10, dy: 0), precise: PointerVector(dx: 10, dy: 0),
+            location: PointerPoint(x: 700, y: 700), at: 2
+        )
+        #expect(later == .rewrite(delta: PointerMotion(dx: 0, dy: 10), location: PointerPoint(x: 690, y: 710)))
+    }
+
+    @Test func rotatedPointerStaysOnScreen() {
+        var router = Self.router()
+        let decision = router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 50, dy: 0), precise: PointerVector(dx: 50, dy: 0),
+            location: PointerPoint(x: 550, y: 990), at: 1
+        )
+        #expect(decision == .rewrite(delta: PointerMotion(dx: 0, dy: 50), location: PointerPoint(x: 500, y: 999)))
+    }
+
+    @Test(arguments: [
+        nil as DeviceAttribution?,
+        DeviceAttribution(id: "mouse", exact: false),
+        DeviceAttribution(id: "mouse", exact: true, isExcluded: true),
+        DeviceAttribution(id: "other", exact: true),
+    ])
+    func unattributedOrUnknownMovementPassesThrough(device: DeviceAttribution?) {
+        var router = Self.router()
+        let decision = router.process(
+            device: device, delta: PointerMotion(dx: 3, dy: 1), precise: PointerVector(dx: 3, dy: 1),
+            location: PointerPoint(x: 100, y: 100), at: 1
+        )
+        #expect(decision == .passThrough)
+    }
+
+    @Test func failsOpenWithoutDisplaysOrWithInvalidNumbers() {
+        var router = PointerOrientationRouter()
+        router.setAngles(["mouse": 90])
+        #expect(!router.isActive)
+        #expect(router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 3, dy: 0), precise: PointerVector(dx: 3, dy: 0),
+            location: PointerPoint(x: 100, y: 100), at: 1
+        ) == .passThrough)
+        router.setDisplays([Self.screen])
+        #expect(router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 3, dy: 0), precise: PointerVector(dx: .nan, dy: 0),
+            location: PointerPoint(x: 100, y: 100), at: 1
+        ) == .passThrough)
+        #expect(router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 3, dy: 0), precise: PointerVector(dx: 3, dy: 0),
+            location: PointerPoint(x: .infinity, y: 100), at: 1
+        ) == .passThrough)
+    }
+
+    @Test func zeroAndInvalidAnglesAreLeftOut() {
+        var router = Self.router(["a": 0, "b": .nan, "c": 360])
+        #expect(!router.isActive)
+        router.setAngles(["a": 450])
+        #expect(router.angles == ["a": 90])
+    }
+
+    @Test func breakingContinuityForgetsTheWrittenPosition() {
+        var router = Self.router()
+        _ = router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 10, dy: 0), precise: PointerVector(dx: 10, dy: 0),
+            location: PointerPoint(x: 510, y: 500), at: 1
+        )
+        router.breakContinuity()
+        let next = router.process(
+            device: Self.mouse, delta: PointerMotion(dx: 10, dy: 0), precise: PointerVector(dx: 10, dy: 0),
+            location: PointerPoint(x: 210, y: 200), at: 1.01
+        )
+        #expect(next == .rewrite(delta: PointerMotion(dx: 0, dy: 10), location: PointerPoint(x: 200, y: 210)))
+    }
+}
+
+@Suite("Pointer orientation preview")
+struct PointerOrientationTrialTests {
+    let now = Date(timeIntervalSinceReferenceDate: 1000)
+
+    @Test func previewConfirmsBeforeTheDeadlineOnly() throws {
+        var trial = PointerOrientationTrial()
+        let outcome = trial.propose(90, on: "m", confirmed: 0, now: now, timeout: 5)
+        let expected = PointerOrientationPreview(deviceID: "m", previous: 0, proposed: 90, deadline: now.addingTimeInterval(5))
+        #expect(outcome == .previewing(expected))
+        let confirmation = trial.confirm(now: now.addingTimeInterval(4))
+        let kept = try #require(confirmation)
+        #expect(kept.deviceID == "m" && kept.degrees == 90)
+        #expect(trial.preview == nil)
+
+        _ = trial.propose(90, on: "m", confirmed: 0, now: now, timeout: 5)
+        #expect(trial.confirm(now: now.addingTimeInterval(5)) == nil)
+        #expect(trial.preview == nil)
+    }
+
+    @Test func unchangedZeroAndInvalidProposals() {
+        var trial = PointerOrientationTrial()
+        #expect(trial.propose(450, on: "m", confirmed: 90, now: now, timeout: 5) == .unchanged)
+        #expect(trial.propose(0, on: "m", confirmed: 90, now: now, timeout: 5) == .commit(0))
+        #expect(trial.propose(.nan, on: "m", confirmed: 0, now: now, timeout: 5) == .rejected)
+        #expect(trial.preview == nil)
+    }
+
+    @Test func repeatedProposalsKeepTheConfirmedBaseline() {
+        var trial = PointerOrientationTrial()
+        _ = trial.propose(90, on: "m", confirmed: 10, now: now, timeout: 5)
+        _ = trial.propose(180, on: "m", confirmed: 90, now: now, timeout: 5)
+        #expect(trial.preview?.previous == 10)
+        #expect(trial.propose(10, on: "m", confirmed: 10, now: now, timeout: 5) == .unchanged)
+        #expect(trial.preview == nil)
+        _ = trial.propose(90, on: "m", confirmed: 0, now: now, timeout: 5)
+        _ = trial.propose(45, on: "other", confirmed: 0, now: now, timeout: 5)
+        #expect(trial.preview?.deviceID == "other")
+        #expect(trial.preview?.previous == 0)
+    }
+
+    @Test func expiresCancelsAndReconciles() {
+        var trial = PointerOrientationTrial()
+        _ = trial.propose(90, on: "m", confirmed: 0, now: now, timeout: 5)
+        #expect(trial.expire(now: now.addingTimeInterval(1)) == nil)
+        #expect(trial.expire(now: now.addingTimeInterval(5))?.proposed == 90)
+        #expect(trial.preview == nil)
+
+        _ = trial.propose(90, on: "m", confirmed: 0, now: now, timeout: 5)
+        #expect(trial.reconcile(connected: ["m"], confirmed: [:]) == nil)
+        #expect(trial.reconcile(connected: ["m"], confirmed: ["m": 30])?.deviceID == "m")
+        _ = trial.propose(90, on: "m", confirmed: 0, now: now, timeout: 5)
+        #expect(trial.reconcile(connected: [], confirmed: [:])?.deviceID == "m")
+        _ = trial.propose(90, on: "m", confirmed: 0, now: now, timeout: 5)
+        #expect(trial.cancel()?.deviceID == "m")
+        #expect(trial.cancel() == nil)
+    }
+}
+
+@Suite("Pointer calibration recording")
+struct PointerCalibrationRecorderTests {
+    @Test func pausesSplitStrokesAndNoiseIsIgnored() {
+        var recorder = PointerCalibrationRecorder()
+        recorder.record(PointerVector(dx: 0, dy: -10), at: 0)
+        recorder.record(PointerVector(dx: 0, dy: -10), at: 0.1)
+        recorder.settle(at: 0.2)
+        #expect(recorder.strokes.isEmpty)
+        recorder.settle(at: 0.5)
+        #expect(recorder.strokes == [PointerVector(dx: 0, dy: -20)])
+        recorder.record(PointerVector(dx: 1, dy: 1), at: 1)
+        recorder.record(PointerVector(dx: 5, dy: -30), at: 2)
+        recorder.record(PointerVector(dx: .nan, dy: 0), at: 2.01)
+        #expect(recorder.finish() == [PointerVector(dx: 0, dy: -20), PointerVector(dx: 5, dy: -30)])
+    }
+
+    @Test func stopsTakingStrokesWhenFull() {
+        var recorder = PointerCalibrationRecorder()
+        for index in 0..<(PointerCalibrationRecorder.maximumStrokes + 3) {
+            recorder.record(PointerVector(dx: 0, dy: -20), at: Double(index))
+        }
+        #expect(recorder.finish().count == PointerCalibrationRecorder.maximumStrokes)
+        #expect(recorder.isFull)
+    }
+
+    @Test func recordedStrokesFeedCalibration() {
+        var recorder = PointerCalibrationRecorder()
+        for index in 0..<3 { recorder.record(PointerVector(dx: 50, dy: 0), at: Double(index)) }
+        let assessment = PointerCalibration.assess(strokes: recorder.finish())
+        #expect(assessment.correctionDegrees != nil)
+    }
+}

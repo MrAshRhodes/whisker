@@ -41,6 +41,15 @@ final class EventEngine: @unchecked Sendable {
         var reportedAutoScroll = false
         var slowPointerDevices: Set<String> = []
         var reportedSlowPointer: UInt64 = 0
+        /// Turns movement of devices with an orientation angle. Nil until an angle, a preview or a calibration
+        /// needs it.
+        var orientation: (any PointerOrientationRewriting)?
+        /// An unconfirmed angle being tried live. Never saved; see `PointerOrientationPreview`.
+        var orientationPreview: PointerOrientationPreview?
+        /// The device whose unrotated movement a guided calibration is recording.
+        var orientationCalibration: String?
+        /// The active displays, which a rotated pointer is kept on.
+        var displays: [PointerRect] = []
     }
 
     static let eventMask: CGEventMask = {
@@ -60,6 +69,7 @@ final class EventEngine: @unchecked Sendable {
     private let clock: any ClickClock
     private let attributeMotion: @Sendable (TimeInterval) -> DeviceAttribution?
     private let makeMovement: ClickLockMovementFactory
+    private let makeOrientation: PointerOrientationFactory
     private let chords: ChordRouter
     /// Called on the main queue when a hold-to-scroll starts, falls back or can't start.
     var onHoldStatus: (@Sendable (HoldScrollStatus) -> Void)?
@@ -70,6 +80,8 @@ final class EventEngine: @unchecked Sendable {
     var onSlowPointer: (@MainActor @Sendable (SlowPointerCommand) -> Void)?
     /// Called on the main queue with a copy of the local duplicate-click test whenever it changes, nil once it ends.
     var onClickFilterTest: (@MainActor @Sendable (ClickFilterTally?) -> Void)?
+    /// Called on the main queue when the system paused the orientation tap, so a preview has to roll back.
+    var onOrientationInterrupted: (@MainActor @Sendable () -> Void)?
 
     private let tapLock = NSLock()
     private var tap: CFMachPort?
@@ -84,7 +96,8 @@ final class EventEngine: @unchecked Sendable {
         attributeMotion: @escaping @Sendable (TimeInterval) -> DeviceAttribution? = { _ in nil },
         movement makeMovement: @escaping ClickLockMovementFactory = { runLoop, hooks in ClickLockMovementTap(runLoop: runLoop, hooks: hooks) },
         attributeChord: @escaping @Sendable (Int, Bool, TimeInterval) -> ChordSource? = { _, _, _ in nil },
-        postChordEvent: @escaping @Sendable (CGEvent) -> Void = { $0.post(tap: .cghidEventTap) }
+        postChordEvent: @escaping @Sendable (CGEvent) -> Void = { $0.post(tap: .cghidEventTap) },
+        orientation makeOrientation: @escaping PointerOrientationFactory = { runLoop, hooks in PointerOrientationTap(runLoop: runLoop, hooks: hooks) }
     ) {
         self.clock = clock
         self.synthesizer = synthesizer
@@ -92,6 +105,7 @@ final class EventEngine: @unchecked Sendable {
         self.frontmostApp = frontmostApp
         self.attributeMotion = attributeMotion
         self.makeMovement = makeMovement
+        self.makeOrientation = makeOrientation
         chords = ChordRouter(clock: clock, attribute: attributeChord, post: postChordEvent)
         chords.host = self
     }
@@ -133,10 +147,12 @@ final class EventEngine: @unchecked Sendable {
             // A gesture began under the settings that are going away, so it is called off rather than finished under new ones.
             state.processor.cancelGesture()
             syncBypass(&state, app: app, at: location)
+            syncOrientation(&state)
             syncAutoScroll(&state)
             reportHold(&state)
         }
         prepareClickLockMovement()
+        prepareOrientation()
     }
 
     /// Reduce Motion changed. Turning it on ends smoothing that is under way, and nothing is smoothed while it is on.
@@ -198,6 +214,7 @@ final class EventEngine: @unchecked Sendable {
             state.processor.cancelAutoScroll()
             state.processor.cancelSlowPointer()
             syncBypass(&state, app: app, at: location)
+            syncOrientation(&state)
             syncAutoScroll(&state)
             reportHold(&state)
         }
@@ -271,11 +288,107 @@ final class EventEngine: @unchecked Sendable {
         }
     }
 
+    // MARK: Orientation
+
+    /// Tries an unconfirmed angle live, or ends the preview (nil). Settings never see it.
+    func setOrientationPreview(_ preview: PointerOrientationPreview?) {
+        state.withLock { state in
+            state.orientationPreview = preview
+            syncOrientation(&state)
+        }
+        prepareOrientation()
+    }
+
+    /// Starts recording one device's unrotated movement for a guided calibration, or stops (nil).
+    func setOrientationCalibration(_ deviceID: String?) {
+        state.withLock { state in
+            state.orientationCalibration = deviceID
+            state.orientation?.setCalibrating(deviceID)
+        }
+        prepareOrientation()
+    }
+
+    /// The forward strokes recorded so far; empty when no calibration is recording.
+    func orientationCalibrationStrokes() -> [PointerVector] {
+        let now = ProcessInfo.processInfo.systemUptime
+        let orientation = state.withLock { $0.orientationCalibration == nil ? nil : $0.orientation }
+        return orientation?.calibrationStrokes(at: now) ?? []
+    }
+
+    /// The active displays changed; a rotated pointer is kept on them.
+    func setDisplays(_ displays: [PointerRect]) {
+        state.withLock { state in
+            guard state.displays != displays else { return }
+            state.displays = displays
+            state.orientation?.setDisplays(displays)
+        }
+    }
+
+    /// The angles in use now, for tests and the log: empty while Whisker is off or standing aside.
+    var orientationAngles: [String: Double] {
+        state.withLock { Self.orientationAngles($0) }
+    }
+
+    private static func orientationAngles(_ state: State) -> [String: Double] {
+        guard !state.stopped, !state.bypassed else { return [:] }
+        let settings = state.compiled.settings
+        return PointerOrientationMath.effectiveAngles(
+            devices: settings.devices, enabled: settings.general.enabled, preview: state.orientationPreview
+        )
+    }
+
+    /// Call with the state lock held. Gives the orientation tap the angles that apply now; it switches itself off
+    /// when there are none.
+    private func syncOrientation(_ state: inout State) {
+        state.orientation?.setAngles(Self.orientationAngles(state))
+    }
+
+    /// Makes the orientation tap when an angle, a preview or a calibration needs it and drops it otherwise. Takes
+    /// the tap lock, so it is never called with the state lock held.
+    private func prepareOrientation() {
+        let (needed, present) = state.withLock { state in
+            // Kept while Whisker is off or standing aside (the tap is merely switched off), so coming back needs no new tap.
+            let angled = !PointerOrientationMath.effectiveAngles(
+                devices: state.compiled.settings.devices, enabled: true, preview: state.orientationPreview
+            ).isEmpty
+            return (!state.stopped && (angled || state.orientationCalibration != nil), state.orientation != nil)
+        }
+        if needed, !present {
+            tapLock.lock()
+            let loop = runLoop
+            tapLock.unlock()
+            let hooks = PointerOrientationHooks(
+                attributeMotion: attributeMotion,
+                interrupted: { [weak self] in
+                    guard let callback = self?.onOrientationInterrupted else { return }
+                    DispatchQueue.main.async { MainActor.assumeIsolated { callback() } }
+                }
+            )
+            guard let created = makeOrientation(loop, hooks) else { return }
+            let kept = state.withLock { state -> Bool in
+                guard state.orientation == nil, !state.stopped else { return false }
+                state.orientation = created
+                created.setDisplays(state.displays)
+                created.setCalibrating(state.orientationCalibration)
+                syncOrientation(&state)
+                return true
+            }
+            if !kept { created.invalidate() }
+        } else if !needed, present {
+            let dropped = state.withLock { state -> (any PointerOrientationRewriting)? in
+                defer { state.orientation = nil }
+                return state.orientation
+            }
+            dropped?.invalidate()
+        }
+    }
+
     /// Starts the tap. Returns false when the system refuses one (no Accessibility access).
     @discardableResult
     func start() -> Bool {
         guard startTap() else { return false }
         prepareClickLockMovement()
+        prepareOrientation()
         return true
     }
 
@@ -323,13 +436,17 @@ final class EventEngine: @unchecked Sendable {
     func stop() {
         let location = Self.cursorLocation()
         chords.reset(at: location)
-        let movement = state.withLock { state -> (any ClickLockMovement)? in
+        let (movement, orientation) = state.withLock { state -> ((any ClickLockMovement)?, (any PointerOrientationRewriting)?) in
             state.stopped = true
             release(&state, at: location, because: .quit)
-            defer { state.movement = nil }
-            return state.movement
+            defer {
+                state.movement = nil
+                state.orientation = nil
+            }
+            return (state.movement, state.orientation)
         }
         movement?.invalidate()
+        orientation?.invalidate()
         tapLock.lock()
         defer { tapLock.unlock() }
         guard let port = tap else { return }
