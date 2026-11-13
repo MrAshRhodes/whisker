@@ -395,26 +395,39 @@ games and raw-input paths are **not yet verified**; no game or anti-cheat compat
 The action is additive without another schema change. Unknown settings keys, at the top level
 and inside nested objects, survive a load and save (see [Privacy](#privacy)).
 
-## Pointer orientation — foundation only
+## Pointer orientation
 
-**Not available as a pointer setting.** The maintainer decision on rewriting pointer coordinates
-is **pending** ([#32](https://github.com/MrAshRhodes/whisker/issues/32)). This work adds tested
-rotation maths, fractional-count handling and confidence calculations for deliberately recorded
-forward strokes, not a calibration wizard or usable global rotation. Confidence measures how
-closely stroke directions agree; its thresholds are provisional, not verified on hardware.
+For a trackball that sits sideways or upside down, **Settings › Pointer** has an **Orientation**
+section for each connected mouse. It turns that device's pointer movement and drags clockwise by
+the angle you choose, so rolling the ball away from you moves the pointer up. The wheel, ring,
+buttons, other mice and trackpads are never turned, and it is independent of custom speed.
 
-The per-device JSON key `rotationDegrees` defaults to zero, rejects non-finite numbers and
-normalises equivalent angles to −180° inclusive through 180° exclusive. It is dormant: editing
-it does not rotate movement or drags, enable custom pointer speed, change a speed preset, reverse
-a wheel or alter button identities. The primary-button guard is unchanged. Unknown settings
-keys, at the top level and inside nested objects such as a device's settings, survive a round
-trip (see [Privacy](#privacy)).
+- **Choosing an angle.** Type an angle, nudge it a degree at a time, or pick 0°, 90°, 180° or
+  270°. **Reset** goes back to no turn at once.
+- **Trying it first.** Any other angle is tried live and goes back by itself after 5 seconds
+  unless you press **Keep** (Return) in the banner; **Revert** (Escape) goes back straight away.
+  Only a kept angle is saved, so quitting or crashing mid-trial leaves the previous one. Closing
+  the settings window, sleep, a macOS pause of the event tap, switching Whisker off, the mouse
+  being unplugged or its saved angle changing (an import, say) also go back.
+- **Calibrate….** Roll the ball straight away from you in one stroke and pause, four times,
+  using only that device, then press **Done** (three strokes at least). Whisker measures the
+  strokes as they arrive, unturned, proposes a whole-degree angle with how closely they agreed,
+  and tries it live: **Accept** keeps it, **Retry** records again and **Cancel** goes back.
+  Strokes that are too short, too few or point in different directions propose nothing.
 
-Before any global control can be offered, a public-API prototype must demonstrate exact motion
-attribution (never inferred from one listed mouse), coherent pointer and drag coordinates across
-mixed-scale displays and edges, and keyboard cancellation, timeout, disable and interruption
-recovery without jumps or drift. These checks and raw-input compatibility are **unverified**.
-No hardware compatibility is claimed; repositioning the trackball remains the available workaround.
+It needs Accessibility and Input Monitoring, so each movement can be matched to the mouse that
+made it. Movement passes through unturned when it can't be matched exactly (two devices moving
+at once, a receiver, identical models, a report that arrives late), while Whisker is off or an
+app is bypassed, and for any angle of zero. A dedicated event tap, active only while some angle
+is non-zero, a trial is running or calibration is recording, rewrites the movement deltas and
+the pointer position, keeping the pointer on a connected display.
+
+**Not yet verified on hardware**, nor in a GUI test. Untried: whether every app and the cursor
+follow the rewritten position (games and apps reading raw input may see unturned movement),
+mixed-scale displays and screen edges, and long drags. Hold to Scroll and button gestures still
+see the unturned movement. The per-device JSON key `rotationDegrees` defaults to zero, rejects
+non-finite numbers and normalises equivalent angles to −180° inclusive through 180° exclusive.
+Unknown settings keys survive a round trip (see [Privacy](#privacy)).
 
 ## Device details
 
@@ -711,7 +724,6 @@ Planned after 0.1, in no particular order:
 - Taking Auto-scroll and Click Lock out of experimental once they have been verified on
   hardware.
 - Support for extra buttons that macOS does not report, using publicly documented protocols.
-- Correcting pointer orientation for a trackball used sideways.
 
 ## Contributing
 

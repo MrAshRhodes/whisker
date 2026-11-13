@@ -27,7 +27,7 @@ struct SettingsView: View {
         case .general: GeneralPane(store: model.store, permission: model.permission, loginItem: model.loginItem)
         case .buttons: ButtonsPane(store: model.store)
         case .scrolling: ScrollingPane(store: model.store)
-        case .pointer: PointerPane(store: model.store, devices: model.devices, pointer: model.pointer)
+        case .pointer: PointerPane(store: model.store, devices: model.devices, pointer: model.pointer, orientation: model.orientation)
         case .applications: ApplicationsPane(store: model.store, pointer: model.pointer)
         case .devices: DevicesPane(store: model.store, devices: model.devices)
         case .updates: Form { Section { UpdatesSection() } }.formStyle(.grouped)
@@ -349,9 +349,16 @@ struct PointerPane: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var devices: DeviceMonitor
     @ObservedObject var pointer: PointerController
+    @ObservedObject var orientation: OrientationController
 
     var body: some View {
         Form {
+            if let preview = orientation.preview {
+                Section {
+                    PendingOrientationBanner(store: store, orientation: orientation, preview: preview)
+                        .id(preview.deadline)
+                }
+            }
             if let pending = pointer.pending {
                 Section {
                     PendingSpeedBanner(store: store, pointer: pointer, pending: pending)
@@ -377,6 +384,11 @@ struct PointerPane: View {
                 Section(device.name) {
                     PointerDeviceControls(store: store, devices: devices, pointer: pointer, device: device)
                 }
+                Section {
+                    OrientationControls(store: store, pointer: pointer, orientation: orientation, device: device)
+                } header: {
+                    Text("Orientation — \(device.name)")
+                }
             }
             Section {
                 Text("Speed here is a software multiplier on what the mouse reports. It isn’t the mouse’s own DPI, which only its maker’s software can change. Pointer settings apply while Whisker is running and go back to the system’s when it quits, or while an app you’ve bypassed is in front. Trackpads keep their own settings.")
@@ -384,7 +396,159 @@ struct PointerPane: View {
             }
         }
         .formStyle(.grouped)
-        .onDisappear { pointer.endSpeedEdit() }
+        .onDisappear {
+            pointer.endSpeedEdit()
+            // Nobody is left to keep a preview or finish a calibration.
+            orientation.interrupt()
+        }
+    }
+}
+
+/// Keep or Revert for an orientation being tried live, which goes back by itself otherwise.
+struct PendingOrientationBanner: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var orientation: OrientationController
+    let preview: PointerOrientationPreview
+
+    var body: some View {
+        let name = store.settings.devices[preview.deviceID]?.name ?? ""
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Keep this orientation?", systemImage: "exclamationmark.triangle").font(.headline)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let seconds = max(0, Int(preview.deadline.timeIntervalSince(context.date).rounded(.up)))
+                    Text("\(name.isEmpty ? "This mouse" : name) is now turned \(OrientationControls.angleText(preview.proposed)). \(seconds > 0 ? "In \(seconds) \(seconds == 1 ? "second" : "seconds") it" : "It") goes back to \(OrientationControls.angleText(preview.previous)) unless you keep it.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Revert") { orientation.revert() }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityHint("Goes back to the previous orientation now.")
+                Button("Keep") { orientation.confirm() }
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityHint("Keeps the new orientation.")
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// One mouse's orientation correction: a typed angle, quarter turns, Reset and the guided calibration.
+struct OrientationControls: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var pointer: PointerController
+    @ObservedObject var orientation: OrientationController
+    let device: ConnectedDevice
+
+    static let quarterTurns: [Double] = [0, 90, 180, 270]
+
+    /// "not turned", "90° clockwise" or "45° anticlockwise".
+    static func angleText(_ degrees: Double) -> String {
+        let angle = PointerOrientationMath.normalisedDegrees(degrees) ?? 0
+        if angle == 0 { return "not turned" }
+        if angle == -180 { return "180°" }
+        let magnitude = abs(angle).formatted(.number.precision(.fractionLength(0...1)))
+        return "\(magnitude)° \(angle > 0 ? "clockwise" : "anticlockwise")"
+    }
+
+    var body: some View {
+        let angle = orientation.displayedAngle(on: device.id)
+        // A speed change waiting to be kept has the keyboard's Return and Escape; one thing at a time.
+        let blocked = pointer.pending != nil || !store.settings.general.enabled
+        let previewingOther = orientation.preview.map { $0.deviceID != device.id } ?? false
+        LabeledContent("Angle") {
+            HStack {
+                TextField("Angle", value: Binding(
+                    get: { angle },
+                    set: { orientation.propose($0, on: device.id, name: device.name) }
+                ), format: .number.precision(.fractionLength(0...1)))
+                .multilineTextAlignment(.trailing)
+                .frame(width: 64)
+                .accessibilityLabel("Orientation angle in degrees, clockwise")
+                .accessibilityValue(Self.angleText(angle))
+                Text("°")
+                Stepper("Angle", value: Binding(
+                    get: { angle },
+                    set: { orientation.propose($0, on: device.id, name: device.name) }
+                ), step: 1)
+                .labelsHidden()
+                .accessibilityLabel("Adjust orientation by one degree")
+            }
+        }
+        .disabled(blocked || previewingOther)
+        LabeledContent("Quarter turns") {
+            HStack {
+                ForEach(Self.quarterTurns, id: \.self) { turn in
+                    let normalised = PointerOrientationMath.normalisedDegrees(turn) ?? 0
+                    Button("\(Int(turn))°") { orientation.propose(turn, on: device.id, name: device.name) }
+                        .disabled(angle == normalised)
+                        .accessibilityLabel(turn == 0 ? "No turn" : "Turn \(Int(turn)) degrees clockwise")
+                }
+                Button("Reset") { orientation.propose(0, on: device.id, name: device.name) }
+                    .disabled(orientation.confirmedAngle(on: device.id) == 0 && angle == 0)
+                    .accessibilityHint("Goes back to ordinary movement at once, without confirmation.")
+            }
+        }
+        .disabled(blocked || previewingOther)
+        calibrationRows(blocked: blocked)
+        Text("Use this when the trackball sits sideways or upside down, so rolling it away from you moves the pointer up. It turns the pointer’s movement and drags for this device only, never the wheel, ring or buttons. A new angle is tried first and goes back by itself after \(Int(PointerMath.confirmationTimeout)) seconds unless you keep it. When Whisker can’t tell which device moved (for example two moving at once), movement passes through unturned.")
+            .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private func calibrationRows(blocked: Bool) -> some View {
+        switch orientation.calibration {
+        case .recording(let id, let strokes) where id == device.id:
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Roll the ball straight away from you in one comfortable stroke, then pause. Do this \(OrientationController.suggestedStrokes) times, using only this device.")
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Strokes recorded: \(strokes)")
+                    .monospacedDigit()
+                    .accessibilityLabel("\(strokes) \(strokes == 1 ? "stroke" : "strokes") recorded")
+                HStack {
+                    Spacer()
+                    Button("Cancel") { orientation.cancelCalibration() }
+                    Button("Done") { orientation.finishCalibration(name: device.name) }
+                        .disabled(strokes < 3)
+                        .accessibilityHint("Proposes an angle from the strokes and tries it.")
+                }
+            }
+        case .result(let id, let assessment) where id == device.id:
+            VStack(alignment: .leading, spacing: 6) {
+                if let proposed = assessment.correctionDegrees {
+                    Text("Proposed: \(Self.angleText(proposed)) (agreement \(Int((assessment.confidence * 100).rounded()))%). Try moving the pointer, then accept it or record again.")
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(Self.rejectionText(assessment.rejection))
+                        .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { orientation.cancelCalibration() }
+                    Button("Retry") { orientation.retryCalibration() }
+                        .accessibilityHint("Records the strokes again.")
+                    if assessment.correctionDegrees != nil {
+                        let previewing = orientation.preview?.deviceID == device.id
+                        Button(previewing ? "Accept" : "Preview Again") { orientation.acceptCalibration(name: device.name) }
+                            .accessibilityHint(previewing ? "Keeps the proposed orientation." : "Tries the proposed orientation again.")
+                    }
+                }
+            }
+        default:
+            Button("Calibrate…") { orientation.startCalibration(on: device.id) }
+                .disabled(blocked || orientation.preview != nil || orientation.calibration != .idle)
+                .accessibilityHint("Records a few forward strokes and proposes an angle.")
+        }
+    }
+
+    static func rejectionText(_ rejection: PointerCalibration.Rejection?) -> String {
+        switch rejection {
+        case .tooFewStrokes: return "At least three strokes are needed. Record again."
+        case .insufficientMovement: return "A stroke was too short. Roll a little further each time and record again."
+        case .inconsistentDirections: return "The strokes pointed different ways. Roll straight away from you each time and record again."
+        case .invalidMovement, nil: return "The movement couldn’t be used. Record again."
+        }
     }
 }
 
@@ -464,7 +628,7 @@ struct PointerDeviceControls: View {
         let binding = model.deviceBinding(device.id, name: device.name)
         let saved = displayedSettings
         // While a change waits to be kept, nothing else may change the speed.
-        let waiting = pointer.pending != nil
+        let waiting = pointer.pending != nil || model.orientation.preview != nil
         if let factor = pointer.slowPointerFactors[device.id], let baseline = saved.pointer {
             LabeledContent("Temporary slowdown") {
                 Text("\(PointerMath.speedLabel(SlowPointer.applying(factor, to: baseline).speed)) (baseline \(PointerMath.speedLabel(baseline.speed)))")

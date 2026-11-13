@@ -50,6 +50,7 @@ final class AppModel: ObservableObject {
     let pointer: PointerController
     let wheel: WheelController
     let engine: EventEngine
+    let orientation: OrientationController
     private let sequences: ShortcutSequenceRunner
 
     @Published private(set) var engineRunning = false
@@ -135,6 +136,8 @@ final class AppModel: ObservableObject {
             attributeMotion: { devices.attributeMotion(at: $0) },
             attributeChord: { devices.attributeChord(button: $0, down: $1, at: $2) }
         )
+        orientation = OrientationController(store: store, engine: engine)
+        engine.onOrientationInterrupted = { [weak self] in self?.orientation.interrupt() }
         engine.onHoldStatus = { [weak self] status in
             DispatchQueue.main.async { self?.holdToScrollNote = status.message }
         }
@@ -200,6 +203,10 @@ final class AppModel: ObservableObject {
             self.store.saveRunState(self.runState)
         }
 
+        orientation.onNeedsMotionChange = { [weak self] in
+            guard let self else { return }
+            self.syncMotionTracking(self.store.settings)
+        }
         frontApp.start()
         refreshBypass(using: store.settings)
         // Set after `start()`, which reads the app already in front; the first settings update below acts on it.
@@ -218,6 +225,7 @@ final class AppModel: ObservableObject {
             self.pointer.devicesChanged(connected, bypassed: self.bypassedApp != nil)
             self.wheel.apply(self.store.settings, connected: connected, bypassed: self.bypassedApp != nil)
             self.engine.devicesChanged(connected: Set(connected.filter { !$0.isExcluded }.map(\.id)))
+            self.orientation.devicesChanged(connected: Set(connected.filter { !$0.isExcluded }.map(\.id)))
             self.engine.setSlowPointerDevices(self.pointer.slowPointerDevices)
         }
         devices.start()
@@ -235,7 +243,8 @@ final class AppModel: ObservableObject {
             .sink { [weak self] settings in
                 guard let self else { return }
                 self.extraButtonDiscovery.stop(reason: "Settings/profile changed. Inspect starts a new session.")
-                self.devices.setTrackingMotion(settings.usesMotionActions)
+                self.orientation.settingsChanged(settings)
+                self.syncMotionTracking(settings)
                 self.engine.update(settings)
                 self.refreshBypass(using: settings)
                 self.applyPointers(settings)
@@ -277,6 +286,7 @@ final class AppModel: ObservableObject {
                 MainActor.assumeIsolated { self?.inputTiming.interrupt(.sleep) }
                 MainActor.assumeIsolated { self?.extraButtonDiscovery.stop(reason: "Sleep or user switch. Observations cleared.") }
                 MainActor.assumeIsolated { self?.stopClickFilterTest() }
+                MainActor.assumeIsolated { self?.orientation.interrupt() }
             })
         }
         // An auto-scroll is anchored to a spot on a display and a Space, and a change to either leaves that spot
@@ -284,8 +294,11 @@ final class AppModel: ObservableObject {
         observers.append(center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.engine.cancelAutoScroll()
         })
+        // A rotated pointer is kept on the displays, so it hears about every change to them.
+        engine.setDisplays(PointerOrientationTap.activeDisplays())
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             self?.engine.cancelAutoScroll()
+            self?.engine.setDisplays(PointerOrientationTap.activeDisplays())
         })
         // Read here, never in the tap: smoothing stands aside while Reduce Motion is on, and live when it changes.
         engine.setReduceMotion(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
@@ -293,6 +306,12 @@ final class AppModel: ObservableObject {
             self?.engine.setReduceMotion(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         })
         Log.app.info("Whisker \(AppInfo.version, privacy: .public) started; accessibility \(self.permission.isTrusted ? "granted" : "not granted", privacy: .public)")
+    }
+
+    /// Device movement is attributed (at a small cost per HID report) only while a motion action or an
+    /// orientation needs it.
+    private func syncMotionTracking(_ settings: WhiskerSettings) {
+        devices.setTrackingMotion(settings.usesMotionActions || orientation.needsMotionTracking(settings))
     }
 
     func startEngine() {
@@ -304,6 +323,7 @@ final class AppModel: ObservableObject {
         // The permission is gone, so the release below may be refused by the system; it is still asked for once.
         engine.releaseClickLock(.permissionLoss)
         engine.stop()
+        orientation.interrupt()
         cancelSlowPointer()
         engineRunning = false
         onStatusChange?()
@@ -449,6 +469,7 @@ final class AppModel: ObservableObject {
         for id in Array(swapTrials.keys) { revertSwap(device: id) }
         permission.stopPolling()
         engine.stop()
+        orientation.interrupt()
         cancelSlowPointer()
         // A speed still waiting to be kept goes back first, so it isn't saved as if it had been.
         pointer.revertPending()

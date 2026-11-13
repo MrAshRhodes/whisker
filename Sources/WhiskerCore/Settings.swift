@@ -129,7 +129,8 @@ public struct DeviceSettings: Equatable, Sendable {
     public var pointerPresets: [PointerPreset]
     /// The preset the current custom speed was switched to. Nil for a speed set by hand or no custom speed.
     public var activePointerPresetID: String?
-    /// Reserved orientation correction, independent of custom speed. Dormant: global rotation is not supported.
+    /// Confirmed orientation correction in degrees (clockwise), independent of custom speed. Zero leaves movement alone.
+    /// Only a kept angle is ever stored here; an unconfirmed preview lives in memory only.
     public var rotationDegrees: Double
     /// Opt-in: this mouse's primary and secondary buttons trade places, as one pair (see `ButtonSwap`). It only acts
     /// while "Allow remapping the primary button" is on.
