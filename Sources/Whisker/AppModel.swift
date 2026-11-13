@@ -507,6 +507,16 @@ final class AppModel: ObservableObject {
 
     // MARK: Editing helpers
 
+    func addAppProfile(bundleID: String, name: String?) {
+        if let existing = store.settings.appProfile(bundleID: bundleID) {
+            selectedProfileID = existing.id
+        } else {
+            let profile = Profile.forApp(bundleID: bundleID, name: name ?? bundleID)
+            store.settings.profiles.append(profile)
+            selectedProfileID = profile.id
+        }
+    }
+
     func profileBinding(_ id: String) -> Binding<Profile> {
         Binding(
             get: { [store] in store.settings.profile(id: id) ?? store.settings.defaultProfile },

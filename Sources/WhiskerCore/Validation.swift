@@ -335,13 +335,7 @@ extension WhiskerSettings {
 
     /// Why a single mapping can't be used, or nil when it is fine.
     public static func problem(with mapping: Mapping, allowPrimary: Bool) -> String? {
-        if mapping.action == .clickLock {
-            switch mapping.trigger {
-            case .button(0): return "Click Lock can't use the primary button as its trigger, because that button is how you get out."
-            case .wheel: return "Click Lock needs a mouse button as its trigger."
-            case .button: break
-            }
-        }
+        if let problem = problem(with: mapping.action, triggeredBy: mapping.trigger) { return problem }
         switch mapping.trigger {
         case .button(let number):
             guard Trigger.buttonRange.contains(number) else { return "Button numbers run from 0 to 31." }
@@ -351,16 +345,28 @@ extension WhiskerSettings {
         case .wheel:
             break
         }
-        if case .slowPointer = mapping.action, case .wheel = mapping.trigger {
+        return problem(with: mapping.action)
+    }
+
+    /// Trigger restrictions shared by validation and the action picker.
+    public static func problem(with action: Action, triggeredBy trigger: Trigger) -> String? {
+        if action == .clickLock {
+            switch trigger {
+            case .button(0): return "Click Lock can't use the primary button as its trigger, because that button is how you get out."
+            case .wheel: return "Click Lock needs a mouse button as its trigger."
+            case .button: break
+            }
+        }
+        if case .slowPointer = action, case .wheel = trigger {
             return "Slow pointer needs a button to hold, not a wheel direction."
         }
-        if case .holdToScroll = mapping.action, case .wheel = mapping.trigger {
+        if case .holdToScroll = action, case .wheel = trigger {
             return "Hold to Scroll needs a button to hold, not a wheel direction."
         }
-        if case .autoScroll = mapping.action, case .wheel = mapping.trigger {
+        if case .autoScroll = action, case .wheel = trigger {
             return "Auto-scroll needs a mouse button as its trigger."
         }
-        return problem(with: mapping.action)
+        return nil
     }
 
     /// Why an action can't be used, or nil when it is fine.

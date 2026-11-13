@@ -162,27 +162,96 @@ final class MessageState: ObservableObject {
     @Published var text: String?
 }
 
-// MARK: - Profile picker
+// MARK: - Profile header
 
 /// Picks which profile the Buttons and Scrolling panes edit.
-struct ProfilePicker: View {
+struct ProfileHeader: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var store: SettingsStore
 
     var body: some View {
-        Picker("Profile", selection: Binding(
-            get: { store.settings.profile(id: model.selectedProfileID) == nil ? Profile.defaultID : model.selectedProfileID },
-            set: { model.selectedProfileID = $0 }
-        )) {
-            ForEach(store.settings.profiles) { profile in
-                Text(Self.title(profile, in: store.settings)).tag(profile.id)
+        let profile = store.settings.profile(id: model.selectedProfileID) ?? store.settings.defaultProfile
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Picker("Editing", selection: Binding(
+                    get: { profile.id },
+                    set: { model.selectedProfileID = $0 }
+                )) {
+                    ForEach(store.settings.profiles) { profile in
+                        Text(profile.isDefault ? "Default (all apps and mice)" : profile.name).tag(profile.id)
+                    }
+                }
+                NewAppProfileMenu(store: store)
+                    .fixedSize()
+            }
+            Text(scope(of: profile)).font(.footnote).foregroundStyle(.secondary)
+            if !profile.match.apps.contains(ProfileMatch.any), profile.inherits == Profile.defaultID {
+                Text("This app profile starts from Default. A mouse's own profile is not layered underneath it while the app is in front.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
         }
     }
 
-    static func title(_ profile: Profile, in settings: WhiskerSettings) -> String {
-        if profile.isDefault { return "Default (all apps and mice)" }
-        return profile.name
+    private func scope(of profile: Profile) -> String {
+        if profile.isDefault { return "Applies to all apps and mice unless a more specific profile overrides it." }
+        let apps = profile.match.apps.contains(ProfileMatch.any)
+            ? "all apps" : profile.match.apps.map { model.appName(forBundleID: $0) }.joined(separator: ", ")
+        let mice = profile.match.devices.contains(ProfileMatch.any)
+            ? "all mice" : profile.match.devices.map { store.settings.devices[$0]?.name ?? $0 }.joined(separator: ", ")
+        let parent = profile.inherits.flatMap { store.settings.profile(id: $0)?.name }
+        return "Applies to \(apps), using \(mice). \(parent.map { "Unchanged settings come from \($0)." } ?? "Does not inherit another profile.")"
+    }
+}
+
+struct NewAppProfileMenu: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var store: SettingsStore
+    var opensButtons = false
+
+    var body: some View {
+        Menu("New App Profile") {
+            Section("Running Apps") {
+                ForEach(runningApps, id: \.bundleIdentifier) { app in
+                    Button(app.localizedName ?? app.bundleIdentifier ?? "App") {
+                        if let id = app.bundleIdentifier { add(bundleID: id, name: app.localizedName) }
+                    }
+                }
+                if runningApps.isEmpty {
+                    Text("No new running apps")
+                }
+            }
+            Button("Choose App…") { chooseApp() }
+        }
+    }
+
+    private var runningApps: [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { app in
+            guard app.activationPolicy == .regular, let id = app.bundleIdentifier,
+                  id != Bundle.main.bundleIdentifier else { return false }
+            return store.settings.appProfile(bundleID: id) == nil
+        }
+        .sorted { ($0.localizedName ?? "").localizedStandardCompare($1.localizedName ?? "") == .orderedAscending }
+    }
+
+    private func chooseApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let id = Bundle(url: url)?.bundleIdentifier else {
+            let alert = NSAlert()
+            alert.messageText = "This app cannot have a profile"
+            alert.informativeText = "The selected app has no bundle identifier, so Whisker cannot match it."
+            alert.runModal()
+            return
+        }
+        let name = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        add(bundleID: id, name: name)
+    }
+
+    private func add(bundleID: String, name: String?) {
+        model.addAppProfile(bundleID: bundleID, name: name)
+        if opensButtons { model.selectedPane = .buttons }
     }
 }
 
@@ -201,7 +270,7 @@ struct ScrollingPane: View {
         let resolved = store.settings.resolvedProfile(id: profile.wrappedValue.id).scroll
         Form {
             Section {
-                ProfilePicker(store: store)
+                ProfileHeader(store: store)
             }
             if profile.wrappedValue.scroll == nil, !profile.wrappedValue.isDefault {
                 Section {
@@ -807,12 +876,13 @@ struct ApplicationsPane: View {
     var body: some View {
         Form {
             Section {
-                Text("Give an app its own buttons and scrolling. Anything an app profile doesn’t set comes from the profile it inherits from.")
+                Text("Give an app its own buttons and scrolling. New app profiles inherit Default, not a mouse's own profile. Unchanged settings still come from the inherited profile.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("App Profiles") {
                 if appProfiles.isEmpty {
-                    Text("No app profiles yet.").foregroundStyle(.secondary)
+                    Text("No app profiles yet. Choose New App Profile below, then change just the buttons or scrolling that app needs.")
+                        .foregroundStyle(.secondary)
                 }
                 ForEach(appProfiles) { profile in
                     HStack {
@@ -828,8 +898,12 @@ struct ApplicationsPane: View {
                             model.selectedProfileID = profile.id
                             model.selectedPane = .buttons
                         }
-                        Button {
-                            model.deleteProfile(profile.id)
+                        Button("Edit Scrolling") {
+                            model.selectedProfileID = profile.id
+                            model.selectedPane = .scrolling
+                        }
+                        Button(role: .destructive) {
+                            confirmDelete(profile)
                         } label: {
                             Image(systemName: "trash")
                         }
@@ -837,19 +911,8 @@ struct ApplicationsPane: View {
                         .help("Delete this profile")
                     }
                 }
-            }
-            Section {
-                HStack {
-                    Menu("Add Running App") {
-                        ForEach(runningApps, id: \.bundleIdentifier) { app in
-                            Button(app.localizedName ?? app.bundleIdentifier ?? "App") {
-                                add(bundleID: app.bundleIdentifier, name: app.localizedName)
-                            }
-                        }
-                    }
+                NewAppProfileMenu(store: store, opensButtons: true)
                     .fixedSize()
-                    Button("Choose App…") { chooseApp() }
-                }
             }
             Section("Application Bypass") {
                 Text("While one of these apps is in front, Whisker leaves your buttons, wheel, scrolling and pointer speed alone, and puts them back when you switch to another app. Your profiles and the Enabled switch don’t change, and this works with or without Input Monitoring.")
@@ -941,32 +1004,15 @@ struct ApplicationsPane: View {
         return "\(profile.match.apps.joined(separator: ", ")) · \(count) \(count == 1 ? "mapping" : "mappings") · inherits \(parent)\(devices)\(bypassed)"
     }
 
-    private var runningApps: [NSRunningApplication] {
-        let existing = Set(appProfiles.flatMap(\.match.apps))
-        return NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && !existing.contains($0.bundleIdentifier!) && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
-            .sorted { ($0.localizedName ?? "").localizedStandardCompare($1.localizedName ?? "") == .orderedAscending }
-    }
-
-    private func chooseApp() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        guard panel.runModal() == .OK, let url = panel.url, let bundle = Bundle(url: url) else { return }
-        let name = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
-        add(bundleID: bundle.bundleIdentifier, name: name)
-    }
-
-    private func add(bundleID: String?, name: String?) {
-        guard let bundleID else { return }
-        if let existing = store.settings.appProfile(bundleID: bundleID) {
-            model.selectedProfileID = existing.id
-        } else {
-            let profile = Profile.forApp(bundleID: bundleID, name: name ?? bundleID)
-            store.settings.profiles.append(profile)
-            model.selectedProfileID = profile.id
-        }
-        model.selectedPane = .buttons
+    private func confirmDelete(_ profile: Profile) {
+        let alert = NSAlert()
+        alert.messageText = "Delete the \(profile.name) profile?"
+        alert.informativeText = "Its button mappings, gestures, chords and scrolling overrides will be removed. Other profiles and application bypass settings will be kept."
+        alert.addButton(withTitle: "Delete Profile")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        model.deleteProfile(profile.id)
     }
 }
 
