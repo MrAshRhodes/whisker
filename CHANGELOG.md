@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
 ### Added
 
 - Two-button chords: press two buttons of the same mouse together to run an action, set up in the Two-button Chords section of Settings › Buttons with Record Two-button Chord… (recording runs no action) or the Primary + Secondary → Middle Click preset. Chords work for a mouse connected over Bluetooth while Input Monitoring is allowed and no other connected mouse is the same model; identical models, USB mice, receivers and presses that cannot be attributed pass through unchanged, and adding or recording is unavailable until such a mouse is ready, while saved chords can always be edited or removed. A single press of a chord's button waits up to the press window (75 ms unless changed, 20–200 ms) and then runs its normal mapping; other buttons are never delayed. A chord using the primary button is blocked unless Allow remapping the primary button is on, so the preset adds ⌥ when it is off. The action carries held modifier keys, and the middle-click chord sends one middle down on recognition, supports dragging and releases on the first button let go. App switches, settings changes, recording, disconnect, sleep, quitting and event-tap interruptions cancel a chord in progress. A press attributed more than about 30 ms late passes through, any movement abandons a waiting chord, chords pass through while buttons are swapped in macOS settings, and it has not yet been verified on hardware ([#24]).
@@ -58,7 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings stored as versioned JSON that is checked and repaired on load (an unreadable file is left untouched and not overwritten); the primary button can't be remapped without a modifier unless allowed.
 - Release workflow for signed and notarized builds with opt-in Sparkle in-app updates and a Homebrew cask.
 
-[Unreleased]: https://github.com/MrAshRhodes/whisker/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/MrAshRhodes/whisker/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MrAshRhodes/whisker/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MrAshRhodes/whisker/releases/tag/v0.1.0
 [#9]: https://github.com/MrAshRhodes/whisker/issues/9
 [#10]: https://github.com/MrAshRhodes/whisker/issues/10
